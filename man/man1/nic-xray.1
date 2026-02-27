@@ -1,0 +1,530 @@
+.\" Man page for nic-xray.sh
+.\" Written in classic troff/groff format
+.TH NIC-XRAY 1 "2026-02-27" "nic-xray 2.1" "User Commands"
+.SH NAME
+nic-xray \- detailed physical network interface diagnostics
+.SH SYNOPSIS
+.B nic-xray.sh
+.RI [ \-\-lacp ]
+.RI [ \-\-vlan ]
+.RI [ \-\-bmac ]
+.RI [ \-\-all ]
+.RI [ \-\-no\-color ]
+.RI [ \-\-filter\-link
+.IR up | down ]
+.RI [ \-s [ SEP ]| \-\-separator [= SEP ]]
+.RI [ \-\-group\-bond ]
+.RI [ \-\-output
+.IR FORMAT ]
+.RI [ \-\-diagram\-out
+.IR FILE ]
+.RI [ \-v | \-\-version ]
+.RI [ \-h | \-\-help ]
+.SH DESCRIPTION
+.B nic-xray.sh
+provides a detailed overview of all physical network interfaces on a Linux
+system. It collects and displays PCI slot, driver name, firmware version,
+interface name, MAC address, MTU, link status, negotiated speed and duplex,
+bond membership, and LLDP peer information (switch name and port).
+.PP
+Supports multiple output formats:
+.B table
+(default, with dynamic column widths),
+.BR csv ,
+.BR json ,
+and
+.B network topology diagrams
+.RB ( dot / svg / png ).
+.PP
+Color coding is used in table output to highlight link status, speed tiers,
+bond groupings, and LACP status, making it easy to spot issues at a glance.
+.PP
+Originally developed for OpenStack node deployments, it is suitable for any
+Linux environment.
+.SH OPTIONS
+.TP
+.B \-\-lacp
+Show LACP Aggregator ID and Partner MAC for each bonded interface. Displays
+aggregation state: fully converged, partial, or pending.
+.TP
+.B \-\-vlan
+Show VLAN tagging information obtained from LLDP. Displays VLAN IDs with a
+.B [P]
+marker for the port VLAN ID (PVID).
+.TP
+.B \-\-bmac
+Show the bridge (bond) MAC address column. Displays the system MAC address
+reported by the bonding driver, or
+.B N/A
+for unbonded interfaces.
+.TP
+.B \-\-all
+Enable all optional columns. Equivalent to specifying
+.BR \-\-lacp ,
+.BR \-\-vlan ,
+and
+.B \-\-bmac
+together.
+.TP
+.B \-\-no\-color
+Disable color output. Colors are also automatically disabled when standard
+output is not a terminal (e.g., when piping to a file or another command).
+.TP
+.BI \-\-filter\-link " TYPE"
+Show only interfaces whose link state matches
+.IR TYPE .
+Valid values are
+.B up
+and
+.BR down .
+.TP
+.BR \-s ", " \-\-separator
+Add column separators to table output using the default separator
+.RB ( \(lq\[u2502]\(rq ).
+When used with CSV output, the separator replaces the default comma.
+.TP
+.BR \-s \fISEP\fR ", " \-\-separator= \fISEP\fR
+Use
+.I SEP
+as the column separator in table and CSV output.
+.TP
+.B \-\-group\-bond
+Sort rows by bond group, then by interface name within each group. Bonded
+interfaces are listed first (grouped by bond), followed by unbonded interfaces
+sorted alphabetically.
+.TP
+.BI \-\-output " FORMAT"
+Set the output format.
+.I FORMAT
+must be one of:
+.RS
+.TP
+.B table
+Default. Aligned columns with dynamic widths and color coding.
+.TP
+.B csv
+Comma-separated values (or custom separator via
+.BR \-s ).
+No color codes.
+.TP
+.B json
+JSON array of objects. No color codes.
+.TP
+.B dot
+Graphviz DOT source to stdout. No external dependencies. All optional columns
+(LACP, VLAN, bond MAC) are automatically included.
+.TP
+.B svg
+Render a network topology diagram in SVG format using
+.BR dot (1)
+from graphviz. Output is saved to a file (see
+.BR \-\-diagram\-out ).
+All optional columns are automatically included.
+.TP
+.B png
+Same as
+.B svg
+but renders in PNG format.
+.RE
+.TP
+.BI \-\-diagram\-out " FILE"
+Set the output file path for
+.B svg
+or
+.B png
+diagram formats. Defaults to
+.IR /tmp/nic\-xray\-<hostname>.{svg,png} .
+Ignored for other output formats.
+.TP
+.BR \-v ", " \-\-version
+Display version information and exit.
+.TP
+.BR \-h ", " \-\-help
+Display usage information and exit.
+.SH OUTPUT COLUMNS
+The following columns are always displayed:
+.TP
+.B Device
+PCI slot identifier (e.g.,
+.IR 0000:3b:00.0 ).
+.TP
+.B Driver
+Kernel driver name for the network adapter as reported by
+.BR ethtool (8)
+(e.g.,
+.IR mlx5_core ", " ixgbe ).
+.TP
+.B Firmware
+Network adapter firmware version as reported by
+.BR ethtool (8).
+.TP
+.B Interface
+Linux network interface name (e.g.,
+.IR eth0 ", " eno1 ).
+.TP
+.B MAC Address
+Permanent hardware MAC address. For bonded interfaces, the address is
+extracted from
+.IR /proc/net/bonding/ .
+.TP
+.B MTU
+Maximum Transmission Unit configured on the interface.
+.TP
+.B Link
+Operational state:
+.B up
+or
+.BR down .
+.TP
+.B Speed/Duplex
+Negotiated link speed and duplex mode (e.g.,
+.IR "10000Mb/s (Full)" ).
+Shows
+.B N/A
+when the link is down or speed cannot be determined.
+.TP
+.B Parent Bond
+Name of the bond master interface, or
+.B None
+if the interface is not bonded.
+.TP
+.B Switch Name
+LLDP-reported remote switch system name.
+.TP
+.B Port Name
+LLDP-reported remote port identifier.
+.PP
+The following columns are shown only when their respective flags are used:
+.TP
+.B Bond MAC
+(shown with
+.BR \-\-bmac )
+System MAC address of the bond.
+.TP
+.B LACP Status
+(shown with
+.BR \-\-lacp )
+LACP aggregation details: Aggregator ID, partner MAC, and convergence state.
+.TP
+.B VLAN
+(shown with
+.BR \-\-vlan )
+VLAN IDs from LLDP, with
+.B [P]
+indicating the port VLAN ID.
+.SH OUTPUT FORMATS
+.SS Table (default)
+Columns are dynamically sized to fit the widest value. Color codes highlight
+link status, speed tiers, bond membership, and LACP status. Use
+.B \-s
+to add visible column separators.
+.SS CSV
+Plain-text comma-separated output suitable for import into spreadsheets or
+processing with tools like
+.BR awk (1).
+No color codes are emitted. The default comma delimiter can be changed with
+.BR \-s .
+.SS JSON
+A JSON array where each element is an object representing one interface.
+All fields use plain strings without color codes. Optional fields
+.RB ( bond_mac ", " lacp_status ", " vlan )
+are included only when their respective flags are active.
+.SS DOT / SVG / PNG (Diagram)
+Generates a left-to-right network topology diagram showing server-to-switch
+connectivity. All optional data columns (LACP, VLAN, bond MAC) are
+automatically enabled for diagram formats.
+.PP
+Visual elements:
+.RS
+.PD 0
+.IP \(bu 3
+.B Server node
+on the left with hostname
+.IP \(bu
+.B Bond clusters
+with dashed blue borders grouping member interfaces and LACP status label
+.IP \(bu
+.B Interface nodes
+with colored border (green=UP, red=DOWN), showing driver and link state
+.IP \(bu
+.B Edge labels
+showing port name, speed/duplex, and VLAN information
+.IP \(bu
+.B Edge thickness
+scales with speed tier (thicker = faster)
+.IP \(bu
+.B Edge color
+green for UP links, red for DOWN links
+.IP \(bu
+.B Switch nodes
+with orange border on the right
+.IP \(bu
+.B Disconnected interfaces
+shown with dashed gray lines to a \(lqNo LLDP peer\(rq label
+.PD
+.RE
+.PP
+The diagram uses a dark theme (Catppuccin Mocha-inspired) for good contrast
+in both SVG and PNG output.
+.PP
+The
+.B dot
+format outputs raw Graphviz DOT source to stdout with no external
+dependencies, allowing the user to render it with any Graphviz-compatible
+tool. The
+.B svg
+and
+.B png
+formats require the
+.BR dot (1)
+command from graphviz.
+.SH COLOR CODING
+In table output, colors indicate:
+.TP
+.B Speed tiers
+.RS
+.PD 0
+.TP 12
+Magenta
+200 Gbps and above
+.TP
+Cyan
+100 Gbps
+.TP
+White
+25 / 40 / 50 Gbps
+.TP
+Green
+10 Gbps
+.TP
+Yellow
+1 Gbps
+.TP
+Red
+Below 1 Gbps or unknown
+.PD
+.RE
+.TP
+.B Link status
+Green for
+.BR up ,
+red for
+.BR down .
+.TP
+.B Bond names
+Each bond is assigned a distinct color (blue, cyan, yellow, magenta, white)
+cycling through a palette to visually group member interfaces.
+.TP
+.B LACP status
+Green for fully converged, yellow for partial, red for pending.
+.SH REQUIREMENTS
+.B nic-xray.sh
+must be run as
+.BR root .
+.PP
+The following commands must be available in
+.BR PATH :
+.PP
+.RS
+.BR ethtool (8),
+.BR lldpctl (8),
+.BR ip (8),
+.BR awk (1),
+.BR grep (1),
+.BR cat (1),
+.BR readlink (1)
+.RE
+.PP
+For diagram output formats
+.RB ( svg ", " png ),
+the
+.BR dot (1)
+command from the
+.B graphviz
+package must be installed. The
+.B dot
+output format has no external dependency beyond the base requirements.
+.PP
+The
+.B lldpd
+service should be running to retrieve LLDP information from connected switches.
+The switches must also be configured to advertise LLDP messages.
+.PP
+On Cisco switches, VLAN information may not be advertised by default; enable it
+with:
+.PP
+.RS
+.B lldp tlv-select vlan-name
+.RE
+.SH RECOMMENDATIONS
+Copy the script to
+.B /usr/local/sbin
+for easy access:
+.PP
+.RS
+.nf
+sudo cp nic-xray.sh /usr/local/sbin/
+sudo chmod +x /usr/local/sbin/nic-xray.sh
+.fi
+.RE
+.PP
+Ensure the
+.B lldpd
+service is running to retrieve LLDP information:
+.PP
+.RS
+.B sudo systemctl enable \-\-now lldpd
+.RE
+.SH EXIT STATUS
+.TP
+.B 0
+Successful execution.
+.TP
+.B 1
+Error: not running as root, missing required commands, or invalid options.
+.SH EXAMPLES
+Default table view:
+.PP
+.RS
+.B sudo nic-xray.sh
+.RE
+.PP
+Show VLAN information:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-vlan
+.RE
+.PP
+Show LACP peer information:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-lacp
+.RE
+.PP
+Show bond MAC address:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-bmac
+.RE
+.PP
+Show VLAN and LACP information with column separators:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-vlan \-\-lacp \-s
+.RE
+.PP
+Show all optional columns at once:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-all
+.RE
+.PP
+Table output with default column separators:
+.PP
+.RS
+.B sudo nic-xray.sh \-s
+.RE
+.PP
+Table output with a custom separator:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-separator='|'
+.RE
+.PP
+Group by bond (bonded interfaces first, then unbonded):
+.PP
+.RS
+.B sudo nic-xray.sh \-\-group\-bond
+.RE
+.PP
+Group by bond with all optional columns and separators:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-group\-bond \-\-all \-s
+.RE
+.PP
+Show only interfaces with link up:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-filter\-link up
+.RE
+.PP
+Show only interfaces with link down:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-filter\-link down
+.RE
+.PP
+Disable color output:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-no\-color
+.RE
+.PP
+CSV output:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-output csv
+.RE
+.PP
+Pipe-delimited CSV:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-output csv \-\-separator='|'
+.RE
+.PP
+Tab-separated CSV:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-output csv \-\-separator=$'\\t'
+.RE
+.PP
+JSON output:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-output json
+.RE
+.PP
+JSON output with all optional fields:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-vlan \-\-lacp \-\-bmac \-\-output json
+.RE
+.PP
+Generate DOT source for external rendering:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-output dot > topology.dot
+.RE
+.PP
+Generate an SVG topology diagram:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-output svg
+.RE
+.PP
+Generate a PNG diagram with custom output path:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-output png \-\-diagram\-out /tmp/network.png
+.RE
+.PP
+Display version:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-version
+.RE
+.PP
+Display help:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-help
+.RE
+.SH AUTHORS
+Ciro Iriarte <ciro.iriarte+software@gmail.com>
+.SH SEE ALSO
+.BR ethtool (8),
+.BR lldpctl (8),
+.BR ip (8),
+.BR dot (1),
+.BR bonding (7)
