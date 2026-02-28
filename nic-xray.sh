@@ -38,10 +38,11 @@
 #                        Optional graphviz dependency for svg/png rendering
 #   - 2026-02-27: v2.2 - Moved man page from section 1 to section 8
 #                        (system administration commands)
+#   - 2026-02-27: v2.2.1 - README restructured for improved readability
 #
-# Version: 2.2
+# Version: 2.2.1
 
-SCRIPT_VERSION="2.2"
+SCRIPT_VERSION="2.2.1"
 
 # LOCALE setup, we expect output in English for proper parsing
 LANG=en_US.UTF-8
