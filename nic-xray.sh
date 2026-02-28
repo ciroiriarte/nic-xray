@@ -40,9 +40,9 @@
 #                        (system administration commands)
 #   - 2026-02-27: v2.2.1 - README restructured for improved readability
 #
-# Version: 2.2.1
+# Version: 2.3.0
 
-SCRIPT_VERSION="2.2.1"
+SCRIPT_VERSION="2.3.0"
 
 # LOCALE setup, we expect output in English for proper parsing
 LANG=en_US.UTF-8
