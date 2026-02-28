@@ -44,10 +44,12 @@
 #                         - Added bond-level LACP consistency validation:
 #                           Peer Mismatch and AE Mismatch detection
 #                         - Extracted LLDP PortAggregID for cross-member checks
+#   - 2026-02-28: v2.4.1 - Added watermark to DOT topology diagram
+#                           (tool name, version, copyright)
 #
-# Version: 2.4.0
+# Version: 2.4.1
 
-SCRIPT_VERSION="2.4.0"
+SCRIPT_VERSION="2.4.1"
 SCRIPT_YEAR="2026"
 
 # LOCALE setup, we expect output in English for proper parsing
