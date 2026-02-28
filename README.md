@@ -234,7 +234,7 @@ sudo nic-xray.sh --output svg                    # Render SVG (requires graphviz
 sudo nic-xray.sh --output png                    # Render PNG (requires graphviz)
 ```
 
-The diagram shows server NICs grouped by bond (color-coded), connected to switch ports, with MAC addresses and link speeds.
+The diagram shows server NICs grouped by bond (color-coded), connected to switch ports, with MAC addresses and MTU. Edge thickness reflects negotiated link speed, and a legend showing only the detected speed tiers is included.
 
 ![Topology diagram](samples/topology.png)
 

@@ -261,16 +261,20 @@ on the left with hostname
 with dashed blue borders grouping member interfaces and LACP status label
 .IP \(bu
 .B Interface nodes
-with colored border (green=UP, red=DOWN), showing driver and link state
+with colored border (green=UP, red=DOWN), showing interface name, MAC address, and MTU
 .IP \(bu
 .B Edge labels
-showing port name, speed/duplex, and VLAN information
+showing VLAN information
 .IP \(bu
 .B Edge thickness
-scales with speed tier (thicker = faster)
+scales with negotiated speed tier (thicker = faster): Fast Ethernet, 1 GbE,
+10 GbE, 25 GbE, 100 GbE, 400 GbE, 800 GbE
 .IP \(bu
 .B Edge color
 green for UP links, red for DOWN links
+.IP \(bu
+.B Link Speed legend
+showing only the detected speed tiers with proportional thickness bars
 .IP \(bu
 .B Switch nodes
 with orange border on the right
