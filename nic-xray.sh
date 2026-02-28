@@ -646,7 +646,11 @@ dot_penwidth() {
     local RAW="$1"
     local NUM="${RAW%%[^0-9]*}"
     if [[ "$NUM" =~ ^[0-9]+$ ]]; then
-        if (( NUM >= 100000 )); then
+        if (( NUM >= 800000 )); then
+            echo "6.0"
+        elif (( NUM >= 400000 )); then
+            echo "5.0"
+        elif (( NUM >= 100000 )); then
             echo "4.0"
         elif (( NUM >= 25000 )); then
             echo "3.0"
@@ -659,6 +663,29 @@ dot_penwidth() {
         fi
     else
         echo "1.0"
+    fi
+}
+
+# Map speed (Mb/s) to human-readable tier label
+dot_speed_tier() {
+    local RAW="$1"
+    local NUM="${RAW%%[^0-9]*}"
+    if [[ "$NUM" =~ ^[0-9]+$ ]]; then
+        if (( NUM >= 800000 )); then
+            echo "800GbE"
+        elif (( NUM >= 400000 )); then
+            echo "400GbE"
+        elif (( NUM >= 100000 )); then
+            echo "100GbE"
+        elif (( NUM >= 25000 )); then
+            echo "25GbE"
+        elif (( NUM >= 10000 )); then
+            echo "10GbE"
+        elif (( NUM >= 1000 )); then
+            echo "1GbE"
+        else
+            echo "Fast"
+        fi
     fi
 }
 
@@ -786,10 +813,8 @@ DOTHEADER
 
         for IDX in $MEMBERS; do
             local IFACE="${DATA_IFACE[$IDX]}"
-            local DRIVER="${DATA_DRIVER[$IDX]}"
             local MAC="${DATA_MAC[$IDX]}"
             local LINK="${DATA_LINK_PLAIN[$IDX]}"
-            local SPEED_RAW="${DATA_SPEED_PLAIN[$IDX]}"
             local NODE_ID
             NODE_ID=$(dot_id "$IFACE")
 
@@ -800,12 +825,7 @@ DOTHEADER
                 NODE_BORDER="$RED_COLOR"
             fi
 
-            # Format speed for display
-            local SPEED_LABEL=""
-            local SPEED_NUM="${SPEED_RAW%%[^0-9]*}"
-            if [[ "$SPEED_NUM" =~ ^[0-9]+$ ]]; then
-                SPEED_LABEL="$(dot_escape "$SPEED_RAW")"
-            fi
+            local MTU="${DATA_MTU[$IDX]}"
 
             printf '        %s [shape=plain, label=<\n' "$NODE_ID"
             printf '            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" '
@@ -814,10 +834,8 @@ DOTHEADER
                 "$TEXT_COLOR" "$(dot_escape "$IFACE")"
             printf '            <TR><TD><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
                 "$SUBTEXT_COLOR" "$(dot_escape "$MAC")"
-            if [[ -n "$SPEED_LABEL" ]]; then
-                printf '            <TR><TD><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
-                    "$SUBTEXT_COLOR" "$SPEED_LABEL"
-            fi
+            printf '            <TR><TD><FONT POINT-SIZE="9" COLOR="%s">MTU: %s</FONT></TD></TR>\n' \
+                "$SUBTEXT_COLOR" "$(dot_escape "$MTU")"
             printf '            </TABLE>\n'
             printf '        >];\n'
         done
@@ -829,10 +847,8 @@ DOTHEADER
     # --- Standalone interface nodes ---
     for IDX in "${STANDALONE_INDICES[@]}"; do
         local IFACE="${DATA_IFACE[$IDX]}"
-        local DRIVER="${DATA_DRIVER[$IDX]}"
         local MAC="${DATA_MAC[$IDX]}"
         local LINK="${DATA_LINK_PLAIN[$IDX]}"
-        local SPEED_RAW="${DATA_SPEED_PLAIN[$IDX]}"
         local NODE_ID
         NODE_ID=$(dot_id "$IFACE")
 
@@ -843,11 +859,7 @@ DOTHEADER
             NODE_BORDER="$RED_COLOR"
         fi
 
-        local SPEED_LABEL=""
-        local SPEED_NUM="${SPEED_RAW%%[^0-9]*}"
-        if [[ "$SPEED_NUM" =~ ^[0-9]+$ ]]; then
-            SPEED_LABEL="$(dot_escape "$SPEED_RAW")"
-        fi
+        local MTU="${DATA_MTU[$IDX]}"
 
         printf '    %s [shape=plain, label=<\n' "$NODE_ID"
         printf '        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" '
@@ -856,10 +868,8 @@ DOTHEADER
             "$TEXT_COLOR" "$(dot_escape "$IFACE")"
         printf '        <TR><TD><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
             "$SUBTEXT_COLOR" "$(dot_escape "$MAC")"
-        if [[ -n "$SPEED_LABEL" ]]; then
-            printf '        <TR><TD><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
-                "$SUBTEXT_COLOR" "$SPEED_LABEL"
-        fi
+        printf '        <TR><TD><FONT POINT-SIZE="9" COLOR="%s">MTU: %s</FONT></TD></TR>\n' \
+            "$SUBTEXT_COLOR" "$(dot_escape "$MTU")"
         printf '        </TABLE>\n'
         printf '    >];\n\n'
     done
@@ -929,6 +939,7 @@ DOTHEADER
     printf '\n'
 
     # --- Edges: interfaces -> switch ports / stubs ---
+    declare -A DETECTED_SPEEDS
     for ((i = 0; i < ROW_COUNT; i++)); do
         local IFACE="${DATA_IFACE[$i]}"
         local NODE_ID
@@ -942,6 +953,11 @@ DOTHEADER
 
         local PW
         PW=$(dot_penwidth "$SPEED_RAW")
+
+        # Track detected speed tiers for the legend
+        local TIER
+        TIER=$(dot_speed_tier "$SPEED_RAW")
+        [[ -n "$TIER" ]] && DETECTED_SPEEDS["$TIER"]=1
 
         if [[ -n "$SW" && -n "$PORT" ]]; then
             local PORT_ID
@@ -1005,17 +1021,55 @@ DOTHEADER
     unset EMITTED_SW_EDGES
     printf '\n'
 
+    # --- Legend node (only detected speed tiers) ---
+    local HAS_LEGEND=false
+    if [[ ${#DETECTED_SPEEDS[@]} -gt 0 ]]; then
+        HAS_LEGEND=true
+        # Ordered tiers from fastest to slowest with their penwidths
+        local -a TIER_ORDER=("800GbE" "400GbE" "100GbE" "25GbE" "10GbE" "1GbE" "Fast")
+        local -A TIER_PW=(
+            ["800GbE"]="6.0" ["400GbE"]="5.0" ["100GbE"]="4.0"
+            ["25GbE"]="3.0" ["10GbE"]="2.5" ["1GbE"]="2.0" ["Fast"]="1.5"
+        )
+        local -A TIER_LABEL=(
+            ["800GbE"]="800 GbE" ["400GbE"]="400 GbE" ["100GbE"]="100 GbE"
+            ["25GbE"]="25 GbE" ["10GbE"]="10 GbE" ["1GbE"]="1 GbE" ["Fast"]="Fast Ethernet"
+        )
+
+        printf '    legend [shape=plain, label=<\n'
+        printf '        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="4" CELLPADDING="3"'
+        printf ' BGCOLOR="%s" COLOR="%s">\n' "$BG_COLOR" "$BORDER_COLOR"
+        printf '        <TR><TD COLSPAN="2"><FONT COLOR="%s"><B>Link Speed</B></FONT></TD></TR>\n' \
+            "$FG_COLOR"
+        for T in "${TIER_ORDER[@]}"; do
+            [[ -z "${DETECTED_SPEEDS[$T]+x}" ]] && continue
+            # HEIGHT proportional to penwidth (scaled ×3 for visibility)
+            local BAR_H
+            BAR_H=$(awk "BEGIN { printf \"%.0f\", ${TIER_PW[$T]} * 3 }")
+            printf '        <TR><TD WIDTH="30" HEIGHT="%s" BGCOLOR="%s"> </TD>\n' \
+                "$BAR_H" "$SUBTEXT_COLOR"
+            printf '            <TD><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
+                "$SUBTEXT_COLOR" "${TIER_LABEL[$T]}"
+        done
+        printf '        </TABLE>\n'
+        printf '    >];\n\n'
+    fi
+    unset DETECTED_SPEEDS
+
     # --- Rank constraints ---
     printf '    { rank=min; server; }\n'
 
     # Switch nodes on the right
-    if [[ ${#SEEN_SWITCHES[@]} -gt 0 || "$HAS_DISCONNECTED" == true ]]; then
+    if [[ ${#SEEN_SWITCHES[@]} -gt 0 || "$HAS_DISCONNECTED" == true || "$HAS_LEGEND" == true ]]; then
         printf '    { rank=max;'
         for SW_NAME in $(printf '%s\n' "${!SEEN_SWITCHES[@]}" | sort); do
             printf ' %s;' "$(dot_id "sw_${SW_NAME}")"
         done
         if [[ "$HAS_DISCONNECTED" == true ]]; then
             printf ' no_lldp_peer;'
+        fi
+        if [[ "$HAS_LEGEND" == true ]]; then
+            printf ' legend;'
         fi
         printf ' }\n'
     fi
