@@ -148,65 +148,67 @@ digraph nic_xray {
         </TABLE>
     >];
 
-    subgraph cluster_sw_switch_01_example_net {
-        style=solid;
-        color="#fab387";
-        bgcolor="#1e1e2ecc";
-        fontcolor="#fab387";
-        label=<<FONT POINT-SIZE="13"><B>switch-01.example.net</B></FONT>>;
-        penwidth=1.5;
+    swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_2 [shape=plain, label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#fab387">
+        <TR><TD><FONT COLOR="#cdd6f4"><B>ifname xe-0/0/2</B></FONT></TD></TR>
+        </TABLE>
+    >];
 
-        swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_2 [shape=plain, label=<
-            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#fab387">
-            <TR><TD><FONT COLOR="#cdd6f4"><B>ifname xe-0/0/2</B></FONT></TD></TR>
-            </TABLE>
-        >];
-        swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_3 [shape=plain, label=<
-            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#fab387">
-            <TR><TD><FONT COLOR="#cdd6f4"><B>ifname xe-0/0/3</B></FONT></TD></TR>
-            </TABLE>
-        >];
-        swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_38 [shape=plain, label=<
-            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#fab387">
-            <TR><TD><FONT COLOR="#cdd6f4"><B>ifname et-0/0/38</B></FONT></TD></TR>
-            </TABLE>
-        >];
-        swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_39 [shape=plain, label=<
-            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#fab387">
-            <TR><TD><FONT COLOR="#cdd6f4"><B>ifname et-0/0/39</B></FONT></TD></TR>
-            </TABLE>
-        >];
-    }
+    swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_3 [shape=plain, label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#fab387">
+        <TR><TD><FONT COLOR="#cdd6f4"><B>ifname xe-0/0/3</B></FONT></TD></TR>
+        </TABLE>
+    >];
 
-    subgraph cluster_sw_switch_02_example_net {
-        style=solid;
-        color="#fab387";
-        bgcolor="#1e1e2ecc";
-        fontcolor="#fab387";
-        label=<<FONT POINT-SIZE="13"><B>switch-02.example.net</B></FONT>>;
-        penwidth=1.5;
+    swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_38 [shape=plain, label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#fab387">
+        <TR><TD><FONT COLOR="#cdd6f4"><B>ifname et-0/0/38</B></FONT></TD></TR>
+        </TABLE>
+    >];
 
-        swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_2 [shape=plain, label=<
-            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#fab387">
-            <TR><TD><FONT COLOR="#cdd6f4"><B>ifname xe-0/0/2</B></FONT></TD></TR>
-            </TABLE>
-        >];
-        swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_3 [shape=plain, label=<
-            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#fab387">
-            <TR><TD><FONT COLOR="#cdd6f4"><B>ifname xe-0/0/3</B></FONT></TD></TR>
-            </TABLE>
-        >];
-        swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_38 [shape=plain, label=<
-            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#fab387">
-            <TR><TD><FONT COLOR="#cdd6f4"><B>ifname et-0/0/38</B></FONT></TD></TR>
-            </TABLE>
-        >];
-        swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_39 [shape=plain, label=<
-            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#fab387">
-            <TR><TD><FONT COLOR="#cdd6f4"><B>ifname et-0/0/39</B></FONT></TD></TR>
-            </TABLE>
-        >];
-    }
+    swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_39 [shape=plain, label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#fab387">
+        <TR><TD><FONT COLOR="#cdd6f4"><B>ifname et-0/0/39</B></FONT></TD></TR>
+        </TABLE>
+    >];
+
+    swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_2 [shape=plain, label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#fab387">
+        <TR><TD><FONT COLOR="#cdd6f4"><B>ifname xe-0/0/2</B></FONT></TD></TR>
+        </TABLE>
+    >];
+
+    swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_3 [shape=plain, label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#fab387">
+        <TR><TD><FONT COLOR="#cdd6f4"><B>ifname xe-0/0/3</B></FONT></TD></TR>
+        </TABLE>
+    >];
+
+    swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_38 [shape=plain, label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#fab387">
+        <TR><TD><FONT COLOR="#cdd6f4"><B>ifname et-0/0/38</B></FONT></TD></TR>
+        </TABLE>
+    >];
+
+    swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_39 [shape=plain, label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#fab387">
+        <TR><TD><FONT COLOR="#cdd6f4"><B>ifname et-0/0/39</B></FONT></TD></TR>
+        </TABLE>
+    >];
+
+    sw_switch_01_example_net [shape=plain, label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="4" CELLPADDING="6" BGCOLOR="#313244" COLOR="#fab387" STYLE="ROUNDED">
+        <TR><TD><FONT POINT-SIZE="14" COLOR="#fab387"><B>switch-01.example.net</B></FONT></TD></TR>
+        <TR><TD><FONT COLOR="#a6adc8">Switch</FONT></TD></TR>
+        </TABLE>
+    >];
+
+    sw_switch_02_example_net [shape=plain, label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="4" CELLPADDING="6" BGCOLOR="#313244" COLOR="#fab387" STYLE="ROUNDED">
+        <TR><TD><FONT POINT-SIZE="14" COLOR="#fab387"><B>switch-02.example.net</B></FONT></TD></TR>
+        <TR><TD><FONT COLOR="#a6adc8">Switch</FONT></TD></TR>
+        </TABLE>
+    >];
 
     no_lldp_peer [shape=plain, label=<
         <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#6c7086" STYLE="ROUNDED">
@@ -214,19 +216,19 @@ digraph nic_xray {
         </TABLE>
     >];
 
-    server -> eno1np0 [style=invis, weight=10];
-    server -> eno2np1 [style=invis, weight=10];
-    server -> eno3np2 [style=invis, weight=10];
-    server -> eno4np3 [style=invis, weight=10];
-    server -> ens3f0np0 [style=invis, weight=10];
-    server -> ens3f1np1 [style=invis, weight=10];
-    server -> ens5f0np0 [style=invis, weight=10];
-    server -> ens5f1np1 [style=invis, weight=10];
-    server -> ens5f2np2 [style=invis, weight=10];
-    server -> ens5f3np3 [style=invis, weight=10];
-    server -> ens8f0np0 [style=invis, weight=10];
-    server -> ens8f1np1 [style=invis, weight=10];
-    server -> idrac [style=invis, weight=10];
+    server -> eno1np0 [color="#585b70", penwidth=1.0, arrowsize=0.6];
+    server -> eno2np1 [color="#585b70", penwidth=1.0, arrowsize=0.6];
+    server -> eno3np2 [color="#585b70", penwidth=1.0, arrowsize=0.6];
+    server -> eno4np3 [color="#585b70", penwidth=1.0, arrowsize=0.6];
+    server -> ens3f0np0 [color="#585b70", penwidth=1.0, arrowsize=0.6];
+    server -> ens3f1np1 [color="#585b70", penwidth=1.0, arrowsize=0.6];
+    server -> ens5f0np0 [color="#585b70", penwidth=1.0, arrowsize=0.6];
+    server -> ens5f1np1 [color="#585b70", penwidth=1.0, arrowsize=0.6];
+    server -> ens5f2np2 [color="#585b70", penwidth=1.0, arrowsize=0.6];
+    server -> ens5f3np3 [color="#585b70", penwidth=1.0, arrowsize=0.6];
+    server -> ens8f0np0 [color="#585b70", penwidth=1.0, arrowsize=0.6];
+    server -> ens8f1np1 [color="#585b70", penwidth=1.0, arrowsize=0.6];
+    server -> idrac [color="#585b70", penwidth=1.0, arrowsize=0.6];
 
     eno1np0 -> swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_2 [label=<VLAN 100;101;102;110;111>, penwidth=2.5, color="#89b4fa", fontcolor="#a6adc8"];
     eno2np1 -> swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_3 [label=<VLAN 200;201;202;211;212>, penwidth=2.5, color="#f9e2af", fontcolor="#a6adc8"];
@@ -241,7 +243,15 @@ digraph nic_xray {
     ens8f0np0 -> swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_38 [label=<VLAN 501>, penwidth=3.0, color="#94e2d5", fontcolor="#a6adc8"];
     ens8f1np1 -> swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_39 [label=<VLAN 502>, penwidth=3.0, color="#f5c2e7", fontcolor="#a6adc8"];
     idrac -> no_lldp_peer [style=dashed, color="#6c7086", fontcolor="#6c7086", penwidth=1.0];
+    swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_2 -> sw_switch_01_example_net [color="#585b70", penwidth=1.0, arrowsize=0.6];
+    swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_3 -> sw_switch_01_example_net [color="#585b70", penwidth=1.0, arrowsize=0.6];
+    swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_38 -> sw_switch_01_example_net [color="#585b70", penwidth=1.0, arrowsize=0.6];
+    swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_39 -> sw_switch_01_example_net [color="#585b70", penwidth=1.0, arrowsize=0.6];
+    swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_2 -> sw_switch_02_example_net [color="#585b70", penwidth=1.0, arrowsize=0.6];
+    swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_3 -> sw_switch_02_example_net [color="#585b70", penwidth=1.0, arrowsize=0.6];
+    swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_38 -> sw_switch_02_example_net [color="#585b70", penwidth=1.0, arrowsize=0.6];
+    swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_39 -> sw_switch_02_example_net [color="#585b70", penwidth=1.0, arrowsize=0.6];
 
     { rank=min; server; }
-    { rank=max; swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_2; swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_3; swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_38; swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_39; swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_2; swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_3; swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_38; swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_39; no_lldp_peer; }
+    { rank=max; sw_switch_01_example_net; sw_switch_02_example_net; no_lldp_peer; }
 }

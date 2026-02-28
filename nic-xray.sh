@@ -762,43 +762,40 @@ DOTHEADER
         printf '    >];\n\n'
     done
 
-    # --- Switch clusters with port nodes ---
+    # --- Switch port nodes ---
+    declare -A EMITTED_PORTS
+    for ((j = 0; j < ROW_COUNT; j++)); do
+        local SW_NAME="${DATA_SWITCH[$j]}"
+        [[ -z "$SW_NAME" ]] && continue
+        local PORT_NAME="${DATA_PORT[$j]}"
+        [[ -z "$PORT_NAME" ]] && continue
+        local PORT_ID
+        PORT_ID=$(dot_id "swport_${SW_NAME}_${PORT_NAME}")
+        [[ -n "${EMITTED_PORTS[$PORT_ID]+x}" ]] && continue
+        EMITTED_PORTS["$PORT_ID"]=1
+
+        printf '    %s [shape=plain, label=<\n' "$PORT_ID"
+        printf '        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" '
+        printf 'BGCOLOR="%s" COLOR="%s">\n' "$SURFACE_COLOR" "$PEACH_COLOR"
+        printf '        <TR><TD><FONT COLOR="%s"><B>%s</B></FONT></TD></TR>\n' \
+            "$TEXT_COLOR" "$(dot_escape "$PORT_NAME")"
+        printf '        </TABLE>\n'
+        printf '    >];\n\n'
+    done
+    unset EMITTED_PORTS
+
+    # --- Switch nodes ---
     for SW_NAME in $(printf '%s\n' "${!SEEN_SWITCHES[@]}" | sort); do
         local SW_ID
         SW_ID=$(dot_id "sw_${SW_NAME}")
-
-        printf '    subgraph cluster_%s {\n' "$SW_ID"
-        printf '        style=solid;\n'
-        printf '        color="%s";\n' "$PEACH_COLOR"
-        printf '        bgcolor="%s";\n' "${BG_COLOR}cc"
-        printf '        fontcolor="%s";\n' "$PEACH_COLOR"
-        printf '        label=<<FONT POINT-SIZE="13"><B>%s</B></FONT>>;\n' \
-            "$(dot_escape "$SW_NAME")"
-        printf '        penwidth=1.5;\n\n'
-
-        # Emit port nodes for this switch (iterate via row data to preserve spaces)
-        declare -A EMITTED_PORTS
-        for ((j = 0; j < ROW_COUNT; j++)); do
-            [[ "${DATA_SWITCH[$j]}" != "$SW_NAME" ]] && continue
-            local PORT_NAME="${DATA_PORT[$j]}"
-            [[ -z "$PORT_NAME" ]] && continue
-            local PORT_ID
-            PORT_ID=$(dot_id "swport_${SW_NAME}_${PORT_NAME}")
-            # Skip already emitted ports (multiple NICs may map to the same port)
-            [[ -n "${EMITTED_PORTS[$PORT_ID]+x}" ]] && continue
-            EMITTED_PORTS["$PORT_ID"]=1
-
-            printf '        %s [shape=plain, label=<\n' "$PORT_ID"
-            printf '            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" '
-            printf 'BGCOLOR="%s" COLOR="%s">\n' "$SURFACE_COLOR" "$PEACH_COLOR"
-            printf '            <TR><TD><FONT COLOR="%s"><B>%s</B></FONT></TD></TR>\n' \
-                "$TEXT_COLOR" "$(dot_escape "$PORT_NAME")"
-            printf '            </TABLE>\n'
-            printf '        >];\n'
-        done
-        unset EMITTED_PORTS
-
-        printf '    }\n\n'
+        printf '    %s [shape=plain, label=<\n' "$SW_ID"
+        printf '        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="4" CELLPADDING="6" '
+        printf 'BGCOLOR="%s" COLOR="%s" STYLE="ROUNDED">\n' "$SURFACE_COLOR" "$PEACH_COLOR"
+        printf '        <TR><TD><FONT POINT-SIZE="14" COLOR="%s"><B>%s</B></FONT></TD></TR>\n' \
+            "$PEACH_COLOR" "$(dot_escape "$SW_NAME")"
+        printf '        <TR><TD><FONT COLOR="%s">Switch</FONT></TD></TR>\n' "$SUBTEXT_COLOR"
+        printf '        </TABLE>\n'
+        printf '    >];\n\n'
     done
 
     # --- "No LLDP peer" stub node ---
@@ -824,7 +821,8 @@ DOTHEADER
         local IFACE="${DATA_IFACE[$i]}"
         local NODE_ID
         NODE_ID=$(dot_id "$IFACE")
-        printf '    server -> %s [style=invis, weight=10];\n' "$NODE_ID"
+        printf '    server -> %s [color="%s", penwidth=1.0, arrowsize=0.6];\n' \
+            "$NODE_ID" "$BORDER_COLOR"
     done
     printf '\n'
 
@@ -887,25 +885,33 @@ DOTHEADER
         fi
     done
 
-    # --- Rank constraints ---
-    printf '\n    { rank=min; server; }\n'
+    # --- Edges: switch ports -> switch nodes ---
+    declare -A EMITTED_SW_EDGES
+    for ((j = 0; j < ROW_COUNT; j++)); do
+        local E_SW="${DATA_SWITCH[$j]}"
+        local E_PORT="${DATA_PORT[$j]}"
+        [[ -z "$E_SW" || -z "$E_PORT" ]] && continue
+        local E_PORT_ID
+        E_PORT_ID=$(dot_id "swport_${E_SW}_${E_PORT}")
+        [[ -n "${EMITTED_SW_EDGES[$E_PORT_ID]+x}" ]] && continue
+        EMITTED_SW_EDGES["$E_PORT_ID"]=1
+        local E_SW_ID
+        E_SW_ID=$(dot_id "sw_${E_SW}")
+        printf '    %s -> %s [color="%s", penwidth=1.0, arrowsize=0.6];\n' \
+            "$E_PORT_ID" "$E_SW_ID" "$BORDER_COLOR"
+    done
+    unset EMITTED_SW_EDGES
+    printf '\n'
 
-    # Switch port nodes on the right
+    # --- Rank constraints ---
+    printf '    { rank=min; server; }\n'
+
+    # Switch nodes on the right
     if [[ ${#SEEN_SWITCHES[@]} -gt 0 || "$HAS_DISCONNECTED" == true ]]; then
         printf '    { rank=max;'
-        declare -A RANK_PORTS
-        for ((j = 0; j < ROW_COUNT; j++)); do
-            local R_SW="${DATA_SWITCH[$j]}"
-            local R_PORT="${DATA_PORT[$j]}"
-            [[ -z "$R_SW" || -z "$R_PORT" ]] && continue
-            local R_ID
-            R_ID=$(dot_id "swport_${R_SW}_${R_PORT}")
-            if [[ -z "${RANK_PORTS[$R_ID]+x}" ]]; then
-                RANK_PORTS["$R_ID"]=1
-                printf ' %s;' "$R_ID"
-            fi
+        for SW_NAME in $(printf '%s\n' "${!SEEN_SWITCHES[@]}" | sort); do
+            printf ' %s;' "$(dot_id "sw_${SW_NAME}")"
         done
-        unset RANK_PORTS
         if [[ "$HAS_DISCONNECTED" == true ]]; then
             printf ' no_lldp_peer;'
         fi
