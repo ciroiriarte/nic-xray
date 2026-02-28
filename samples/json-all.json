@@ -10,7 +10,7 @@
     "speed_duplex": "10000Mb/s (Full)",
     "parent_bond": "bond0",
     "bond_mac": "XX:XX:XX:XX:XX:01",
-    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:01 (Partial)",
+    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:01",
     "vlan": "100;101;102;110;111",
     "switch_name": "switch-01.example.net",
     "port_name": "ifname xe-0/0/2"
@@ -26,7 +26,7 @@
     "speed_duplex": "10000Mb/s (Full)",
     "parent_bond": "bond1",
     "bond_mac": "XX:XX:XX:XX:XX:02",
-    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:02 (Partial)",
+    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:02",
     "vlan": "200;201;202;211;212",
     "switch_name": "switch-01.example.net",
     "port_name": "ifname xe-0/0/3"
@@ -74,7 +74,7 @@
     "speed_duplex": "25000Mb/s (Full)",
     "parent_bond": "bond2",
     "bond_mac": "XX:XX:XX:XX:XX:05",
-    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:03 (Partial)",
+    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:03",
     "vlan": "501",
     "switch_name": "switch-01.example.net",
     "port_name": "ifname et-0/0/38"
@@ -90,7 +90,7 @@
     "speed_duplex": "25000Mb/s (Full)",
     "parent_bond": "bond3",
     "bond_mac": "XX:XX:XX:XX:XX:06",
-    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:04 (Partial)",
+    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:04",
     "vlan": "502",
     "switch_name": "switch-01.example.net",
     "port_name": "ifname et-0/0/39"
@@ -106,7 +106,7 @@
     "speed_duplex": "10000Mb/s (Full)",
     "parent_bond": "bond0",
     "bond_mac": "XX:XX:XX:XX:XX:01",
-    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:01 (Partial)",
+    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:01",
     "vlan": "100;101;102;110;111",
     "switch_name": "switch-02.example.net",
     "port_name": "ifname xe-0/0/2"
@@ -122,7 +122,7 @@
     "speed_duplex": "10000Mb/s (Full)",
     "parent_bond": "bond1",
     "bond_mac": "XX:XX:XX:XX:XX:02",
-    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:02 (Partial)",
+    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:02",
     "vlan": "200;201;202;211;212",
     "switch_name": "switch-02.example.net",
     "port_name": "ifname xe-0/0/3"
@@ -170,7 +170,7 @@
     "speed_duplex": "25000Mb/s (Full)",
     "parent_bond": "bond2",
     "bond_mac": "XX:XX:XX:XX:XX:05",
-    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:03 (Partial)",
+    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:03",
     "vlan": "501",
     "switch_name": "switch-02.example.net",
     "port_name": "ifname et-0/0/38"
@@ -186,7 +186,7 @@
     "speed_duplex": "25000Mb/s (Full)",
     "parent_bond": "bond3",
     "bond_mac": "XX:XX:XX:XX:XX:06",
-    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:04 (Partial)",
+    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:04",
     "vlan": "502",
     "switch_name": "switch-02.example.net",
     "port_name": "ifname et-0/0/39"

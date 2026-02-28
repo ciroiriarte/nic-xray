@@ -39,10 +39,15 @@
 #   - 2026-02-27: v2.2 - Moved man page from section 1 to section 8
 #                        (system administration commands)
 #   - 2026-02-27: v2.2.1 - README restructured for improved readability
+#   - 2026-02-28: v2.4.0 - Fixed false LACP "Partial" status (bitmask check
+#                           instead of exact port state comparison)
+#                         - Added bond-level LACP consistency validation:
+#                           Peer Mismatch and AE Mismatch detection
+#                         - Extracted LLDP PortAggregID for cross-member checks
 #
-# Version: 2.3.1
+# Version: 2.4.0
 
-SCRIPT_VERSION="2.3.1"
+SCRIPT_VERSION="2.4.0"
 
 # LOCALE setup, we expect output in English for proper parsing
 LANG=en_US.UTF-8
@@ -322,7 +327,8 @@ declare -a DATA_LINK_PLAIN DATA_LINK_COLOR
 declare -a DATA_SPEED_PLAIN DATA_SPEED_COLOR
 declare -a DATA_BOND_PLAIN DATA_BOND_COLOR
 declare -a DATA_BMAC
-declare -a DATA_LACP_PLAIN DATA_LACP_COLOR
+declare -a DATA_LACP_PLAIN DATA_LACP_COLOR DATA_LACP_PEER
+declare -a DATA_LLDP_AGGID
 declare -a DATA_VLAN DATA_SWITCH DATA_PORT
 ROW_COUNT=0
 
@@ -383,7 +389,13 @@ for IFACE in $(ls /sys/class/net/ | grep -vE 'lo|vnet|virbr|br|bond|docker|tap|t
     # LACP Status
     LACP_PLAIN="N/A"
     LACP_COLOR="N/A"
+    LACP_PEER=""
     if $SHOW_LACP && [[ "$BOND_MASTER" != "None" && -f /proc/net/bonding/$BOND_MASTER ]]; then
+        # Extract aggregator ID, actor port state, and partner MAC
+        # Essential LACP bits (mask 0x3D = 61):
+        #   Bit 0: Activity, Bit 2: Aggregation, Bit 3: Synchronization,
+        #   Bit 4: Collecting, Bit 5: Distributing
+        # Bit 1 (Timeout) is intentionally ignored — short vs long is not an error
         LACP_PLAIN=$(awk -v IFACE="$IFACE" '
             BEGIN { in_iface=0; in_actor=0; in_partner=0; agg=""; peer=""; state="" }
             $0 ~ "^Slave Interface: "IFACE"$" { in_iface=1; next }
@@ -394,13 +406,22 @@ for IFACE in $(ls /sys/class/net/ | grep -vE 'lo|vnet|virbr|br|bond|docker|tap|t
             in_iface && /details partner lacp pdu:/ { in_partner=1; next }
             in_partner && /^[[:space:]]*system mac address:/ { peer=$4; in_partner=0 }
             END {
-                if (agg && peer && state == "63")
+                if (agg && peer && and(state+0, 61) == 61)
                     printf "AggID:%s Peer:%s", agg, peer
                 else if (agg && peer)
                     printf "AggID:%s Peer:%s (Partial)", agg, peer
                 else
                     print "Pending"
             }
+        ' /proc/net/bonding/$BOND_MASTER)
+
+        # Extract raw partner MAC for bond-level validation
+        LACP_PEER=$(awk -v IFACE="$IFACE" '
+            BEGIN { in_iface=0; in_partner=0 }
+            $0 ~ "^Slave Interface: "IFACE"$" { in_iface=1; next }
+            in_iface && /^Slave Interface:/ { in_iface=0 }
+            in_iface && /details partner lacp pdu:/ { in_partner=1; next }
+            in_partner && /^[[:space:]]*system mac address:/ { print $4; exit }
         ' /proc/net/bonding/$BOND_MASTER)
 
         if [[ "$LACP_PLAIN" == *"(Partial)"* ]]; then
@@ -416,6 +437,10 @@ for IFACE in $(ls /sys/class/net/ | grep -vE 'lo|vnet|virbr|br|bond|docker|tap|t
     LLDP_OUTPUT=$(lldpctl "$IFACE" 2>/dev/null)
     SWITCH_NAME=$(echo "$LLDP_OUTPUT" | awk -F'SysName: ' '/SysName:/ {print $2}' | xargs)
     PORT_NAME=$(echo "$LLDP_OUTPUT" | awk -F'PortID: ' '/PortID:/ {print $2}' | xargs)
+
+    # LLDP PortAggregID (link aggregation group on the switch side)
+    LLDP_AGGID=$(echo "$LLDP_OUTPUT" | awk '/PortAggregID:/ {print $NF}')
+    [[ -z "$LLDP_AGGID" ]] && LLDP_AGGID="N/A"
 
     # VLAN Info from LLDP
     VLAN_INFO=""
@@ -449,6 +474,8 @@ for IFACE in $(ls /sys/class/net/ | grep -vE 'lo|vnet|virbr|br|bond|docker|tap|t
     DATA_BMAC[$ROW_COUNT]="$BMAC"
     DATA_LACP_PLAIN[$ROW_COUNT]="$LACP_PLAIN"
     DATA_LACP_COLOR[$ROW_COUNT]="$LACP_COLOR"
+    DATA_LACP_PEER[$ROW_COUNT]="$LACP_PEER"
+    DATA_LLDP_AGGID[$ROW_COUNT]="$LLDP_AGGID"
     DATA_VLAN[$ROW_COUNT]="$VLAN_INFO"
     DATA_SWITCH[$ROW_COUNT]="$SWITCH_NAME"
     DATA_PORT[$ROW_COUNT]="$PORT_NAME"
@@ -459,6 +486,73 @@ done
 if [[ $ROW_COUNT -eq 0 ]]; then
     echo "No physical network interfaces found." >&2
     exit 0
+fi
+
+# --- Bond-level LACP consistency validation ---
+if $SHOW_LACP; then
+    # Collect unique bonds and their member indices
+    declare -A BOND_MEMBER_INDICES
+    for ((i = 0; i < ROW_COUNT; i++)); do
+        local_bond="${DATA_BOND_PLAIN[$i]}"
+        [[ "$local_bond" == "None" ]] && continue
+        BOND_MEMBER_INDICES["$local_bond"]+="$i "
+    done
+
+    for BOND_NAME in "${!BOND_MEMBER_INDICES[@]}"; do
+        read -ra MEMBERS <<< "${BOND_MEMBER_INDICES[$BOND_NAME]}"
+        [[ ${#MEMBERS[@]} -lt 2 ]] && continue
+
+        # --- Check 1: Partner MAC consistency across all bond members ---
+        declare -A PEER_MACS
+        for IDX in "${MEMBERS[@]}"; do
+            PEER="${DATA_LACP_PEER[$IDX]}"
+            [[ -n "$PEER" ]] && PEER_MACS["$PEER"]=1
+        done
+        PEER_MAC_COUNT=${#PEER_MACS[@]}
+        unset PEER_MACS
+
+        if [[ $PEER_MAC_COUNT -gt 1 ]]; then
+            for IDX in "${MEMBERS[@]}"; do
+                DATA_LACP_PLAIN[$IDX]="${DATA_LACP_PLAIN[$IDX]} [Peer Mismatch]"
+                DATA_LACP_COLOR[$IDX]="${RED}${DATA_LACP_PLAIN[$IDX]}${RESET_COLOR}"
+            done
+        fi
+
+        # --- Check 2: Same-switch PortAggregID consistency ---
+        # Group members by switch, then check for AggID mismatches
+        declare -A SWITCH_AGGIDS
+        for IDX in "${MEMBERS[@]}"; do
+            SW="${DATA_SWITCH[$IDX]}"
+            AGGID="${DATA_LLDP_AGGID[$IDX]}"
+            [[ -z "$SW" || "$AGGID" == "N/A" ]] && continue
+            if [[ -n "${SWITCH_AGGIDS[$SW]}" ]]; then
+                SWITCH_AGGIDS["$SW"]+=" $AGGID"
+            else
+                SWITCH_AGGIDS["$SW"]="$AGGID"
+            fi
+        done
+
+        for SW in "${!SWITCH_AGGIDS[@]}"; do
+            read -ra AGGID_LIST <<< "${SWITCH_AGGIDS[$SW]}"
+            declare -A UNIQUE_AGGIDS
+            for AID in "${AGGID_LIST[@]}"; do
+                UNIQUE_AGGIDS["$AID"]=1
+            done
+            if [[ ${#UNIQUE_AGGIDS[@]} -gt 1 ]]; then
+                for IDX in "${MEMBERS[@]}"; do
+                    [[ "${DATA_SWITCH[$IDX]}" != "$SW" ]] && continue
+                    # Only tag if not already flagged with Peer Mismatch
+                    if [[ "${DATA_LACP_PLAIN[$IDX]}" != *"Mismatch"* ]]; then
+                        DATA_LACP_PLAIN[$IDX]="${DATA_LACP_PLAIN[$IDX]} [AE Mismatch on ${SW}]"
+                        DATA_LACP_COLOR[$IDX]="${RED}${DATA_LACP_PLAIN[$IDX]}${RESET_COLOR}"
+                    fi
+                done
+            fi
+            unset UNIQUE_AGGIDS
+        done
+        unset SWITCH_AGGIDS
+    done
+    unset BOND_MEMBER_INDICES
 fi
 
 # --- Compute Dynamic Column Widths ---
@@ -662,10 +756,12 @@ DOTHEADER
         local LACP_LABEL=""
         for IDX in $MEMBERS; do
             local LACP="${DATA_LACP_PLAIN[$IDX]}"
-            if [[ "$LACP" == AggID* && "$LACP" != *"Partial"* ]]; then
-                LACP_LABEL="LACP Active"
+            if [[ "$LACP" == *"Mismatch"* ]]; then
+                LACP_LABEL="LACP Mismatch"
                 break
-            elif [[ "$LACP" == *"Partial"* ]]; then
+            elif [[ "$LACP" == AggID* && "$LACP" != *"Partial"* ]]; then
+                LACP_LABEL="LACP Active"
+            elif [[ "$LACP" == *"Partial"* && "$LACP_LABEL" != "LACP Active" ]]; then
                 LACP_LABEL="LACP Partial"
             elif [[ "$LACP" == "Pending" && -z "$LACP_LABEL" ]]; then
                 LACP_LABEL="LACP Pending"

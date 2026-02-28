@@ -21,7 +21,7 @@ digraph nic_xray {
         color="#89b4fa";
         bgcolor="#1e1e2ecc";
         fontcolor="#89b4fa";
-        label=<<FONT POINT-SIZE="12"><B>bond0</B> (LACP Partial)</FONT>>;
+        label=<<FONT POINT-SIZE="12"><B>bond0</B> (LACP Active)</FONT>>;
         penwidth=1.5;
 
         eno1np0 [shape=plain, label=<
@@ -45,7 +45,7 @@ digraph nic_xray {
         color="#f9e2af";
         bgcolor="#1e1e2ecc";
         fontcolor="#f9e2af";
-        label=<<FONT POINT-SIZE="12"><B>bond1</B> (LACP Partial)</FONT>>;
+        label=<<FONT POINT-SIZE="12"><B>bond1</B> (LACP Active)</FONT>>;
         penwidth=1.5;
 
         eno2np1 [shape=plain, label=<
@@ -69,7 +69,7 @@ digraph nic_xray {
         color="#94e2d5";
         bgcolor="#1e1e2ecc";
         fontcolor="#94e2d5";
-        label=<<FONT POINT-SIZE="12"><B>bond2</B> (LACP Partial)</FONT>>;
+        label=<<FONT POINT-SIZE="12"><B>bond2</B> (LACP Active)</FONT>>;
         penwidth=1.5;
 
         ens3f0np0 [shape=plain, label=<
@@ -93,7 +93,7 @@ digraph nic_xray {
         color="#f5c2e7";
         bgcolor="#1e1e2ecc";
         fontcolor="#f5c2e7";
-        label=<<FONT POINT-SIZE="12"><B>bond3</B> (LACP Partial)</FONT>>;
+        label=<<FONT POINT-SIZE="12"><B>bond3</B> (LACP Active)</FONT>>;
         penwidth=1.5;
 
         ens3f1np1 [shape=plain, label=<

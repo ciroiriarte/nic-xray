@@ -1,6 +1,6 @@
 .\" Man page for nic-xray.sh
 .\" Written in classic troff/groff format
-.TH NIC-XRAY 8 "2026-02-27" "nic-xray 2.2.1" "System Administration Commands"
+.TH NIC-XRAY 8 "2026-02-28" "nic-xray 2.4.0" "System Administration Commands"
 .SH NAME
 nic-xray \- detailed physical network interface diagnostics
 .SH SYNOPSIS
@@ -46,6 +46,19 @@ Linux environment.
 .B \-\-lacp
 Show LACP Aggregator ID and Partner MAC for each bonded interface. Displays
 aggregation state: fully converged, partial, or pending.
+.IP
+Bond-level consistency checks are performed automatically when this flag is
+active. The following warnings may appear:
+.RS
+.TP
+.B [Peer Mismatch]
+Bond members report different LACP partner MACs, indicating they are connected
+to unrelated switches (not an MLAG/EVPN pair). Shown in red.
+.TP
+.B [AE Mismatch on \fIswitch\fP]
+Bond members connected to the same switch have different LLDP PortAggregIDs,
+indicating they are wired to different LAG groups on that switch. Shown in red.
+.RE
 .TP
 .B \-\-vlan
 Show VLAN tagging information obtained from LLDP. Displays VLAN IDs with a
@@ -205,6 +218,9 @@ System MAC address of the bond.
 (shown with
 .BR \-\-lacp )
 LACP aggregation details: Aggregator ID, partner MAC, and convergence state.
+Bond-level consistency warnings
+.RB ( "[Peer Mismatch]" ", " "[AE Mismatch]" )
+are appended when misconfigurations are detected.
 .TP
 .B VLAN
 (shown with
@@ -316,7 +332,8 @@ Each bond is assigned a distinct color (blue, cyan, yellow, magenta, white)
 cycling through a palette to visually group member interfaces.
 .TP
 .B LACP status
-Green for fully converged, yellow for partial, red for pending.
+Green for fully converged, yellow for partial, red for pending or mismatch
+warnings.
 .SH REQUIREMENTS
 .B nic-xray.sh
 must be run as
