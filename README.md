@@ -2,11 +2,11 @@
 
 Detailed physical network interface diagnostics for Linux.
 
-## 📦 Latest Release: [v2.1](https://github.com/ciroiriarte/nic-xray/releases/tag/v2.1)
+## 📦 Latest Release: [v2.2](https://github.com/ciroiriarte/nic-xray/releases/tag/v2.2)
 
 | Script | Version |
 |---|---|
-| `nic-xray.sh` | 2.1 |
+| `nic-xray.sh` | 2.2 |
 
 Supports `--version` / `-v` and `--help` / `-h` flags.
 
@@ -74,12 +74,12 @@ Originally developed for OpenStack node deployments, it is suitable for any Linu
 
 ## 📖 Man Page
 
-A man page is available under `man/man1/` for detailed reference.
+A man page is available under `man/man8/` for detailed reference (section 8: system administration commands).
 
 **Preview locally** (no installation required):
 
 ```bash
-man -l man/man1/nic-xray.1
+man -l man/man8/nic-xray.8
 ```
 
 **Install system-wide:**

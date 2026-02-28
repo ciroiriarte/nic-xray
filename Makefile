@@ -4,8 +4,8 @@ MANDIR  ?= $(PREFIX)/share/man
 .PHONY: install-man uninstall-man
 
 install-man:
-	install -d $(DESTDIR)$(MANDIR)/man1
-	install -m 644 man/man1/nic-xray.1 $(DESTDIR)$(MANDIR)/man1/
+	install -d $(DESTDIR)$(MANDIR)/man8
+	install -m 644 man/man8/nic-xray.8 $(DESTDIR)$(MANDIR)/man8/
 
 uninstall-man:
-	rm -f $(DESTDIR)$(MANDIR)/man1/nic-xray.1
+	rm -f $(DESTDIR)$(MANDIR)/man8/nic-xray.8

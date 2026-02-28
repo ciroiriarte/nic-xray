@@ -36,10 +36,12 @@
 #   - 2026-02-27: v2.1 - Added network topology diagram output (dot/svg/png)
 #                        New --diagram-out flag for custom output file path
 #                        Optional graphviz dependency for svg/png rendering
+#   - 2026-02-27: v2.2 - Moved man page from section 1 to section 8
+#                        (system administration commands)
 #
-# Version: 2.1
+# Version: 2.2
 
-SCRIPT_VERSION="2.1"
+SCRIPT_VERSION="2.2"
 
 # LOCALE setup, we expect output in English for proper parsing
 LANG=en_US.UTF-8

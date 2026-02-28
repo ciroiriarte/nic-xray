@@ -19,7 +19,7 @@
 * Use functions when the script becomes long and complex.
 
 ## 4. Documentation
-* The man page lives under `man/man1/nic-xray.1` in classic troff/groff format (section 1). It must document at minimum: NAME, SYNOPSIS, DESCRIPTION, OPTIONS, EXIT STATUS, EXAMPLES, AUTHORS, and SEE ALSO.
+* The man page lives under `man/man8/nic-xray.8` in classic troff/groff format (section 8, system administration commands). It must document at minimum: NAME, SYNOPSIS, DESCRIPTION, OPTIONS, EXIT STATUS, EXAMPLES, AUTHORS, and SEE ALSO.
 * The `README.md` must include: Author (Ciro Iriarte), creation date, update date, description, requirements, recommendations, and usage examples.
 * Use UTF-8 based icons to make reading easier.
 * Format should be consistent.
