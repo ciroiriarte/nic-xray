@@ -2,21 +2,20 @@
 
 Detailed physical network interface diagnostics for Linux.
 
-## 📦 Latest Release: [v2.2](https://github.com/ciroiriarte/nic-xray/releases/tag/v2.2)
+[![Latest Release](https://img.shields.io/github/v/release/ciroiriarte/nic-xray)](https://github.com/ciroiriarte/nic-xray/releases)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
-| Script | Version |
-|---|---|
-| `nic-xray.sh` | 2.2 |
+## Table of Contents
 
-Supports `--version` / `-v` and `--help` / `-h` flags.
-
----
+- [Description](#-description)
+- [Requirements](#%EF%B8%8F-requirements)
+- [Installation](#-installation)
+- [Usage](#-usage)
+- [License](#-license)
+- [Contributing](#-contributing)
+- [Authors](#%EF%B8%8F-authors)
 
 ## 📝 Description
-
-**Author**: Ciro Iriarte
-**Created**: 2025-06-05
-**Updated**: 2026-02-27
 
 `nic-xray.sh` is a diagnostic script that provides a detailed overview of all **physical network interfaces** on a Linux system. It displays:
 
@@ -27,7 +26,7 @@ Supports `--version` / `-v` and `--help` / `-h` flags.
 - MAC address
 - MTU
 - Link status (with color)
-- Negotiated speed and duplex (color-coded by tier: 200G magenta, 100G cyan, 25G/40G/50G white, 10G green, 1G yellow, <1G/unknown red)
+- Negotiated speed and duplex (color-coded by speed tier)
 - Bond membership (with color)
 - LLDP peer information (switch and port)
 - Optionally: LACP status, VLAN tagging, bond MAC address
@@ -35,8 +34,6 @@ Supports `--version` / `-v` and `--help` / `-h` flags.
 Supports multiple output formats: **table** (default, with dynamic column widths), **CSV**, **JSON**, and **network topology diagrams** (DOT/SVG/PNG).
 
 Originally developed for OpenStack node deployments, it is suitable for any Linux environment.
-
----
 
 ## ⚙️ Requirements
 
@@ -55,24 +52,18 @@ Originally developed for OpenStack node deployments, it is suitable for any Linu
     lldp tlv-select vlan-name
     ```
 
----
+## 📦 Installation
 
-## 💡 Recommendations
+### Script
 
-- Copy the script to `/usr/local/sbin` for easy access:
-  ```bash
-  sudo cp nic-xray.sh /usr/local/sbin/
-  sudo chmod +x /usr/local/sbin/nic-xray.sh
-  ```
+Copy to `/usr/local/sbin` for easy access:
 
-- Ensure lldpd service is running to retrieve LLDP information:
-  ```bash
-  sudo systemctl enable --now lldpd
-  ```
+```bash
+sudo cp nic-xray.sh /usr/local/sbin/
+sudo chmod +x /usr/local/sbin/nic-xray.sh
+```
 
----
-
-## 📖 Man Page
+### Man page
 
 A man page is available under `man/man8/` for detailed reference (section 8: system administration commands).
 
@@ -96,136 +87,79 @@ After installation, use `man nic-xray` to view the man page.
 sudo make uninstall-man
 ```
 
----
+### lldpd service
+
+Ensure lldpd is running to retrieve LLDP information:
+
+```bash
+sudo systemctl enable --now lldpd
+```
 
 ## 🚀 Usage
 
-Default view:
+### Basic
 
 ```bash
-sudo nic-xray.sh
+sudo nic-xray.sh              # Default view
+sudo nic-xray.sh --all        # All optional columns at once
+sudo nic-xray.sh -h           # Display help
+sudo nic-xray.sh -v           # Display version
 ```
 
-Show VLAN information:
+### Optional columns
 
 ```bash
-sudo nic-xray.sh --vlan
+sudo nic-xray.sh --lacp       # Show LACP peer information
+sudo nic-xray.sh --vlan       # Show VLAN information
+sudo nic-xray.sh --bmac       # Show bond MAC address
 ```
 
-Show LACP peer information:
+### Filtering and sorting
 
 ```bash
-sudo nic-xray.sh --lacp
+sudo nic-xray.sh --filter-link up      # Only interfaces with link up
+sudo nic-xray.sh --filter-link down    # Only interfaces with link down
+sudo nic-xray.sh --group-bond          # Group rows by bond
+sudo nic-xray.sh --group-bond --all -s # Combined example
 ```
 
-Show bond MAC address:
+### Output formats
 
 ```bash
-sudo nic-xray.sh --bmac
+sudo nic-xray.sh --output csv                     # CSV output
+sudo nic-xray.sh --output csv --separator='|'      # Pipe-delimited CSV
+sudo nic-xray.sh --output csv --separator=$'\t'    # Tab-separated CSV
+sudo nic-xray.sh --output json                     # JSON output
+sudo nic-xray.sh --all --output json               # All columns as JSON
 ```
 
-Table output with `│` column separators:
+### Topology diagrams
 
 ```bash
-sudo nic-xray.sh -s
-sudo nic-xray.sh --separator
+sudo nic-xray.sh --output dot > topology.dot                   # DOT source
+sudo nic-xray.sh --output svg                                  # SVG diagram
+sudo nic-xray.sh --output png --diagram-out /tmp/network.png   # PNG with custom path
 ```
 
-Table output with a custom separator:
+### Formatting
 
 ```bash
-sudo nic-xray.sh --separator='|'
+sudo nic-xray.sh -s                # Table with │ column separators
+sudo nic-xray.sh --separator='|'   # Table with custom separator
+sudo nic-xray.sh --no-color        # Disable color output
 ```
 
-CSV output:
+## 📄 License
 
-```bash
-sudo nic-xray.sh --output csv
-```
+This project is licensed under the GNU General Public License v3.0. See [LICENSE](LICENSE) for details.
 
-Pipe-delimited CSV:
+## 🤝 Contributing
 
-```bash
-sudo nic-xray.sh --output csv --separator='|'
-```
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-Tab-separated CSV:
+## ✍️ Authors
 
-```bash
-sudo nic-xray.sh --output csv --separator=$'\t'
-```
+**Ciro Iriarte**
 
-JSON output:
-
-```bash
-sudo nic-xray.sh --output json
-```
-
-All optional columns with JSON output:
-
-```bash
-sudo nic-xray.sh --vlan --lacp --bmac --output json
-```
-
-Generate DOT source for external rendering:
-
-```bash
-sudo nic-xray.sh --output dot > topology.dot
-```
-
-Generate an SVG network topology diagram:
-
-```bash
-sudo nic-xray.sh --output svg
-```
-
-Generate a PNG diagram with custom output path:
-
-```bash
-sudo nic-xray.sh --output png --diagram-out /tmp/network.png
-```
-
-Show all optional columns at once:
-
-```bash
-sudo nic-xray.sh --all
-```
-
-Group rows by bond (bonded interfaces first, then unbonded):
-
-```bash
-sudo nic-xray.sh --group-bond
-sudo nic-xray.sh --group-bond --all -s
-```
-
-Show only interfaces with link up:
-
-```bash
-sudo nic-xray.sh --filter-link up
-```
-
-Show only interfaces with link down:
-
-```bash
-sudo nic-xray.sh --filter-link down
-```
-
-Disable color output:
-
-```bash
-sudo nic-xray.sh --no-color
-```
-
-Display version:
-
-```bash
-sudo nic-xray.sh -v
-sudo nic-xray.sh --version
-```
-
-Display help:
-
-```bash
-sudo nic-xray.sh -h
-sudo nic-xray.sh --help
-```
+- **Created**: 2025-06-05
+- **Updated**: 2026-02-27
