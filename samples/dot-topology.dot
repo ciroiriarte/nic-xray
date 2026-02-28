@@ -1,0 +1,247 @@
+digraph nic_xray {
+    rankdir=LR;
+    bgcolor="#1e1e2e";
+    fontname="Helvetica,Arial,sans-serif";
+    fontcolor="#cdd6f4";
+    pad="0.5";
+    nodesep="0.6";
+    ranksep="1.5";
+    node [fontname="Helvetica,Arial,sans-serif", fontcolor="#cdd6f4", fontsize=11];
+    edge [fontname="Helvetica,Arial,sans-serif", fontcolor="#a6adc8", fontsize=10];
+
+    server [shape=plain, label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="4" CELLPADDING="6" BGCOLOR="#313244" COLOR="#585b70">
+        <TR><TD COLSPAN="2"><FONT POINT-SIZE="14" COLOR="#cba6f7"><B>server-01.example.net</B></FONT></TD></TR>
+        <TR><TD COLSPAN="2"><FONT COLOR="#a6adc8">Server</FONT></TD></TR>
+        </TABLE>
+    >];
+
+    subgraph cluster_bond_0 {
+        style=dashed;
+        color="#89b4fa";
+        bgcolor="#1e1e2ecc";
+        fontcolor="#89b4fa";
+        label=<<FONT POINT-SIZE="12"><B>bond0</B> (LACP Partial)</FONT>>;
+        penwidth=1.5;
+
+        eno1np0 [shape=plain, label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#a6e3a1">
+            <TR><TD><FONT COLOR="#cdd6f4"><B>eno1np0</B></FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">XX:XX:XX:XX:XX:01</FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">10000Mb/s (Full)</FONT></TD></TR>
+            </TABLE>
+        >];
+        ens5f0np0 [shape=plain, label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#a6e3a1">
+            <TR><TD><FONT COLOR="#cdd6f4"><B>ens5f0np0</B></FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">XX:XX:XX:XX:XX:07</FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">10000Mb/s (Full)</FONT></TD></TR>
+            </TABLE>
+        >];
+    }
+
+    subgraph cluster_bond_1 {
+        style=dashed;
+        color="#f9e2af";
+        bgcolor="#1e1e2ecc";
+        fontcolor="#f9e2af";
+        label=<<FONT POINT-SIZE="12"><B>bond1</B> (LACP Partial)</FONT>>;
+        penwidth=1.5;
+
+        eno2np1 [shape=plain, label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#a6e3a1">
+            <TR><TD><FONT COLOR="#cdd6f4"><B>eno2np1</B></FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">XX:XX:XX:XX:XX:02</FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">10000Mb/s (Full)</FONT></TD></TR>
+            </TABLE>
+        >];
+        ens5f1np1 [shape=plain, label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#a6e3a1">
+            <TR><TD><FONT COLOR="#cdd6f4"><B>ens5f1np1</B></FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">XX:XX:XX:XX:XX:08</FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">10000Mb/s (Full)</FONT></TD></TR>
+            </TABLE>
+        >];
+    }
+
+    subgraph cluster_bond_2 {
+        style=dashed;
+        color="#94e2d5";
+        bgcolor="#1e1e2ecc";
+        fontcolor="#94e2d5";
+        label=<<FONT POINT-SIZE="12"><B>bond2</B> (LACP Partial)</FONT>>;
+        penwidth=1.5;
+
+        ens3f0np0 [shape=plain, label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#a6e3a1">
+            <TR><TD><FONT COLOR="#cdd6f4"><B>ens3f0np0</B></FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">XX:XX:XX:XX:XX:05</FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">25000Mb/s (Full)</FONT></TD></TR>
+            </TABLE>
+        >];
+        ens8f0np0 [shape=plain, label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#a6e3a1">
+            <TR><TD><FONT COLOR="#cdd6f4"><B>ens8f0np0</B></FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">XX:XX:XX:XX:XX:0b</FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">25000Mb/s (Full)</FONT></TD></TR>
+            </TABLE>
+        >];
+    }
+
+    subgraph cluster_bond_3 {
+        style=dashed;
+        color="#f5c2e7";
+        bgcolor="#1e1e2ecc";
+        fontcolor="#f5c2e7";
+        label=<<FONT POINT-SIZE="12"><B>bond3</B> (LACP Partial)</FONT>>;
+        penwidth=1.5;
+
+        ens3f1np1 [shape=plain, label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#a6e3a1">
+            <TR><TD><FONT COLOR="#cdd6f4"><B>ens3f1np1</B></FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">XX:XX:XX:XX:XX:06</FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">25000Mb/s (Full)</FONT></TD></TR>
+            </TABLE>
+        >];
+        ens8f1np1 [shape=plain, label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#a6e3a1">
+            <TR><TD><FONT COLOR="#cdd6f4"><B>ens8f1np1</B></FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">XX:XX:XX:XX:XX:0c</FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">25000Mb/s (Full)</FONT></TD></TR>
+            </TABLE>
+        >];
+    }
+
+    eno3np2 [shape=plain, label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#f38ba8">
+        <TR><TD><FONT COLOR="#cdd6f4"><B>eno3np2</B></FONT></TD></TR>
+        <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">XX:XX:XX:XX:XX:03</FONT></TD></TR>
+        </TABLE>
+    >];
+
+    eno4np3 [shape=plain, label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#f38ba8">
+        <TR><TD><FONT COLOR="#cdd6f4"><B>eno4np3</B></FONT></TD></TR>
+        <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">XX:XX:XX:XX:XX:04</FONT></TD></TR>
+        </TABLE>
+    >];
+
+    ens5f2np2 [shape=plain, label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#f38ba8">
+        <TR><TD><FONT COLOR="#cdd6f4"><B>ens5f2np2</B></FONT></TD></TR>
+        <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">XX:XX:XX:XX:XX:09</FONT></TD></TR>
+        </TABLE>
+    >];
+
+    ens5f3np3 [shape=plain, label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#f38ba8">
+        <TR><TD><FONT COLOR="#cdd6f4"><B>ens5f3np3</B></FONT></TD></TR>
+        <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">XX:XX:XX:XX:XX:0a</FONT></TD></TR>
+        </TABLE>
+    >];
+
+    idrac [shape=plain, label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#a6e3a1">
+        <TR><TD><FONT COLOR="#cdd6f4"><B>idrac</B></FONT></TD></TR>
+        <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">XX:XX:XX:XX:XX:0d</FONT></TD></TR>
+        <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">425Mb/s (Half)</FONT></TD></TR>
+        </TABLE>
+    >];
+
+    subgraph cluster_sw_switch_01_example_net {
+        style=solid;
+        color="#fab387";
+        bgcolor="#1e1e2ecc";
+        fontcolor="#fab387";
+        label=<<FONT POINT-SIZE="13"><B>switch-01.example.net</B></FONT>>;
+        penwidth=1.5;
+
+        swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_2 [shape=plain, label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#fab387">
+            <TR><TD><FONT COLOR="#cdd6f4"><B>ifname xe-0/0/2</B></FONT></TD></TR>
+            </TABLE>
+        >];
+        swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_3 [shape=plain, label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#fab387">
+            <TR><TD><FONT COLOR="#cdd6f4"><B>ifname xe-0/0/3</B></FONT></TD></TR>
+            </TABLE>
+        >];
+        swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_38 [shape=plain, label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#fab387">
+            <TR><TD><FONT COLOR="#cdd6f4"><B>ifname et-0/0/38</B></FONT></TD></TR>
+            </TABLE>
+        >];
+        swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_39 [shape=plain, label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#fab387">
+            <TR><TD><FONT COLOR="#cdd6f4"><B>ifname et-0/0/39</B></FONT></TD></TR>
+            </TABLE>
+        >];
+    }
+
+    subgraph cluster_sw_switch_02_example_net {
+        style=solid;
+        color="#fab387";
+        bgcolor="#1e1e2ecc";
+        fontcolor="#fab387";
+        label=<<FONT POINT-SIZE="13"><B>switch-02.example.net</B></FONT>>;
+        penwidth=1.5;
+
+        swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_2 [shape=plain, label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#fab387">
+            <TR><TD><FONT COLOR="#cdd6f4"><B>ifname xe-0/0/2</B></FONT></TD></TR>
+            </TABLE>
+        >];
+        swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_3 [shape=plain, label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#fab387">
+            <TR><TD><FONT COLOR="#cdd6f4"><B>ifname xe-0/0/3</B></FONT></TD></TR>
+            </TABLE>
+        >];
+        swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_38 [shape=plain, label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#fab387">
+            <TR><TD><FONT COLOR="#cdd6f4"><B>ifname et-0/0/38</B></FONT></TD></TR>
+            </TABLE>
+        >];
+        swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_39 [shape=plain, label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#fab387">
+            <TR><TD><FONT COLOR="#cdd6f4"><B>ifname et-0/0/39</B></FONT></TD></TR>
+            </TABLE>
+        >];
+    }
+
+    no_lldp_peer [shape=plain, label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" BGCOLOR="#313244" COLOR="#6c7086" STYLE="ROUNDED">
+        <TR><TD><FONT COLOR="#6c7086"><I>No LLDP peer</I></FONT></TD></TR>
+        </TABLE>
+    >];
+
+    server -> eno1np0 [style=invis, weight=10];
+    server -> eno2np1 [style=invis, weight=10];
+    server -> eno3np2 [style=invis, weight=10];
+    server -> eno4np3 [style=invis, weight=10];
+    server -> ens3f0np0 [style=invis, weight=10];
+    server -> ens3f1np1 [style=invis, weight=10];
+    server -> ens5f0np0 [style=invis, weight=10];
+    server -> ens5f1np1 [style=invis, weight=10];
+    server -> ens5f2np2 [style=invis, weight=10];
+    server -> ens5f3np3 [style=invis, weight=10];
+    server -> ens8f0np0 [style=invis, weight=10];
+    server -> ens8f1np1 [style=invis, weight=10];
+    server -> idrac [style=invis, weight=10];
+
+    eno1np0 -> swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_2 [label=<VLAN 100;101;102;110;111>, penwidth=2.5, color="#89b4fa", fontcolor="#a6adc8"];
+    eno2np1 -> swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_3 [label=<VLAN 200;201;202;211;212>, penwidth=2.5, color="#f9e2af", fontcolor="#a6adc8"];
+    eno3np2 -> no_lldp_peer [style=dashed, color="#6c7086", fontcolor="#6c7086", penwidth=1.0];
+    eno4np3 -> no_lldp_peer [style=dashed, color="#6c7086", fontcolor="#6c7086", penwidth=1.0];
+    ens3f0np0 -> swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_38 [label=<VLAN 501>, penwidth=3.0, color="#94e2d5", fontcolor="#a6adc8"];
+    ens3f1np1 -> swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_39 [label=<VLAN 502>, penwidth=3.0, color="#f5c2e7", fontcolor="#a6adc8"];
+    ens5f0np0 -> swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_2 [label=<VLAN 100;101;102;110;111>, penwidth=2.5, color="#89b4fa", fontcolor="#a6adc8"];
+    ens5f1np1 -> swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_3 [label=<VLAN 200;201;202;211;212>, penwidth=2.5, color="#f9e2af", fontcolor="#a6adc8"];
+    ens5f2np2 -> no_lldp_peer [style=dashed, color="#6c7086", fontcolor="#6c7086", penwidth=1.0];
+    ens5f3np3 -> no_lldp_peer [style=dashed, color="#6c7086", fontcolor="#6c7086", penwidth=1.0];
+    ens8f0np0 -> swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_38 [label=<VLAN 501>, penwidth=3.0, color="#94e2d5", fontcolor="#a6adc8"];
+    ens8f1np1 -> swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_39 [label=<VLAN 502>, penwidth=3.0, color="#f5c2e7", fontcolor="#a6adc8"];
+    idrac -> no_lldp_peer [style=dashed, color="#6c7086", fontcolor="#6c7086", penwidth=1.0];
+
+    { rank=min; server; }
+    { rank=max; swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_2; swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_3; swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_38; swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_39; swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_2; swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_3; swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_38; swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_39; no_lldp_peer; }
+}

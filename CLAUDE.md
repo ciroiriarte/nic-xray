@@ -27,3 +27,7 @@
 ## 5. Security
 * Safe variable handling is required.
 * Apply relevant safe coding practices you may know about.
+
+## 6. Releases
+* Use semantic versioning (https://semver.org/)
+* Bump script version & repo release tags in tandem

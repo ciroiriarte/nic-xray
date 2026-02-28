@@ -1,0 +1,30 @@
+Usage: nic-xray.sh [--lacp] [--vlan] [--bmac] [--all] [--no-color]
+       [--filter-link up|down] [-s[SEP]|--separator[=SEP]]
+       [--group-bond] [--output FORMAT] [--diagram-out FILE]
+       [--help]
+
+Version: 2.2.1
+
+Description:
+ Lists physical network interfaces with detailed information including:
+ PCI slot, driver, firmware, MAC, MTU, link, speed/duplex, bond membership,
+ LLDP peer info, and optionally LACP status and VLAN tagging (via LLDP).
+
+Options:
+ --lacp              Show LACP Aggregator ID and Partner MAC per interface
+ --vlan              Show VLAN tagging information (from LLDP)
+ --bmac              Show bridge MAC address
+ --all               Enable all optional columns (--lacp --vlan --bmac)
+ --no-color          Disable color output (auto-disabled for non-terminal)
+ --filter-link TYPE  Show only interfaces with link up or down
+ -s, --separator     Show │ column separators in table output; applies to CSV too
+ -sSEP, --separator=SEP
+                     Use SEP as column separator in table and CSV output
+ --group-bond        Sort rows by bond group, then by interface name
+ --output TYPE       Output format: table (default), csv, json, dot, svg, or png
+                     dot/svg/png generate a network topology diagram
+                     svg/png require graphviz (dot command)
+ --diagram-out FILE  Output file path for svg/png diagrams
+                     Default: /tmp/nic-xray-<hostname>.{svg,png}
+ -v, --version       Display version information
+ -h, --help          Display this help message

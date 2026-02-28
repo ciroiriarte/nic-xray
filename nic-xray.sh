@@ -577,17 +577,30 @@ generate_dot() {
     local BORDER_COLOR="#585b70"
     local GREEN_COLOR="#a6e3a1"
     local RED_COLOR="#f38ba8"
-    local BLUE_COLOR="#89b4fa"
     local PEACH_COLOR="#fab387"
     local MAUVE_COLOR="#cba6f7"
     local GRAY_COLOR="#6c7086"
     local TEXT_COLOR="#cdd6f4"
     local SUBTEXT_COLOR="#a6adc8"
 
+    # Per-bond color palette (Catppuccin Mocha accents)
+    local BOND_COLORS=(
+        "#89b4fa"   # Blue
+        "#f9e2af"   # Yellow
+        "#94e2d5"   # Teal
+        "#f5c2e7"   # Pink
+        "#b4befe"   # Lavender
+        "#eba0ac"   # Maroon
+        "#74c7ec"   # Sapphire
+        "#fab387"   # Peach
+    )
+
     # Categorize interfaces: bond members vs standalone
     declare -A BOND_MEMBERS  # bond_name -> space-separated row indices
     declare -a STANDALONE_INDICES
     declare -A SEEN_SWITCHES  # switch_name -> 1
+    declare -A SWITCH_PORTS   # "switch|port" -> row index (for unique port nodes)
+    declare -A BOND_COLOR_MAP # bond_name -> color
 
     for ((i = 0; i < ROW_COUNT; i++)); do
         local BOND="${DATA_BOND_PLAIN[$i]}"
@@ -598,9 +611,20 @@ generate_dot() {
         fi
 
         local SW="${DATA_SWITCH[$i]}"
+        local PORT="${DATA_PORT[$i]}"
         if [[ -n "$SW" ]]; then
             SEEN_SWITCHES["$SW"]=1
+            if [[ -n "$PORT" ]]; then
+                SWITCH_PORTS["${SW}|${PORT}"]="$i"
+            fi
         fi
+    done
+
+    # Assign colors to bonds in sorted order
+    local COLOR_IDX=0
+    for BOND_NAME in $(printf '%s\n' "${!BOND_MEMBERS[@]}" | sort); do
+        BOND_COLOR_MAP["$BOND_NAME"]="${BOND_COLORS[$((COLOR_IDX % ${#BOND_COLORS[@]}))]}"
+        ((COLOR_IDX++))
     done
 
     # --- Emit DOT source ---
@@ -632,6 +656,7 @@ DOTHEADER
     local CLUSTER_IDX=0
     for BOND_NAME in $(printf '%s\n' "${!BOND_MEMBERS[@]}" | sort); do
         local MEMBERS="${BOND_MEMBERS[$BOND_NAME]}"
+        local BOND_CLR="${BOND_COLOR_MAP[$BOND_NAME]}"
 
         # Determine LACP status label for the bond
         local LACP_LABEL=""
@@ -650,9 +675,9 @@ DOTHEADER
 
         printf '    subgraph cluster_bond_%d {\n' "$CLUSTER_IDX"
         printf '        style=dashed;\n'
-        printf '        color="%s";\n' "$BLUE_COLOR"
+        printf '        color="%s";\n' "$BOND_CLR"
         printf '        bgcolor="%s";\n' "${BG_COLOR}cc"
-        printf '        fontcolor="%s";\n' "$BLUE_COLOR"
+        printf '        fontcolor="%s";\n' "$BOND_CLR"
         printf '        label=<<FONT POINT-SIZE="12"><B>%s</B> (%s)</FONT>>;\n' \
             "$(dot_escape "$BOND_NAME")" "$(dot_escape "$LACP_LABEL")"
         printf '        penwidth=1.5;\n\n'
@@ -660,7 +685,9 @@ DOTHEADER
         for IDX in $MEMBERS; do
             local IFACE="${DATA_IFACE[$IDX]}"
             local DRIVER="${DATA_DRIVER[$IDX]}"
+            local MAC="${DATA_MAC[$IDX]}"
             local LINK="${DATA_LINK_PLAIN[$IDX]}"
+            local SPEED_RAW="${DATA_SPEED_PLAIN[$IDX]}"
             local NODE_ID
             NODE_ID=$(dot_id "$IFACE")
 
@@ -671,13 +698,24 @@ DOTHEADER
                 NODE_BORDER="$RED_COLOR"
             fi
 
+            # Format speed for display
+            local SPEED_LABEL=""
+            local SPEED_NUM="${SPEED_RAW%%[^0-9]*}"
+            if [[ "$SPEED_NUM" =~ ^[0-9]+$ ]]; then
+                SPEED_LABEL="$(dot_escape "$SPEED_RAW")"
+            fi
+
             printf '        %s [shape=plain, label=<\n' "$NODE_ID"
             printf '            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" '
             printf 'BGCOLOR="%s" COLOR="%s">\n' "$SURFACE_COLOR" "$NODE_BORDER"
             printf '            <TR><TD><FONT COLOR="%s"><B>%s</B></FONT></TD></TR>\n' \
                 "$TEXT_COLOR" "$(dot_escape "$IFACE")"
-            printf '            <TR><TD><FONT POINT-SIZE="9" COLOR="%s">%s | %s</FONT></TD></TR>\n' \
-                "$SUBTEXT_COLOR" "$(dot_escape "$DRIVER")" "$(dot_escape "${LINK^^}")"
+            printf '            <TR><TD><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
+                "$SUBTEXT_COLOR" "$(dot_escape "$MAC")"
+            if [[ -n "$SPEED_LABEL" ]]; then
+                printf '            <TR><TD><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
+                    "$SUBTEXT_COLOR" "$SPEED_LABEL"
+            fi
             printf '            </TABLE>\n'
             printf '        >];\n'
         done
@@ -690,7 +728,9 @@ DOTHEADER
     for IDX in "${STANDALONE_INDICES[@]}"; do
         local IFACE="${DATA_IFACE[$IDX]}"
         local DRIVER="${DATA_DRIVER[$IDX]}"
+        local MAC="${DATA_MAC[$IDX]}"
         local LINK="${DATA_LINK_PLAIN[$IDX]}"
+        local SPEED_RAW="${DATA_SPEED_PLAIN[$IDX]}"
         local NODE_ID
         NODE_ID=$(dot_id "$IFACE")
 
@@ -701,29 +741,64 @@ DOTHEADER
             NODE_BORDER="$RED_COLOR"
         fi
 
+        local SPEED_LABEL=""
+        local SPEED_NUM="${SPEED_RAW%%[^0-9]*}"
+        if [[ "$SPEED_NUM" =~ ^[0-9]+$ ]]; then
+            SPEED_LABEL="$(dot_escape "$SPEED_RAW")"
+        fi
+
         printf '    %s [shape=plain, label=<\n' "$NODE_ID"
         printf '        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" '
         printf 'BGCOLOR="%s" COLOR="%s">\n' "$SURFACE_COLOR" "$NODE_BORDER"
         printf '        <TR><TD><FONT COLOR="%s"><B>%s</B></FONT></TD></TR>\n' \
             "$TEXT_COLOR" "$(dot_escape "$IFACE")"
-        printf '        <TR><TD><FONT POINT-SIZE="9" COLOR="%s">%s | %s</FONT></TD></TR>\n' \
-            "$SUBTEXT_COLOR" "$(dot_escape "$DRIVER")" "$(dot_escape "${LINK^^}")"
+        printf '        <TR><TD><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
+            "$SUBTEXT_COLOR" "$(dot_escape "$MAC")"
+        if [[ -n "$SPEED_LABEL" ]]; then
+            printf '        <TR><TD><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
+                "$SUBTEXT_COLOR" "$SPEED_LABEL"
+        fi
         printf '        </TABLE>\n'
         printf '    >];\n\n'
     done
 
-    # --- Switch nodes ---
+    # --- Switch clusters with port nodes ---
     for SW_NAME in $(printf '%s\n' "${!SEEN_SWITCHES[@]}" | sort); do
         local SW_ID
         SW_ID=$(dot_id "sw_${SW_NAME}")
-        printf '    %s [shape=plain, label=<\n' "$SW_ID"
-        printf '        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="6" '
-        printf 'BGCOLOR="%s" COLOR="%s" STYLE="ROUNDED">\n' "$SURFACE_COLOR" "$PEACH_COLOR"
-        printf '        <TR><TD><FONT POINT-SIZE="13" COLOR="%s"><B>%s</B></FONT></TD></TR>\n' \
-            "$PEACH_COLOR" "$(dot_escape "$SW_NAME")"
-        printf '        <TR><TD><FONT COLOR="%s">Switch</FONT></TD></TR>\n' "$SUBTEXT_COLOR"
-        printf '        </TABLE>\n'
-        printf '    >];\n\n'
+
+        printf '    subgraph cluster_%s {\n' "$SW_ID"
+        printf '        style=solid;\n'
+        printf '        color="%s";\n' "$PEACH_COLOR"
+        printf '        bgcolor="%s";\n' "${BG_COLOR}cc"
+        printf '        fontcolor="%s";\n' "$PEACH_COLOR"
+        printf '        label=<<FONT POINT-SIZE="13"><B>%s</B></FONT>>;\n' \
+            "$(dot_escape "$SW_NAME")"
+        printf '        penwidth=1.5;\n\n'
+
+        # Emit port nodes for this switch (iterate via row data to preserve spaces)
+        declare -A EMITTED_PORTS
+        for ((j = 0; j < ROW_COUNT; j++)); do
+            [[ "${DATA_SWITCH[$j]}" != "$SW_NAME" ]] && continue
+            local PORT_NAME="${DATA_PORT[$j]}"
+            [[ -z "$PORT_NAME" ]] && continue
+            local PORT_ID
+            PORT_ID=$(dot_id "swport_${SW_NAME}_${PORT_NAME}")
+            # Skip already emitted ports (multiple NICs may map to the same port)
+            [[ -n "${EMITTED_PORTS[$PORT_ID]+x}" ]] && continue
+            EMITTED_PORTS["$PORT_ID"]=1
+
+            printf '        %s [shape=plain, label=<\n' "$PORT_ID"
+            printf '            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" '
+            printf 'BGCOLOR="%s" COLOR="%s">\n' "$SURFACE_COLOR" "$PEACH_COLOR"
+            printf '            <TR><TD><FONT COLOR="%s"><B>%s</B></FONT></TD></TR>\n' \
+                "$TEXT_COLOR" "$(dot_escape "$PORT_NAME")"
+            printf '            </TABLE>\n'
+            printf '        >];\n'
+        done
+        unset EMITTED_PORTS
+
+        printf '    }\n\n'
     done
 
     # --- "No LLDP peer" stub node ---
@@ -753,7 +828,7 @@ DOTHEADER
     done
     printf '\n'
 
-    # --- Edges: interfaces -> switches/stubs ---
+    # --- Edges: interfaces -> switch ports / stubs ---
     for ((i = 0; i < ROW_COUNT; i++)); do
         local IFACE="${DATA_IFACE[$i]}"
         local NODE_ID
@@ -763,41 +838,49 @@ DOTHEADER
         local SPEED_RAW="${DATA_SPEED_PLAIN[$i]}"
         local LINK="${DATA_LINK_PLAIN[$i]}"
         local VLAN="${DATA_VLAN[$i]}"
-
-        # Build edge label
-        local LABEL_PARTS=()
-        [[ -n "$PORT" ]] && LABEL_PARTS+=("$(dot_escape "$PORT")")
-
-        local SPEED_NUM="${SPEED_RAW%%[^0-9]*}"
-        if [[ "$SPEED_NUM" =~ ^[0-9]+$ ]]; then
-            LABEL_PARTS+=("$(dot_escape "$SPEED_RAW")")
-        fi
-
-        if [[ -n "$VLAN" && "$VLAN" != "N/A" ]]; then
-            LABEL_PARTS+=("VLAN $(dot_escape "$VLAN")")
-        fi
-
-        local EDGE_LABEL=""
-        if [[ ${#LABEL_PARTS[@]} -gt 0 ]]; then
-            EDGE_LABEL=$(printf '%s\n' "${LABEL_PARTS[@]}" | paste -sd '\n' -)
-        fi
+        local BOND="${DATA_BOND_PLAIN[$i]}"
 
         local PW
         PW=$(dot_penwidth "$SPEED_RAW")
 
-        if [[ -n "$SW" ]]; then
-            local SW_ID
-            SW_ID=$(dot_id "sw_${SW}")
+        if [[ -n "$SW" && -n "$PORT" ]]; then
+            local PORT_ID
+            PORT_ID=$(dot_id "swport_${SW}_${PORT}")
+
+            # Determine edge color: use bond color if bonded, otherwise green/red
             local EDGE_COLOR
-            if [[ "$LINK" == "up" ]]; then
+            if [[ "$BOND" != "None" && -n "${BOND_COLOR_MAP[$BOND]+x}" ]]; then
+                EDGE_COLOR="${BOND_COLOR_MAP[$BOND]}"
+            elif [[ "$LINK" == "up" ]]; then
                 EDGE_COLOR="$GREEN_COLOR"
             else
                 EDGE_COLOR="$RED_COLOR"
             fi
+
+            # Build edge label (VLAN only — speed/MAC are in the nodes)
+            local EDGE_LABEL=""
+            if [[ -n "$VLAN" && "$VLAN" != "N/A" ]]; then
+                EDGE_LABEL="VLAN $(dot_escape "$VLAN")"
+            fi
+
             printf '    %s -> %s [label=<%s>, penwidth=%s, color="%s", fontcolor="%s"];\n' \
-                "$NODE_ID" "$SW_ID" \
-                "$(printf '%s' "$EDGE_LABEL" | sed 's/\\n/<BR\/>/g')" \
+                "$NODE_ID" "$PORT_ID" \
+                "$EDGE_LABEL" \
                 "$PW" "$EDGE_COLOR" "$SUBTEXT_COLOR"
+        elif [[ -n "$SW" ]]; then
+            # Has switch but no port info — connect to an invisible anchor
+            local SW_ID
+            SW_ID=$(dot_id "sw_${SW}")
+            local EDGE_COLOR
+            if [[ "$BOND" != "None" && -n "${BOND_COLOR_MAP[$BOND]+x}" ]]; then
+                EDGE_COLOR="${BOND_COLOR_MAP[$BOND]}"
+            elif [[ "$LINK" == "up" ]]; then
+                EDGE_COLOR="$GREEN_COLOR"
+            else
+                EDGE_COLOR="$RED_COLOR"
+            fi
+            printf '    %s -> %s [penwidth=%s, color="%s"];\n' \
+                "$NODE_ID" "$SW_ID" "$PW" "$EDGE_COLOR"
         else
             printf '    %s -> no_lldp_peer [style=dashed, color="%s", fontcolor="%s", penwidth=1.0];\n' \
                 "$NODE_ID" "$GRAY_COLOR" "$GRAY_COLOR"
@@ -807,20 +890,26 @@ DOTHEADER
     # --- Rank constraints ---
     printf '\n    { rank=min; server; }\n'
 
-    # Switch nodes on the right
-    local SW_NAMES
-    SW_NAMES=$(printf '%s\n' "${!SEEN_SWITCHES[@]}" | sort)
-    if [[ -n "$SW_NAMES" ]]; then
+    # Switch port nodes on the right
+    if [[ ${#SEEN_SWITCHES[@]} -gt 0 || "$HAS_DISCONNECTED" == true ]]; then
         printf '    { rank=max;'
-        while IFS= read -r SW_NAME; do
-            printf ' %s;' "$(dot_id "sw_${SW_NAME}")"
-        done <<< "$SW_NAMES"
+        declare -A RANK_PORTS
+        for ((j = 0; j < ROW_COUNT; j++)); do
+            local R_SW="${DATA_SWITCH[$j]}"
+            local R_PORT="${DATA_PORT[$j]}"
+            [[ -z "$R_SW" || -z "$R_PORT" ]] && continue
+            local R_ID
+            R_ID=$(dot_id "swport_${R_SW}_${R_PORT}")
+            if [[ -z "${RANK_PORTS[$R_ID]+x}" ]]; then
+                RANK_PORTS["$R_ID"]=1
+                printf ' %s;' "$R_ID"
+            fi
+        done
+        unset RANK_PORTS
         if [[ "$HAS_DISCONNECTED" == true ]]; then
             printf ' no_lldp_peer;'
         fi
         printf ' }\n'
-    elif [[ "$HAS_DISCONNECTED" == true ]]; then
-        printf '    { rank=max; no_lldp_peer; }\n'
     fi
 
     printf '}\n'

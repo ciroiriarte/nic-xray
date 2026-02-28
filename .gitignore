@@ -1,0 +1,5 @@
+# Raw sample outputs (contain real MAC addresses, hostnames, etc.)
+samples/raw/
+
+# Obfuscation mapping (contains the real→fake translation table)
+samples/obfuscation-table.sed
