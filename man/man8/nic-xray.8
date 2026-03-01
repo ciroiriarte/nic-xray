@@ -1,6 +1,6 @@
 .\" Man page for nic-xray.sh
 .\" Written in classic troff/groff format
-.TH NIC-XRAY 8 "2026-02-28" "nic-xray 2.4.1" "System Administration Commands"
+.TH NIC-XRAY 8 "2026-03-01" "nic-xray 2.5.0" "System Administration Commands"
 .SH NAME
 nic-xray \- detailed physical network interface diagnostics
 .SH SYNOPSIS
@@ -14,6 +14,7 @@ nic-xray \- detailed physical network interface diagnostics
 .IR up | down ]
 .RI [ \-s [ SEP ]| \-\-separator [= SEP ]]
 .RI [ \-\-group\-bond ]
+.RI [ \-m [ SEC ]| \-\-metrics [= SEC ]]
 .RI [ \-\-output
 .IR FORMAT ]
 .RI [ \-\-diagram\-out
@@ -105,6 +106,26 @@ as the column separator in table and CSV output.
 Sort rows by bond group, then by interface name within each group. Bonded
 interfaces are listed first (grouped by bond), followed by unbonded interfaces
 sorted alphabetically.
+.TP
+.BR \-m ", " \-\-metrics
+Sample real-time interface traffic metrics over a default window of 30 seconds.
+The script takes two snapshots of kernel NIC counters before and after the
+sampling window, then computes per-second bandwidth, packet rates, and
+absolute counts for drops, errors, and FIFO errors.
+.IP
+This flag is not included in
+.B \-\-all
+because it introduces a blocking sleep. Metrics require explicit opt-in.
+.TP
+.BR \-m \fISEC\fR ", " \-\-metrics= \fISEC\fR
+Set the metrics sampling duration to
+.I SEC
+seconds. Valid range is 1 to 3600.
+.IP
+For non-active-backup bonds with two or more members, a variance check is
+performed: if the minimum value among members is less than 70% of the maximum,
+the low member is highlighted in red. Active-backup bonds are excluded from
+this check since only one member carries traffic by design.
 .TP
 .BI \-\-output " FORMAT"
 Set the output format.
@@ -228,6 +249,29 @@ are appended when misconfigurations are detected.
 VLAN IDs from LLDP, with
 .B [P]
 indicating the port VLAN ID.
+.PP
+The following columns are shown when
+.B \-\-metrics
+is used:
+.TP
+.B Bandwidth
+Receive and transmit throughput in human-readable units (B/s, KB/s, MB/s,
+GB/s), computed from the sampling window.
+.TP
+.B Packets/s
+Receive and transmit packet rates per second.
+.TP
+.B Drops
+Receive and transmit packet drops during the sampling window. Highlighted in
+red if greater than zero.
+.TP
+.B Errors
+Receive and transmit errors during the sampling window. Highlighted in red if
+greater than zero.
+.TP
+.B FIFO Errors
+Receive and transmit FIFO (ring buffer overflow) errors during the sampling
+window. Highlighted in red if greater than zero.
 .SH OUTPUT FORMATS
 .SS Table (default)
 Columns are dynamically sized to fit the widest value. Color codes highlight
@@ -261,7 +305,10 @@ on the left with hostname
 with dashed blue borders grouping member interfaces and LACP status label
 .IP \(bu
 .B Interface nodes
-with colored border (green=UP, red=DOWN), showing interface name, MAC address, and MTU
+with colored border (green=UP, red=DOWN), showing interface name, MAC address, MTU,
+and optionally traffic metrics when
+.B \-\-metrics
+is active
 .IP \(bu
 .B Edge labels
 showing VLAN information near the NIC end and negotiated speed tier near
@@ -337,6 +384,11 @@ cycling through a palette to visually group member interfaces.
 .B LACP status
 Green for fully converged, yellow for partial, red for pending or mismatch
 warnings.
+.TP
+.B Metrics
+Drops, errors, and FIFO errors are red when greater than zero. For
+non-active-backup bonds, bandwidth and packet rates are red for members whose
+value is below 70% of the maximum within the bond (traffic imbalance).
 .SH REQUIREMENTS
 .B nic-xray.sh
 must be run as
@@ -527,6 +579,36 @@ Generate a PNG diagram with custom output path:
 .PP
 .RS
 .B sudo nic-xray.sh \-\-output png \-\-diagram\-out /tmp/network.png
+.RE
+.PP
+Sample real-time traffic metrics (30-second default):
+.PP
+.RS
+.B sudo nic-xray.sh \-\-metrics
+.RE
+.PP
+Sample metrics over a custom 5-second window:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-metrics=5
+.RE
+.PP
+Metrics with CSV output (raw numeric values):
+.PP
+.RS
+.B sudo nic-xray.sh \-\-metrics \-\-output csv
+.RE
+.PP
+Metrics with JSON output (nested metrics object):
+.PP
+.RS
+.B sudo nic-xray.sh \-\-metrics \-\-output json
+.RE
+.PP
+Metrics included in topology diagram:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-metrics \-\-output svg
 .RE
 .PP
 Display version:

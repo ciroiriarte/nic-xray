@@ -44,8 +44,15 @@
 #                         - Added bond-level LACP consistency validation:
 #                           Peer Mismatch and AE Mismatch detection
 #                         - Extracted LLDP PortAggregID for cross-member checks
-#   - 2026-02-28: v2.5.0 - Added watermark to DOT topology diagram
+#   - 2026-02-28: v2.4.1 - Added watermark to DOT topology diagram
 #                           (tool name, version, copyright)
+#   - 2026-03-01: v2.5.0 - Added --metrics flag for real-time traffic metrics:
+#                           bandwidth, packets/s, drops, errors, FIFO errors
+#                         - Metrics supported across all output formats
+#                           (table, CSV, JSON, DOT/SVG/PNG)
+#                         - Bond variance detection: flags imbalanced members
+#                           in non-active-backup bonds (< 70% of max → red)
+#                         - Progress bar during sampling window (table + TTY)
 #
 # Version: 2.5.0
 
@@ -65,11 +72,12 @@ SORT_BY_BOND=false
 USE_COLOR=true
 FILTER_LINK=""
 DIAGRAM_OUTPUT_FILE=""
+SHOW_METRICS=false
+METRICS_DURATION=30
 
 
 # Parse options using getopt
-OPTIONS=$(getopt -o hvs:: --long help,version,lacp,vlan,bmac,separator::,group-bond,output:,no-color,all,filter-link:,diagram-out: -n "$0" -- "$@")
-if [ $? -ne 0 ]; then
+if ! OPTIONS=$(getopt -o hvs::m:: --long help,version,lacp,vlan,bmac,separator::,group-bond,output:,no-color,all,filter-link:,diagram-out:,metrics:: -n "$0" -- "$@"); then
 	echo "Failed to parse options." >&2
 	exit 1
 fi
@@ -124,6 +132,18 @@ while true; do
 			esac
 			shift 2
 			;;
+		-m|--metrics)
+			SHOW_METRICS=true
+			if [[ -n "$2" ]]; then
+				if [[ "$2" =~ ^[0-9]+$ ]] && (( $2 >= 1 && $2 <= 3600 )); then
+					METRICS_DURATION="$2"
+				else
+					echo "Invalid metrics duration: $2. Must be an integer between 1 and 3600." >&2
+					exit 1
+				fi
+			fi
+			shift 2
+			;;
 		--group-bond)
 			SORT_BY_BOND=true
 			shift
@@ -151,8 +171,8 @@ while true; do
 		-h|--help)
 			echo -e "Usage: $0 [--lacp] [--vlan] [--bmac] [--all] [--no-color]"
 			echo -e "       [--filter-link up|down] [-s[SEP]|--separator[=SEP]]"
-			echo -e "       [--group-bond] [--output FORMAT] [--diagram-out FILE]"
-			echo -e "       [--help]"
+			echo -e "       [--group-bond] [-m[SEC]|--metrics[=SEC]]"
+			echo -e "       [--output FORMAT] [--diagram-out FILE] [--help]"
 			echo -e ""
 			echo -e "Version: $SCRIPT_VERSION"
 			echo -e ""
@@ -172,6 +192,9 @@ while true; do
 			echo -e " -sSEP, --separator=SEP"
 			echo -e "                     Use SEP as column separator in table and CSV output"
 			echo -e " --group-bond        Sort rows by bond group, then by interface name"
+			echo -e " -m, --metrics       Sample interface traffic metrics (default: 30s)"
+			echo -e " -mSEC, --metrics=SEC"
+			echo -e "                     Set sampling duration in seconds (1-3600)"
 			echo -e " --output TYPE       Output format: table (default), csv, json, dot, svg, or png"
 			echo -e "                     dot/svg/png generate a network topology diagram"
 			echo -e "                     svg/png require graphviz (dot command)"
@@ -267,7 +290,8 @@ strip_ansi() {
 pad_color() {
     local TEXT="$1"
     local WIDTH="$2"
-    local STRIPPED=$(strip_ansi "$TEXT")
+    local STRIPPED
+    STRIPPED=$(strip_ansi "$TEXT")
     local PAD=$((WIDTH - ${#STRIPPED}))
     printf "%b%*s" "$TEXT" "$PAD" ""
 }
@@ -324,6 +348,52 @@ colorize_speed() {
     printf "%b%s%b" "$COLOR" "$RAW" "$RESET_COLOR"
 }
 
+# --- Metrics Helpers ---
+
+# Read interface counters from /sys/class/net into associative arrays
+# Usage: read_iface_stats PREFIX IFACE_LIST...
+# Sets PREFIX_rx_bytes[IFACE], PREFIX_tx_bytes[IFACE], etc.
+read_iface_stats() {
+    local PREFIX="$1"
+    shift
+    local STATS_DIR IFACE VAL
+    for IFACE in "$@"; do
+        STATS_DIR="/sys/class/net/${IFACE}/statistics"
+        [[ ! -d "$STATS_DIR" ]] && continue
+        for COUNTER in rx_bytes tx_bytes rx_packets tx_packets \
+                       rx_dropped tx_dropped rx_errors tx_errors \
+                       rx_fifo_errors tx_fifo_errors; do
+            VAL=$(<"${STATS_DIR}/${COUNTER}") || VAL=0
+            eval "${PREFIX}_${COUNTER}[\"${IFACE}\"]=${VAL}"
+        done
+    done
+}
+
+# Convert bytes/s to human-readable bandwidth (pure bash)
+human_bandwidth() {
+    local BPS="$1"
+    if (( BPS >= 1073741824 )); then
+        local INT=$((BPS / 1073741824))
+        local FRAC=$(( (BPS % 1073741824) * 10 / 1073741824 ))
+        printf '%d.%d GB/s' "$INT" "$FRAC"
+    elif (( BPS >= 1048576 )); then
+        local INT=$((BPS / 1048576))
+        local FRAC=$(( (BPS % 1048576) * 10 / 1048576 ))
+        printf '%d.%d MB/s' "$INT" "$FRAC"
+    elif (( BPS >= 1024 )); then
+        local INT=$((BPS / 1024))
+        local FRAC=$(( (BPS % 1024) * 10 / 1024 ))
+        printf '%d.%d KB/s' "$INT" "$FRAC"
+    else
+        printf '%d B/s' "$BPS"
+    fi
+}
+
+# Check if a bond is in active-backup mode
+is_active_backup() {
+    [[ "${BOND_MODE_MAP[$1]}" == *"active-backup"* ]]
+}
+
 # --- Data Collection Arrays ---
 declare -a DATA_DEVICE DATA_DRIVER DATA_FIRMWARE DATA_IFACE DATA_MAC DATA_MTU
 declare -a DATA_LINK_PLAIN DATA_LINK_COLOR
@@ -333,10 +403,30 @@ declare -a DATA_BMAC
 declare -a DATA_LACP_PLAIN DATA_LACP_COLOR DATA_LACP_PEER
 declare -a DATA_LLDP_AGGID
 declare -a DATA_VLAN DATA_SWITCH DATA_PORT
+declare -A BOND_MODE_MAP
 ROW_COUNT=0
 
+# --- Metrics: Snapshot 1 (before data collection) ---
+if $SHOW_METRICS; then
+    declare -A S1_rx_bytes S1_tx_bytes S1_rx_packets S1_tx_packets
+    declare -A S1_rx_dropped S1_tx_dropped S1_rx_errors S1_tx_errors
+    declare -A S1_rx_fifo_errors S1_tx_fifo_errors
+    METRICS_IFACES=()
+    for _IFACE in /sys/class/net/*; do
+        _IFACE="${_IFACE##*/}"
+        [[ "$_IFACE" =~ ^(lo|vnet|virbr|br|bond|docker|tap|tun) ]] && continue
+        [[ "$_IFACE" == *.* ]] && continue
+        [[ ! -e "/sys/class/net/$_IFACE/device" ]] && continue
+        METRICS_IFACES+=("$_IFACE")
+    done
+    read_iface_stats "S1" "${METRICS_IFACES[@]}"
+    METRICS_START=$(date +%s)
+fi
+
 # --- Data Collection ---
-for IFACE in $(ls /sys/class/net/ | grep -vE 'lo|vnet|virbr|br|bond|docker|tap|tun'); do
+for _IFACE_PATH in /sys/class/net/*; do
+    IFACE="${_IFACE_PATH##*/}"
+    [[ "$IFACE" =~ ^(lo|vnet|virbr|br|bond|docker|tap|tun) ]] && continue
     [[ "$IFACE" == *.* ]] && continue
 
     DEVICE_PATH="/sys/class/net/$IFACE/device"
@@ -346,9 +436,9 @@ for IFACE in $(ls /sys/class/net/ | grep -vE 'lo|vnet|virbr|br|bond|docker|tap|t
     ETHTOOL_I=$(ethtool -i "$IFACE" 2>/dev/null)
     FIRMWARE=$(echo "$ETHTOOL_I" | awk -F': ' '/firmware-version/ {print $2}')
     DRIVER=$(echo "$ETHTOOL_I" | awk -F': ' '/^driver:/ {print $2}')
-    MTU=$(cat /sys/class/net/$IFACE/mtu 2>/dev/null)
+    MTU=$(cat "/sys/class/net/$IFACE/mtu" 2>/dev/null)
 
-    LINK_RAW=$(cat /sys/class/net/$IFACE/operstate 2>/dev/null)
+    LINK_RAW=$(cat "/sys/class/net/$IFACE/operstate" 2>/dev/null)
     if [[ "$LINK_RAW" == "up" ]]; then
         LINK_PLAIN="up"
         LINK_COLOR="${GREEN}up${RESET_COLOR}"
@@ -367,8 +457,8 @@ for IFACE in $(ls /sys/class/net/ | grep -vE 'lo|vnet|virbr|br|bond|docker|tap|t
     DUPLEX=$(echo "$ETHTOOL_OUT" | awk -F': ' '/Duplex:/ {print $2}' | sed 's/Unknown.*/N\/A/')
     SPEED_DUPLEX="${SPEED:-N/A} (${DUPLEX:-N/A})"
 
-    if [[ -L /sys/class/net/$IFACE/master ]]; then
-        BOND_MASTER=$(basename "$(readlink -f /sys/class/net/$IFACE/master)")
+    if [[ -L "/sys/class/net/$IFACE/master" ]]; then
+        BOND_MASTER=$(basename "$(readlink -f "/sys/class/net/$IFACE/master")")
     else
         BOND_MASTER="None"
     fi
@@ -378,14 +468,18 @@ for IFACE in $(ls /sys/class/net/ | grep -vE 'lo|vnet|virbr|br|bond|docker|tap|t
             BOND_COLORS[$BOND_MASTER]=${COLOR_CODES[$COLOR_INDEX]}
             ((COLOR_INDEX=(COLOR_INDEX+1)%${#COLOR_CODES[@]}))
         fi
+        # Detect bond mode (once per bond)
+        if [[ -z "${BOND_MODE_MAP[$BOND_MASTER]+x}" ]]; then
+            BOND_MODE_MAP["$BOND_MASTER"]=$(awk '/^Bonding Mode:/{$1=$2=""; sub(/^ +/,""); print}' "/proc/net/bonding/${BOND_MASTER}")
+        fi
         BOND_COLOR="${BOND_COLORS[$BOND_MASTER]}${BOND_MASTER}${RESET_COLOR}"
         BOND_PLAIN="$BOND_MASTER"
-        MAC=$(grep -E "Slave Interface: ${IFACE}|Permanent HW addr" /proc/net/bonding/${BOND_MASTER} |grep -A1 "Slave Interface: ${IFACE}"|tail -1|awk '{ print $4}' 2>/dev/null)
-        BMAC=$(grep "System MAC address" /proc/net/bonding/${BOND_MASTER}|awk '{ print $4 }' 2>/dev/null)
+        MAC=$(grep -E "Slave Interface: ${IFACE}|Permanent HW addr" "/proc/net/bonding/${BOND_MASTER}" |grep -A1 "Slave Interface: ${IFACE}"|tail -1|awk '{ print $4}' 2>/dev/null)
+        BMAC=$(grep "System MAC address" "/proc/net/bonding/${BOND_MASTER}"|awk '{ print $4 }' 2>/dev/null)
     else
         BOND_COLOR="$BOND_MASTER"
         BOND_PLAIN="$BOND_MASTER"
-        MAC=$(cat /sys/class/net/${IFACE}/address 2>/dev/null)
+        MAC=$(cat "/sys/class/net/${IFACE}/address" 2>/dev/null)
         BMAC="N/A"
     fi
 
@@ -416,7 +510,7 @@ for IFACE in $(ls /sys/class/net/ | grep -vE 'lo|vnet|virbr|br|bond|docker|tap|t
                 else
                     print "Pending"
             }
-        ' /proc/net/bonding/$BOND_MASTER)
+        ' "/proc/net/bonding/$BOND_MASTER")
 
         # Extract raw partner MAC for bond-level validation
         LACP_PEER=$(awk -v IFACE="$IFACE" '
@@ -425,7 +519,7 @@ for IFACE in $(ls /sys/class/net/ | grep -vE 'lo|vnet|virbr|br|bond|docker|tap|t
             in_iface && /^Slave Interface:/ { in_iface=0 }
             in_iface && /details partner lacp pdu:/ { in_partner=1; next }
             in_partner && /^[[:space:]]*system mac address:/ { print $4; exit }
-        ' /proc/net/bonding/$BOND_MASTER)
+        ' "/proc/net/bonding/$BOND_MASTER")
 
         if [[ "$LACP_PLAIN" == *"(Partial)"* ]]; then
             LACP_COLOR="${YELLOW}${LACP_PLAIN}${RESET_COLOR}"
@@ -454,34 +548,33 @@ for IFACE in $(ls /sys/class/net/ | grep -vE 'lo|vnet|virbr|br|bond|docker|tap|t
             [[ $PVID == "yes" ]] && VLAN_INFO+="${VLAN_ID}[P];" || VLAN_INFO+="${VLAN_ID};"
         done <<< "$(echo "$LLDP_OUTPUT" | grep 'VLAN:')"
         VLAN_INFO=${VLAN_INFO%, }
-	VLAN_INFO=$(echo ${VLAN_INFO}|sed 's/;$//g')
-	if [ "${VLAN_INFO}x" == "x" ]
-	then
+	VLAN_INFO="${VLAN_INFO%;}"
+	if [[ -z "$VLAN_INFO" ]]; then
 		VLAN_INFO="N/A"
 	fi
     fi
 
     # Store collected data
-    DATA_DEVICE[$ROW_COUNT]="$DEVICE"
-    DATA_DRIVER[$ROW_COUNT]="$DRIVER"
-    DATA_FIRMWARE[$ROW_COUNT]="$FIRMWARE"
-    DATA_IFACE[$ROW_COUNT]="$IFACE"
-    DATA_MAC[$ROW_COUNT]="$MAC"
-    DATA_MTU[$ROW_COUNT]="$MTU"
-    DATA_LINK_PLAIN[$ROW_COUNT]="$LINK_PLAIN"
-    DATA_LINK_COLOR[$ROW_COUNT]="$LINK_COLOR"
-    DATA_SPEED_PLAIN[$ROW_COUNT]="$SPEED_DUPLEX"
-    DATA_SPEED_COLOR[$ROW_COUNT]="$(colorize_speed "$SPEED_DUPLEX")"
-    DATA_BOND_PLAIN[$ROW_COUNT]="$BOND_PLAIN"
-    DATA_BOND_COLOR[$ROW_COUNT]="$BOND_COLOR"
-    DATA_BMAC[$ROW_COUNT]="$BMAC"
-    DATA_LACP_PLAIN[$ROW_COUNT]="$LACP_PLAIN"
-    DATA_LACP_COLOR[$ROW_COUNT]="$LACP_COLOR"
-    DATA_LACP_PEER[$ROW_COUNT]="$LACP_PEER"
-    DATA_LLDP_AGGID[$ROW_COUNT]="$LLDP_AGGID"
-    DATA_VLAN[$ROW_COUNT]="$VLAN_INFO"
-    DATA_SWITCH[$ROW_COUNT]="$SWITCH_NAME"
-    DATA_PORT[$ROW_COUNT]="$PORT_NAME"
+    DATA_DEVICE[ROW_COUNT]="$DEVICE"
+    DATA_DRIVER[ROW_COUNT]="$DRIVER"
+    DATA_FIRMWARE[ROW_COUNT]="$FIRMWARE"
+    DATA_IFACE[ROW_COUNT]="$IFACE"
+    DATA_MAC[ROW_COUNT]="$MAC"
+    DATA_MTU[ROW_COUNT]="$MTU"
+    DATA_LINK_PLAIN[ROW_COUNT]="$LINK_PLAIN"
+    DATA_LINK_COLOR[ROW_COUNT]="$LINK_COLOR"
+    DATA_SPEED_PLAIN[ROW_COUNT]="$SPEED_DUPLEX"
+    DATA_SPEED_COLOR[ROW_COUNT]="$(colorize_speed "$SPEED_DUPLEX")"
+    DATA_BOND_PLAIN[ROW_COUNT]="$BOND_PLAIN"
+    DATA_BOND_COLOR[ROW_COUNT]="$BOND_COLOR"
+    DATA_BMAC[ROW_COUNT]="$BMAC"
+    DATA_LACP_PLAIN[ROW_COUNT]="$LACP_PLAIN"
+    DATA_LACP_COLOR[ROW_COUNT]="$LACP_COLOR"
+    DATA_LACP_PEER[ROW_COUNT]="$LACP_PEER"
+    DATA_LLDP_AGGID[ROW_COUNT]="$LLDP_AGGID"
+    DATA_VLAN[ROW_COUNT]="$VLAN_INFO"
+    DATA_SWITCH[ROW_COUNT]="$SWITCH_NAME"
+    DATA_PORT[ROW_COUNT]="$PORT_NAME"
     ((ROW_COUNT++))
 done
 
@@ -516,8 +609,8 @@ if $SHOW_LACP; then
 
         if [[ $PEER_MAC_COUNT -gt 1 ]]; then
             for IDX in "${MEMBERS[@]}"; do
-                DATA_LACP_PLAIN[$IDX]="${DATA_LACP_PLAIN[$IDX]} [Peer Mismatch]"
-                DATA_LACP_COLOR[$IDX]="${RED}${DATA_LACP_PLAIN[$IDX]}${RESET_COLOR}"
+                DATA_LACP_PLAIN[IDX]="${DATA_LACP_PLAIN[IDX]} [Peer Mismatch]"
+                DATA_LACP_COLOR[IDX]="${RED}${DATA_LACP_PLAIN[IDX]}${RESET_COLOR}"
             done
         fi
 
@@ -525,8 +618,8 @@ if $SHOW_LACP; then
         # Group members by switch, then check for AggID mismatches
         declare -A SWITCH_AGGIDS
         for IDX in "${MEMBERS[@]}"; do
-            SW="${DATA_SWITCH[$IDX]}"
-            AGGID="${DATA_LLDP_AGGID[$IDX]}"
+            SW="${DATA_SWITCH[IDX]}"
+            AGGID="${DATA_LLDP_AGGID[IDX]}"
             [[ -z "$SW" || "$AGGID" == "N/A" ]] && continue
             if [[ -n "${SWITCH_AGGIDS[$SW]}" ]]; then
                 SWITCH_AGGIDS["$SW"]+=" $AGGID"
@@ -543,11 +636,11 @@ if $SHOW_LACP; then
             done
             if [[ ${#UNIQUE_AGGIDS[@]} -gt 1 ]]; then
                 for IDX in "${MEMBERS[@]}"; do
-                    [[ "${DATA_SWITCH[$IDX]}" != "$SW" ]] && continue
+                    [[ "${DATA_SWITCH[IDX]}" != "$SW" ]] && continue
                     # Only tag if not already flagged with Peer Mismatch
-                    if [[ "${DATA_LACP_PLAIN[$IDX]}" != *"Mismatch"* ]]; then
-                        DATA_LACP_PLAIN[$IDX]="${DATA_LACP_PLAIN[$IDX]} [AE Mismatch on ${SW}]"
-                        DATA_LACP_COLOR[$IDX]="${RED}${DATA_LACP_PLAIN[$IDX]}${RESET_COLOR}"
+                    if [[ "${DATA_LACP_PLAIN[IDX]}" != *"Mismatch"* ]]; then
+                        DATA_LACP_PLAIN[IDX]="${DATA_LACP_PLAIN[IDX]} [AE Mismatch on ${SW}]"
+                        DATA_LACP_COLOR[IDX]="${RED}${DATA_LACP_PLAIN[IDX]}${RESET_COLOR}"
                     fi
                 done
             fi
@@ -556,6 +649,243 @@ if $SHOW_LACP; then
         unset SWITCH_AGGIDS
     done
     unset BOND_MEMBER_INDICES
+fi
+
+# --- Metrics: Sleep, Snapshot 2, Delta Computation ---
+if $SHOW_METRICS; then
+    # Metrics data arrays (plain, color, and raw)
+    declare -a DATA_MET_BW_PLAIN DATA_MET_BW_COLOR
+    declare -a DATA_MET_PPS_PLAIN DATA_MET_PPS_COLOR
+    declare -a DATA_MET_DROP_PLAIN DATA_MET_DROP_COLOR
+    declare -a DATA_MET_ERR_PLAIN DATA_MET_ERR_COLOR
+    declare -a DATA_MET_FIFO_PLAIN DATA_MET_FIFO_COLOR
+    declare -a DATA_MET_RX_BPS DATA_MET_TX_BPS
+    declare -a DATA_MET_RX_PPS DATA_MET_TX_PPS
+    declare -a DATA_MET_RX_DROP DATA_MET_TX_DROP
+    declare -a DATA_MET_RX_ERR DATA_MET_TX_ERR
+    declare -a DATA_MET_RX_FIFO DATA_MET_TX_FIFO
+
+    # Compute remaining sleep time
+    METRICS_NOW=$(date +%s)
+    METRICS_ELAPSED_SO_FAR=$((METRICS_NOW - METRICS_START))
+    METRICS_REMAINING=$((METRICS_DURATION - METRICS_ELAPSED_SO_FAR))
+    (( METRICS_REMAINING < 0 )) && METRICS_REMAINING=0
+
+    # Sleep with progress bar (table format + TTY on stderr only)
+    if (( METRICS_REMAINING > 0 )); then
+        if [[ "$OUTPUT_FORMAT" == "table" && -t 2 ]]; then
+            for ((s = 1; s <= METRICS_REMAINING; s++)); do
+                TOTAL_ELAPSED=$((METRICS_ELAPSED_SO_FAR + s))
+                FILLED=$((TOTAL_ELAPSED * 30 / METRICS_DURATION))
+                EMPTY=$((30 - FILLED))
+                BAR=$(printf '%*s' "$FILLED" '' | tr ' ' '#')
+                BAR+=$(printf '%*s' "$EMPTY" '' | tr ' ' '.')
+                printf '\r📊 Sampling metrics: [%s] %d/%ds' "$BAR" "$TOTAL_ELAPSED" "$METRICS_DURATION" >&2
+                sleep 1
+            done
+            printf '\r%*s\r' 60 '' >&2
+        else
+            sleep "$METRICS_REMAINING"
+        fi
+    fi
+
+    # Snapshot 2
+    declare -A S2_rx_bytes S2_tx_bytes S2_rx_packets S2_tx_packets
+    declare -A S2_rx_dropped S2_tx_dropped S2_rx_errors S2_tx_errors
+    declare -A S2_rx_fifo_errors S2_tx_fifo_errors
+    read_iface_stats "S2" "${METRICS_IFACES[@]}"
+    METRICS_END=$(date +%s)
+    METRICS_ELAPSED=$((METRICS_END - METRICS_START))
+    (( METRICS_ELAPSED < 1 )) && METRICS_ELAPSED=1
+
+    # Delta computation per row
+    for ((i = 0; i < ROW_COUNT; i++)); do
+        local_iface="${DATA_IFACE[i]}"
+
+        # Compute raw deltas (clamp negative to 0 for 32-bit counter wraps)
+        D_RX_BYTES=$(( S2_rx_bytes["$local_iface"] - S1_rx_bytes["$local_iface"] ))
+        D_TX_BYTES=$(( S2_tx_bytes["$local_iface"] - S1_tx_bytes["$local_iface"] ))
+        D_RX_PKTS=$(( S2_rx_packets["$local_iface"] - S1_rx_packets["$local_iface"] ))
+        D_TX_PKTS=$(( S2_tx_packets["$local_iface"] - S1_tx_packets["$local_iface"] ))
+        D_RX_DROP=$(( S2_rx_dropped["$local_iface"] - S1_rx_dropped["$local_iface"] ))
+        D_TX_DROP=$(( S2_tx_dropped["$local_iface"] - S1_tx_dropped["$local_iface"] ))
+        D_RX_ERR=$(( S2_rx_errors["$local_iface"] - S1_rx_errors["$local_iface"] ))
+        D_TX_ERR=$(( S2_tx_errors["$local_iface"] - S1_tx_errors["$local_iface"] ))
+        D_RX_FIFO=$(( S2_rx_fifo_errors["$local_iface"] - S1_rx_fifo_errors["$local_iface"] ))
+        D_TX_FIFO=$(( S2_tx_fifo_errors["$local_iface"] - S1_tx_fifo_errors["$local_iface"] ))
+
+        # Clamp negative deltas (counter wrap)
+        (( D_RX_BYTES < 0 )) && D_RX_BYTES=0
+        (( D_TX_BYTES < 0 )) && D_TX_BYTES=0
+        (( D_RX_PKTS < 0 )) && D_RX_PKTS=0
+        (( D_TX_PKTS < 0 )) && D_TX_PKTS=0
+        (( D_RX_DROP < 0 )) && D_RX_DROP=0
+        (( D_TX_DROP < 0 )) && D_TX_DROP=0
+        (( D_RX_ERR < 0 )) && D_RX_ERR=0
+        (( D_TX_ERR < 0 )) && D_TX_ERR=0
+        (( D_RX_FIFO < 0 )) && D_RX_FIFO=0
+        (( D_TX_FIFO < 0 )) && D_TX_FIFO=0
+
+        # Rates (per second)
+        RX_BPS=$((D_RX_BYTES / METRICS_ELAPSED))
+        TX_BPS=$((D_TX_BYTES / METRICS_ELAPSED))
+        RX_PPS=$((D_RX_PKTS / METRICS_ELAPSED))
+        TX_PPS=$((D_TX_PKTS / METRICS_ELAPSED))
+
+        # Store raw values
+        DATA_MET_RX_BPS[i]=$RX_BPS
+        DATA_MET_TX_BPS[i]=$TX_BPS
+        DATA_MET_RX_PPS[i]=$RX_PPS
+        DATA_MET_TX_PPS[i]=$TX_PPS
+        DATA_MET_RX_DROP[i]=$D_RX_DROP
+        DATA_MET_TX_DROP[i]=$D_TX_DROP
+        DATA_MET_RX_ERR[i]=$D_RX_ERR
+        DATA_MET_TX_ERR[i]=$D_TX_ERR
+        DATA_MET_RX_FIFO[i]=$D_RX_FIFO
+        DATA_MET_TX_FIFO[i]=$D_TX_FIFO
+
+        # Plain compound strings for table display
+        RX_BW_STR=$(human_bandwidth "$RX_BPS")
+        TX_BW_STR=$(human_bandwidth "$TX_BPS")
+        DATA_MET_BW_PLAIN[i]="Rx:${RX_BW_STR} Tx:${TX_BW_STR}"
+
+        DATA_MET_PPS_PLAIN[i]="Rx:${RX_PPS} Tx:${TX_PPS}"
+
+        DATA_MET_DROP_PLAIN[i]="Rx:${D_RX_DROP} Tx:${D_TX_DROP}"
+        DATA_MET_ERR_PLAIN[i]="Rx:${D_RX_ERR} Tx:${D_TX_ERR}"
+        DATA_MET_FIFO_PLAIN[i]="Rx:${D_RX_FIFO} Tx:${D_TX_FIFO}"
+
+        # Color strings — drops/errors/fifo: RED if > 0
+        RX_BW_CLR="${RX_BW_STR}"
+        TX_BW_CLR="${TX_BW_STR}"
+        RX_PPS_CLR="${RX_PPS}"
+        TX_PPS_CLR="${TX_PPS}"
+
+        if (( D_RX_DROP > 0 )); then
+            RX_DROP_CLR="${RED}${D_RX_DROP}${RESET_COLOR}"
+        else
+            RX_DROP_CLR="${D_RX_DROP}"
+        fi
+        if (( D_TX_DROP > 0 )); then
+            TX_DROP_CLR="${RED}${D_TX_DROP}${RESET_COLOR}"
+        else
+            TX_DROP_CLR="${D_TX_DROP}"
+        fi
+        DATA_MET_DROP_COLOR[i]="Rx:${RX_DROP_CLR} Tx:${TX_DROP_CLR}"
+
+        if (( D_RX_ERR > 0 )); then
+            RX_ERR_CLR="${RED}${D_RX_ERR}${RESET_COLOR}"
+        else
+            RX_ERR_CLR="${D_RX_ERR}"
+        fi
+        if (( D_TX_ERR > 0 )); then
+            TX_ERR_CLR="${RED}${D_TX_ERR}${RESET_COLOR}"
+        else
+            TX_ERR_CLR="${D_TX_ERR}"
+        fi
+        DATA_MET_ERR_COLOR[i]="Rx:${RX_ERR_CLR} Tx:${TX_ERR_CLR}"
+
+        if (( D_RX_FIFO > 0 )); then
+            RX_FIFO_CLR="${RED}${D_RX_FIFO}${RESET_COLOR}"
+        else
+            RX_FIFO_CLR="${D_RX_FIFO}"
+        fi
+        if (( D_TX_FIFO > 0 )); then
+            TX_FIFO_CLR="${RED}${D_TX_FIFO}${RESET_COLOR}"
+        else
+            TX_FIFO_CLR="${D_TX_FIFO}"
+        fi
+        DATA_MET_FIFO_COLOR[i]="Rx:${RX_FIFO_CLR} Tx:${TX_FIFO_CLR}"
+
+        # Bandwidth and PPS color (initially no color; bond variance applied next)
+        DATA_MET_BW_COLOR[i]="Rx:${RX_BW_CLR} Tx:${TX_BW_CLR}"
+        DATA_MET_PPS_COLOR[i]="Rx:${RX_PPS_CLR} Tx:${TX_PPS_CLR}"
+    done
+
+    # --- Bond variance check ---
+    # For non-active-backup bonds with >=2 members, flag if min < 70% of max
+    declare -A MET_BOND_MEMBERS
+    for ((i = 0; i < ROW_COUNT; i++)); do
+        local_bond="${DATA_BOND_PLAIN[i]}"
+        [[ "$local_bond" == "None" ]] && continue
+        MET_BOND_MEMBERS["$local_bond"]+="$i "
+    done
+
+    # Helper: get metric value for a given index
+    _met_val() {
+        local metric="$1" idx="$2"
+        case "$metric" in
+            RX_BPS) echo "${DATA_MET_RX_BPS[idx]}" ;;
+            TX_BPS) echo "${DATA_MET_TX_BPS[idx]}" ;;
+            RX_PPS) echo "${DATA_MET_RX_PPS[idx]}" ;;
+            TX_PPS) echo "${DATA_MET_TX_PPS[idx]}" ;;
+        esac
+    }
+
+    for BOND_NAME in "${!MET_BOND_MEMBERS[@]}"; do
+        is_active_backup "$BOND_NAME" && continue
+        read -ra MBR_INDICES <<< "${MET_BOND_MEMBERS[$BOND_NAME]}"
+        [[ ${#MBR_INDICES[@]} -lt 2 ]] && continue
+
+        # Check 4 metrics: RX_BPS, TX_BPS, RX_PPS, TX_PPS
+        for METRIC in RX_BPS TX_BPS RX_PPS TX_PPS; do
+            MIN_VAL=999999999999999 MAX_VAL=0
+            for IDX in "${MBR_INDICES[@]}"; do
+                MVAL=$(_met_val "$METRIC" "$IDX")
+                (( MVAL < MIN_VAL )) && MIN_VAL=$MVAL
+                (( MVAL > MAX_VAL )) && MAX_VAL=$MVAL
+            done
+
+            # Skip if max is 0 (no traffic)
+            (( MAX_VAL == 0 )) && continue
+
+            # Check if min < 70% of max
+            THRESHOLD=$(( MAX_VAL * 70 / 100 ))
+            (( MIN_VAL >= THRESHOLD )) && continue
+
+            # Flag minimum value(s) with RED
+            for IDX in "${MBR_INDICES[@]}"; do
+                MVAL=$(_met_val "$METRIC" "$IDX")
+                (( MVAL > THRESHOLD )) && continue
+
+                # Rebuild the color string for this index
+                case "$METRIC" in
+                    RX_BPS)
+                        RX_STR="${RED}$(human_bandwidth "${DATA_MET_RX_BPS[IDX]}")${RESET_COLOR}"
+                        TX_STR=$(human_bandwidth "${DATA_MET_TX_BPS[IDX]}")
+                        # Preserve TX color if it was already flagged
+                        if [[ "${DATA_MET_BW_COLOR[IDX]}" == *$'\033'*"Tx:"* ]]; then
+                            TX_PART="${DATA_MET_BW_COLOR[IDX]#*Tx:}"
+                            DATA_MET_BW_COLOR[IDX]="Rx:${RX_STR} Tx:${TX_PART}"
+                        else
+                            DATA_MET_BW_COLOR[IDX]="Rx:${RX_STR} Tx:${TX_STR}"
+                        fi
+                        ;;
+                    TX_BPS)
+                        RX_PART="${DATA_MET_BW_COLOR[IDX]%%Tx:*}"
+                        TX_STR="${RED}$(human_bandwidth "${DATA_MET_TX_BPS[IDX]}")${RESET_COLOR}"
+                        DATA_MET_BW_COLOR[IDX]="${RX_PART}Tx:${TX_STR}"
+                        ;;
+                    RX_PPS)
+                        RX_STR="${RED}${DATA_MET_RX_PPS[IDX]}${RESET_COLOR}"
+                        TX_STR="${DATA_MET_TX_PPS[IDX]}"
+                        if [[ "${DATA_MET_PPS_COLOR[IDX]}" == *$'\033'*"Tx:"* ]]; then
+                            TX_PART="${DATA_MET_PPS_COLOR[IDX]#*Tx:}"
+                            DATA_MET_PPS_COLOR[IDX]="Rx:${RX_STR} Tx:${TX_PART}"
+                        else
+                            DATA_MET_PPS_COLOR[IDX]="Rx:${RX_STR} Tx:${TX_STR}"
+                        fi
+                        ;;
+                    TX_PPS)
+                        RX_PART="${DATA_MET_PPS_COLOR[IDX]%%Tx:*}"
+                        TX_STR="${RED}${DATA_MET_TX_PPS[IDX]}${RESET_COLOR}"
+                        DATA_MET_PPS_COLOR[IDX]="${RX_PART}Tx:${TX_STR}"
+                        ;;
+                esac
+            done
+        done
+    done
+    unset MET_BOND_MEMBERS
 fi
 
 # --- Compute Dynamic Column Widths ---
@@ -573,6 +903,14 @@ COL_W_LACP=$(max_width "LACP Status" "${DATA_LACP_PLAIN[@]}")
 COL_W_VLAN=$(max_width "VLAN" "${DATA_VLAN[@]}")
 COL_W_SWITCH=$(max_width "Switch Name" "${DATA_SWITCH[@]}")
 COL_W_PORT=$(max_width "Port Name" "${DATA_PORT[@]}")
+
+if $SHOW_METRICS; then
+    COL_W_MET_BW=$(max_width "Bandwidth" "${DATA_MET_BW_PLAIN[@]}")
+    COL_W_MET_PPS=$(max_width "Packets/s" "${DATA_MET_PPS_PLAIN[@]}")
+    COL_W_MET_DROP=$(max_width "Drops" "${DATA_MET_DROP_PLAIN[@]}")
+    COL_W_MET_ERR=$(max_width "Errors" "${DATA_MET_ERR_PLAIN[@]}")
+    COL_W_MET_FIFO=$(max_width "FIFO Errors" "${DATA_MET_FIFO_PLAIN[@]}")
+fi
 
 # --- Column Gap ---
 if [[ -n "${FIELD_SEP}" ]]; then
@@ -596,7 +934,7 @@ if $SORT_BY_BOND; then
         fi
     done
     # Sort bond names
-    IFS=$'\n' SORTED_BONDS=($(sort <<< "${UNIQUE_BONDS[*]}")); unset IFS
+    mapfile -t SORTED_BONDS < <(printf '%s\n' "${UNIQUE_BONDS[@]}" | sort)
 
     # Append indices for each bond (sorted)
     for BOND in "${SORTED_BONDS[@]}"; do
@@ -611,7 +949,7 @@ if $SORT_BY_BOND; then
         [[ "${DATA_BOND_PLAIN[$i]}" == "None" ]] && UNBONDED_PAIRS+=("${DATA_IFACE[$i]} $i")
     done
     if [[ ${#UNBONDED_PAIRS[@]} -gt 0 ]]; then
-        IFS=$'\n' UNBONDED_PAIRS=($(sort <<< "${UNBONDED_PAIRS[*]}")); unset IFS
+        mapfile -t UNBONDED_PAIRS < <(printf '%s\n' "${UNBONDED_PAIRS[@]}" | sort)
         for ENTRY in "${UNBONDED_PAIRS[@]}"; do
             RENDER_ORDER+=("${ENTRY##* }")
         done
@@ -706,9 +1044,11 @@ generate_dot() {
     local GRAY_COLOR="#6c7086"
     local TEXT_COLOR="#cdd6f4"
     local SUBTEXT_COLOR="#a6adc8"
+    local RX_ARROW_COLOR="#a6e3a1"   # Green — receive
+    local TX_ARROW_COLOR="#89b4fa"   # Blue — transmit
 
     # Per-bond color palette (Catppuccin Mocha accents)
-    local BOND_COLORS=(
+    local -a DOT_BOND_COLORS=(
         "#89b4fa"   # Blue
         "#f9e2af"   # Yellow
         "#94e2d5"   # Teal
@@ -723,7 +1063,6 @@ generate_dot() {
     declare -A BOND_MEMBERS  # bond_name -> space-separated row indices
     declare -a STANDALONE_INDICES
     declare -A SEEN_SWITCHES  # switch_name -> 1
-    declare -A SWITCH_PORTS   # "switch|port" -> row index (for unique port nodes)
     declare -A BOND_COLOR_MAP # bond_name -> color
 
     for ((i = 0; i < ROW_COUNT; i++)); do
@@ -735,19 +1074,15 @@ generate_dot() {
         fi
 
         local SW="${DATA_SWITCH[$i]}"
-        local PORT="${DATA_PORT[$i]}"
         if [[ -n "$SW" ]]; then
             SEEN_SWITCHES["$SW"]=1
-            if [[ -n "$PORT" ]]; then
-                SWITCH_PORTS["${SW}|${PORT}"]="$i"
-            fi
         fi
     done
 
     # Assign colors to bonds in sorted order
     local COLOR_IDX=0
     for BOND_NAME in $(printf '%s\n' "${!BOND_MEMBERS[@]}" | sort); do
-        BOND_COLOR_MAP["$BOND_NAME"]="${BOND_COLORS[$((COLOR_IDX % ${#BOND_COLORS[@]}))]}"
+        BOND_COLOR_MAP["$BOND_NAME"]="${DOT_BOND_COLORS[$((COLOR_IDX % ${#DOT_BOND_COLORS[@]}))]}"
         ((COLOR_IDX++))
     done
 
@@ -782,12 +1117,13 @@ DOTHEADER
     # --- Bond clusters with member interface nodes ---
     local CLUSTER_IDX=0
     for BOND_NAME in $(printf '%s\n' "${!BOND_MEMBERS[@]}" | sort); do
-        local MEMBERS="${BOND_MEMBERS[$BOND_NAME]}"
+        local -a MEMBERS_ARR
+        read -ra MEMBERS_ARR <<< "${BOND_MEMBERS[$BOND_NAME]}"
         local BOND_CLR="${BOND_COLOR_MAP[$BOND_NAME]}"
 
         # Determine LACP status label for the bond
         local LACP_LABEL=""
-        for IDX in $MEMBERS; do
+        for IDX in "${MEMBERS_ARR[@]}"; do
             local LACP="${DATA_LACP_PLAIN[$IDX]}"
             if [[ "$LACP" == *"Mismatch"* ]]; then
                 LACP_LABEL="LACP Mismatch"
@@ -811,7 +1147,7 @@ DOTHEADER
             "$(dot_escape "$BOND_NAME")" "$(dot_escape "$LACP_LABEL")"
         printf '        penwidth=1.5;\n\n'
 
-        for IDX in $MEMBERS; do
+        for IDX in "${MEMBERS_ARR[@]}"; do
             local IFACE="${DATA_IFACE[$IDX]}"
             local MAC="${DATA_MAC[$IDX]}"
             local LINK="${DATA_LINK_PLAIN[$IDX]}"
@@ -836,6 +1172,27 @@ DOTHEADER
                 "$SUBTEXT_COLOR" "$(dot_escape "$MAC")"
             printf '            <TR><TD><FONT POINT-SIZE="9" COLOR="%s">MTU: %s</FONT></TD></TR>\n' \
                 "$SUBTEXT_COLOR" "$(dot_escape "$MTU")"
+            if $SHOW_METRICS; then
+                local RX_BW TX_BW RX_BW_CLR TX_BW_CLR
+                RX_BW=$(human_bandwidth "${DATA_MET_RX_BPS[$IDX]}")
+                TX_BW=$(human_bandwidth "${DATA_MET_TX_BPS[$IDX]}")
+                # Check if bond variance flagged this value (RED in color string)
+                RX_BW_CLR="$SUBTEXT_COLOR"
+                TX_BW_CLR="$SUBTEXT_COLOR"
+                [[ "${DATA_MET_BW_COLOR[$IDX]}" == *$'\033[1;31m'*"Rx:"* ]] && RX_BW_CLR="$RED_COLOR"
+                [[ "${DATA_MET_BW_COLOR[$IDX]}" == *"Tx:"*$'\033[1;31m'* ]] && TX_BW_CLR="$RED_COLOR"
+                printf '            <TR><TD><FONT POINT-SIZE="11" COLOR="%s"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="%s">%s</FONT> <FONT POINT-SIZE="11" COLOR="%s"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
+                    "$RX_ARROW_COLOR" "$RX_BW_CLR" "$(dot_escape "$RX_BW")" "$TX_ARROW_COLOR" "$TX_BW_CLR" "$(dot_escape "$TX_BW")"
+                # Error row (only if any > 0)
+                local TOTAL_ERR=$(( DATA_MET_RX_DROP[IDX] + DATA_MET_TX_DROP[IDX] + DATA_MET_RX_ERR[IDX] + DATA_MET_TX_ERR[IDX] + DATA_MET_RX_FIFO[IDX] + DATA_MET_TX_FIFO[IDX] ))
+                if (( TOTAL_ERR > 0 )); then
+                    printf '            <TR><TD><FONT POINT-SIZE="8" COLOR="%s">Drop:%d/Err:%d/FIFO:%d</FONT></TD></TR>\n' \
+                        "$RED_COLOR" \
+                        "$(( DATA_MET_RX_DROP[IDX] + DATA_MET_TX_DROP[IDX] ))" \
+                        "$(( DATA_MET_RX_ERR[IDX] + DATA_MET_TX_ERR[IDX] ))" \
+                        "$(( DATA_MET_RX_FIFO[IDX] + DATA_MET_TX_FIFO[IDX] ))"
+                fi
+            fi
             printf '            </TABLE>\n'
             printf '        >];\n'
         done
@@ -870,6 +1227,22 @@ DOTHEADER
             "$SUBTEXT_COLOR" "$(dot_escape "$MAC")"
         printf '        <TR><TD><FONT POINT-SIZE="9" COLOR="%s">MTU: %s</FONT></TD></TR>\n' \
             "$SUBTEXT_COLOR" "$(dot_escape "$MTU")"
+        if $SHOW_METRICS; then
+            local RX_BW TX_BW
+            RX_BW=$(human_bandwidth "${DATA_MET_RX_BPS[$IDX]}")
+            TX_BW=$(human_bandwidth "${DATA_MET_TX_BPS[$IDX]}")
+            printf '        <TR><TD><FONT POINT-SIZE="11" COLOR="%s"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="%s">%s</FONT> <FONT POINT-SIZE="11" COLOR="%s"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
+                "$RX_ARROW_COLOR" "$SUBTEXT_COLOR" "$(dot_escape "$RX_BW")" "$TX_ARROW_COLOR" "$SUBTEXT_COLOR" "$(dot_escape "$TX_BW")"
+            # Error row (only if any > 0)
+            local TOTAL_ERR=$(( DATA_MET_RX_DROP[IDX] + DATA_MET_TX_DROP[IDX] + DATA_MET_RX_ERR[IDX] + DATA_MET_TX_ERR[IDX] + DATA_MET_RX_FIFO[IDX] + DATA_MET_TX_FIFO[IDX] ))
+            if (( TOTAL_ERR > 0 )); then
+                printf '        <TR><TD><FONT POINT-SIZE="8" COLOR="%s">Drop:%d/Err:%d/FIFO:%d</FONT></TD></TR>\n' \
+                    "$RED_COLOR" \
+                    "$(( DATA_MET_RX_DROP[IDX] + DATA_MET_TX_DROP[IDX] ))" \
+                    "$(( DATA_MET_RX_ERR[IDX] + DATA_MET_TX_ERR[IDX] ))" \
+                    "$(( DATA_MET_RX_FIFO[IDX] + DATA_MET_TX_FIFO[IDX] ))"
+            fi
+        fi
         printf '        </TABLE>\n'
         printf '    >];\n\n'
     done
@@ -1063,12 +1436,22 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
     ${SHOW_BMAC} && printf "${COL_GAP}%-${COL_W_BMAC}s" "Bond MAC"
     ${SHOW_LACP} && printf "${COL_GAP}%-${COL_W_LACP}s" "LACP Status"
     ${SHOW_VLAN} && printf "${COL_GAP}%-${COL_W_VLAN}s" "VLAN"
+    if ${SHOW_METRICS}; then
+        printf "${COL_GAP}%-${COL_W_MET_BW}s" "Bandwidth"
+        printf "${COL_GAP}%-${COL_W_MET_PPS}s" "Packets/s"
+        printf "${COL_GAP}%-${COL_W_MET_DROP}s" "Drops"
+        printf "${COL_GAP}%-${COL_W_MET_ERR}s" "Errors"
+        printf "${COL_GAP}%-${COL_W_MET_FIFO}s" "FIFO Errors"
+    fi
     printf "${COL_GAP}%-${COL_W_SWITCH}s${COL_GAP}%s\n" "Switch Name" "Port Name"
     # Separator line
     SEP_WIDTH=$((COL_W_DEVICE + COL_GAP_WIDTH + COL_W_DRIVER + COL_GAP_WIDTH + COL_W_FIRMWARE + COL_GAP_WIDTH + COL_W_IFACE + COL_GAP_WIDTH + COL_W_MAC + COL_GAP_WIDTH + COL_W_MTU + COL_GAP_WIDTH + COL_W_LINK + COL_GAP_WIDTH + COL_W_SPEED + COL_GAP_WIDTH + COL_W_BOND))
     ${SHOW_BMAC} && SEP_WIDTH=$((SEP_WIDTH + COL_GAP_WIDTH + COL_W_BMAC))
     ${SHOW_LACP} && SEP_WIDTH=$((SEP_WIDTH + COL_GAP_WIDTH + COL_W_LACP))
     ${SHOW_VLAN} && SEP_WIDTH=$((SEP_WIDTH + COL_GAP_WIDTH + COL_W_VLAN))
+    if ${SHOW_METRICS}; then
+        SEP_WIDTH=$((SEP_WIDTH + COL_GAP_WIDTH + COL_W_MET_BW + COL_GAP_WIDTH + COL_W_MET_PPS + COL_GAP_WIDTH + COL_W_MET_DROP + COL_GAP_WIDTH + COL_W_MET_ERR + COL_GAP_WIDTH + COL_W_MET_FIFO))
+    fi
     SEP_WIDTH=$((SEP_WIDTH + COL_GAP_WIDTH + COL_W_SWITCH + COL_GAP_WIDTH + COL_W_PORT))
     printf '%*s\n' "$SEP_WIDTH" '' | tr ' ' '-'
     # Data rows
@@ -1076,20 +1459,35 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
         printf "%-${COL_W_DEVICE}s${COL_GAP}%-${COL_W_DRIVER}s${COL_GAP}%-${COL_W_FIRMWARE}s${COL_GAP}%-${COL_W_IFACE}s${COL_GAP}%-${COL_W_MAC}s${COL_GAP}%-${COL_W_MTU}s${COL_GAP}" \
             "${DATA_DEVICE[$i]}" "${DATA_DRIVER[$i]}" "${DATA_FIRMWARE[$i]}" "${DATA_IFACE[$i]}" "${DATA_MAC[$i]}" "${DATA_MTU[$i]}"
         pad_color "${DATA_LINK_COLOR[$i]}" "$COL_W_LINK"
-        printf "${COL_GAP}"
+        printf '%s' "${COL_GAP}"
         pad_color "${DATA_SPEED_COLOR[$i]}" "$COL_W_SPEED"
-        printf "${COL_GAP}"
+        printf '%s' "${COL_GAP}"
         pad_color "${DATA_BOND_COLOR[$i]}" "$COL_W_BOND"
         if ${SHOW_BMAC}; then
             printf "${COL_GAP}%-${COL_W_BMAC}s" "${DATA_BMAC[$i]}"
         fi
         if ${SHOW_LACP}; then
-            printf "${COL_GAP}"
+            printf '%s' "${COL_GAP}"
             pad_color "${DATA_LACP_COLOR[$i]}" "$COL_W_LACP"
         fi
         ${SHOW_VLAN} && printf "${COL_GAP}%-${COL_W_VLAN}s" "${DATA_VLAN[$i]}"
+        if ${SHOW_METRICS}; then
+            printf '%s' "${COL_GAP}"
+            pad_color "${DATA_MET_BW_COLOR[$i]}" "$COL_W_MET_BW"
+            printf '%s' "${COL_GAP}"
+            pad_color "${DATA_MET_PPS_COLOR[$i]}" "$COL_W_MET_PPS"
+            printf '%s' "${COL_GAP}"
+            pad_color "${DATA_MET_DROP_COLOR[$i]}" "$COL_W_MET_DROP"
+            printf '%s' "${COL_GAP}"
+            pad_color "${DATA_MET_ERR_COLOR[$i]}" "$COL_W_MET_ERR"
+            printf '%s' "${COL_GAP}"
+            pad_color "${DATA_MET_FIFO_COLOR[$i]}" "$COL_W_MET_FIFO"
+        fi
         printf "${COL_GAP}%-${COL_W_SWITCH}s${COL_GAP}%s\n" "${DATA_SWITCH[$i]}" "${DATA_PORT[$i]}"
     done
+    if ${SHOW_METRICS}; then
+        printf '\n📊 Metrics sampled over %ds\n' "$METRICS_ELAPSED"
+    fi
 elif [[ "${OUTPUT_FORMAT}" == "csv" ]]; then
     FS="${FIELD_SEP:-,}"
     # CSV Header
@@ -1097,6 +1495,12 @@ elif [[ "${OUTPUT_FORMAT}" == "csv" ]]; then
     ${SHOW_BMAC} && printf "${FS}%s" "Bond MAC"
     ${SHOW_LACP} && printf "${FS}%s" "LACP Status"
     ${SHOW_VLAN} && printf "${FS}%s" "VLAN"
+    if ${SHOW_METRICS}; then
+        printf "${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
+            "Rx Bytes/s" "Tx Bytes/s" "Rx Packets/s" "Tx Packets/s" \
+            "Rx Drops" "Tx Drops" "Rx Errors" "Tx Errors" \
+            "Rx FIFO Errors" "Tx FIFO Errors" "Sample Duration"
+    fi
     printf "${FS}%s${FS}%s\n" "Switch Name" "Port Name"
     # CSV Data rows
     for i in "${RENDER_ORDER[@]}"; do
@@ -1106,6 +1510,15 @@ elif [[ "${OUTPUT_FORMAT}" == "csv" ]]; then
         ${SHOW_BMAC} && printf "${FS}%s" "${DATA_BMAC[$i]}"
         ${SHOW_LACP} && printf "${FS}%s" "${DATA_LACP_PLAIN[$i]}"
         ${SHOW_VLAN} && printf "${FS}%s" "${DATA_VLAN[$i]}"
+        if ${SHOW_METRICS}; then
+            printf "${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
+                "${DATA_MET_RX_BPS[$i]}" "${DATA_MET_TX_BPS[$i]}" \
+                "${DATA_MET_RX_PPS[$i]}" "${DATA_MET_TX_PPS[$i]}" \
+                "${DATA_MET_RX_DROP[$i]}" "${DATA_MET_TX_DROP[$i]}" \
+                "${DATA_MET_RX_ERR[$i]}" "${DATA_MET_TX_ERR[$i]}" \
+                "${DATA_MET_RX_FIFO[$i]}" "${DATA_MET_TX_FIFO[$i]}" \
+                "${METRICS_ELAPSED}"
+        fi
         printf "${FS}%s${FS}%s\n" "${DATA_SWITCH[$i]}" "${DATA_PORT[$i]}"
     done
 elif [[ "${OUTPUT_FORMAT}" == "json" ]]; then
@@ -1130,6 +1543,21 @@ elif [[ "${OUTPUT_FORMAT}" == "json" ]]; then
         fi
         if ${SHOW_VLAN}; then
             printf ',\n    "vlan": "%s"' "$(json_escape "${DATA_VLAN[$i]}")"
+        fi
+        if ${SHOW_METRICS}; then
+            printf ',\n    "metrics": {\n'
+            printf '      "sample_duration_seconds": %s,\n' "$METRICS_ELAPSED"
+            printf '      "rx_bytes_per_sec": %s,\n' "${DATA_MET_RX_BPS[$i]}"
+            printf '      "tx_bytes_per_sec": %s,\n' "${DATA_MET_TX_BPS[$i]}"
+            printf '      "rx_packets_per_sec": %s,\n' "${DATA_MET_RX_PPS[$i]}"
+            printf '      "tx_packets_per_sec": %s,\n' "${DATA_MET_TX_PPS[$i]}"
+            printf '      "rx_drops": %s,\n' "${DATA_MET_RX_DROP[$i]}"
+            printf '      "tx_drops": %s,\n' "${DATA_MET_TX_DROP[$i]}"
+            printf '      "rx_errors": %s,\n' "${DATA_MET_RX_ERR[$i]}"
+            printf '      "tx_errors": %s,\n' "${DATA_MET_TX_ERR[$i]}"
+            printf '      "rx_fifo_errors": %s,\n' "${DATA_MET_RX_FIFO[$i]}"
+            printf '      "tx_fifo_errors": %s\n' "${DATA_MET_TX_FIFO[$i]}"
+            printf '    }'
         fi
         printf ',\n    "switch_name": "%s"' "$(json_escape "${DATA_SWITCH[$i]}")"
         printf ',\n    "port_name": "%s"' "$(json_escape "${DATA_PORT[$i]}")"

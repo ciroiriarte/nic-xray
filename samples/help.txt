@@ -1,9 +1,9 @@
 Usage: nic-xray.sh [--lacp] [--vlan] [--bmac] [--all] [--no-color]
        [--filter-link up|down] [-s[SEP]|--separator[=SEP]]
-       [--group-bond] [--output FORMAT] [--diagram-out FILE]
-       [--help]
+       [--group-bond] [-m[SEC]|--metrics[=SEC]]
+       [--output FORMAT] [--diagram-out FILE] [--help]
 
-Version: 2.4.0
+Version: 2.5.0
 
 Description:
  Lists physical network interfaces with detailed information including:
@@ -21,6 +21,9 @@ Options:
  -sSEP, --separator=SEP
                      Use SEP as column separator in table and CSV output
  --group-bond        Sort rows by bond group, then by interface name
+ -m, --metrics       Sample interface traffic metrics (default: 30s)
+ -mSEC, --metrics=SEC
+                     Set sampling duration in seconds (1-3600)
  --output TYPE       Output format: table (default), csv, json, dot, svg, or png
                      dot/svg/png generate a network topology diagram
                      svg/png require graphviz (dot command)

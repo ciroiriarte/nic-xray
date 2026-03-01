@@ -31,6 +31,7 @@ Detailed physical network interface diagnostics for Linux.
 - Bond membership (with color)
 - LLDP peer information (switch and port)
 - Optionally: LACP status, VLAN tagging, bond MAC address
+- Real-time traffic metrics: bandwidth, packets/s, drops, errors, FIFO errors (with `--metrics`)
 
 Supports multiple output formats: **table** (default, with dynamic column widths), **CSV**, **JSON**, and **network topology diagrams** (DOT/SVG/PNG).
 
@@ -115,6 +116,15 @@ sudo nic-xray.sh --vlan       # Show VLAN information
 sudo nic-xray.sh --bmac       # Show bond MAC address
 ```
 
+### Traffic metrics
+
+```bash
+sudo nic-xray.sh --metrics             # Sample metrics over 30s (default)
+sudo nic-xray.sh --metrics=5           # Sample metrics over 5s
+sudo nic-xray.sh --metrics --output csv   # Metrics as raw numeric CSV columns
+sudo nic-xray.sh --metrics --output json  # Metrics as nested JSON object
+```
+
 ### Filtering and sorting
 
 ```bash
@@ -165,6 +175,7 @@ Device         Driver      Firmware                 Interface   MAC Address     
 0000:19:00.2   i40e        9.50 0x8000f25e 23.0.8   eno3np2     XX:XX:XX:XX:XX:03   1500   down   N/A (N/A)          None
 0000:19:00.3   i40e        9.50 0x8000f25e 23.0.8   eno4np3     XX:XX:XX:XX:XX:04   1500   down   N/A (N/A)          None
 0000:5e:00.0   i40e        9.50 0x8000f251 23.0.8   ens3f0np0   XX:XX:XX:XX:XX:05   9100   up     25000Mb/s (Full)   bond2         switch-01.example.net   ifname et-0/0/38
+0000:5e:00.1   i40e        9.50 0x8000f251 23.0.8   ens3f1np1   XX:XX:XX:XX:XX:06   9100   up     25000Mb/s (Full)   bond3         switch-01.example.net   ifname et-0/0/39
 ...
 ```
 
@@ -172,10 +183,10 @@ Device         Driver      Firmware                 Interface   MAC Address     
 
 ```
 $ sudo nic-xray.sh --all -s
-Device       │ Driver    │ Firmware               │ Interface │ MAC Address       │ MTU  │ Link │ Speed/Duplex     │ Parent Bond │ Bond MAC          │ LACP Status                              │ VLAN                │ Switch Name                 │ Port Name
-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-0000:19:00.0 │ i40e      │ 9.50 0x8000f25e 23.0.8 │ eno1np0   │ XX:XX:XX:XX:XX:01 │ 9100 │ up   │ 10000Mb/s (Full) │ bond0       │ XX:XX:XX:XX:XX:01 │ AggID:1 Peer:AA:BB:CC:DD:EE:01 (Partial) │ 100;101;102;110;111 │ switch-01.example.net │ ifname xe-0/0/2
-0000:19:00.1 │ i40e      │ 9.50 0x8000f25e 23.0.8 │ eno2np1   │ XX:XX:XX:XX:XX:02 │ 9100 │ up   │ 10000Mb/s (Full) │ bond1       │ XX:XX:XX:XX:XX:02 │ AggID:1 Peer:AA:BB:CC:DD:EE:02 (Partial) │ 200;201;202;211;212 │ switch-01.example.net │ ifname xe-0/0/3
+Device       │ Driver    │ Firmware               │ Interface │ MAC Address       │ MTU  │ Link │ Speed/Duplex     │ Parent Bond │ Bond MAC          │ LACP Status                    │ VLAN                │ Switch Name           │ Port Name
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+0000:19:00.0 │ i40e      │ 9.50 0x8000f25e 23.0.8 │ eno1np0   │ XX:XX:XX:XX:XX:01 │ 9100 │ up   │ 10000Mb/s (Full) │ bond0       │ XX:XX:XX:XX:XX:01 │ AggID:1 Peer:AA:BB:CC:DD:EE:01 │ 100;101;102;110;111 │ switch-01.example.net │ ifname xe-0/0/2
+0000:19:00.1 │ i40e      │ 9.50 0x8000f25e 23.0.8 │ eno2np1   │ XX:XX:XX:XX:XX:02 │ 9100 │ up   │ 10000Mb/s (Full) │ bond1       │ XX:XX:XX:XX:XX:02 │ AggID:1 Peer:AA:BB:CC:DD:EE:02 │ 200;201;202;211;212 │ switch-01.example.net │ ifname xe-0/0/3
 ...
 ```
 
@@ -191,6 +202,19 @@ Device         Driver   Firmware                 Interface   MAC Address        
 0000:86:00.3   i40e     9.50 0x8000f25d 23.0.8   ens5f3np3   XX:XX:XX:XX:XX:0a   1500   down   N/A (N/A)      None
 ```
 
+### Traffic metrics table
+
+```
+$ sudo nic-xray.sh --all --metrics=3
+Device         Driver      Firmware                 Interface   MAC Address         MTU    Link   Speed/Duplex       Parent Bond   Bond MAC            LACP Status                      VLAN                  Bandwidth                   Packets/s         Drops       Errors      FIFO Errors   Switch Name             Port Name
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+0000:19:00.0   i40e        9.50 0x8000f25e 23.0.8   eno1np0     XX:XX:XX:XX:XX:01   9100   up     10000Mb/s (Full)   bond0         XX:XX:XX:XX:XX:01   AggID:1 Peer:AA:BB:CC:DD:EE:01   100;101;102;110;111   Rx:708 B/s Tx:950 B/s       Rx:3 Tx:4         Rx:0 Tx:0   Rx:0 Tx:0   Rx:0 Tx:0     switch-01.example.net   ifname xe-0/0/2
+0000:5e:00.1   i40e        9.50 0x8000f251 23.0.8   ens3f1np1   XX:XX:XX:XX:XX:06   9100   up     25000Mb/s (Full)   bond3         XX:XX:XX:XX:XX:06   AggID:1 Peer:AA:BB:CC:DD:EE:04   502                   Rx:2.2 MB/s Tx:514.0 KB/s   Rx:866 Tx:808     Rx:0 Tx:0   Rx:0 Tx:0   Rx:0 Tx:0     switch-01.example.net   ifname et-0/0/39
+...
+
+📊 Metrics sampled over 3s
+```
+
 ### CSV output
 
 ```
@@ -198,6 +222,15 @@ $ sudo nic-xray.sh --output csv
 Device,Driver,Firmware,Interface,MAC Address,MTU,Link,Speed/Duplex,Parent Bond,Switch Name,Port Name
 0000:19:00.0,i40e,9.50 0x8000f25e 23.0.8,eno1np0,XX:XX:XX:XX:XX:01,9100,up,10000Mb/s (Full),bond0,switch-01.example.net,ifname xe-0/0/2
 0000:19:00.1,i40e,9.50 0x8000f25e 23.0.8,eno2np1,XX:XX:XX:XX:XX:02,9100,up,10000Mb/s (Full),bond1,switch-01.example.net,ifname xe-0/0/3
+...
+```
+
+### CSV with metrics
+
+```
+$ sudo nic-xray.sh --all --metrics=3 --output csv
+Device,Driver,Firmware,Interface,MAC Address,MTU,Link,Speed/Duplex,Parent Bond,Bond MAC,LACP Status,VLAN,Rx Bytes/s,Tx Bytes/s,Rx Packets/s,Tx Packets/s,Rx Drops,Tx Drops,Rx Errors,Tx Errors,Rx FIFO Errors,Tx FIFO Errors,Sample Duration,Switch Name,Port Name
+0000:19:00.0,i40e,...,eno1np0,XX:XX:XX:XX:XX:01,9100,up,10000Mb/s (Full),bond0,...,100;101;102;110;111,849,1325,4,7,0,0,0,0,0,0,3,switch-01.example.net,ifname xe-0/0/2
 ...
 ```
 
@@ -217,8 +250,36 @@ $ sudo nic-xray.sh --output json --all
     "speed_duplex": "10000Mb/s (Full)",
     "parent_bond": "bond0",
     "bond_mac": "XX:XX:XX:XX:XX:01",
-    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:01 (Partial)",
+    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:01",
     "vlan": "100;101;102;110;111",
+    "switch_name": "switch-01.example.net",
+    "port_name": "ifname xe-0/0/2"
+  },
+  ...
+]
+```
+
+### JSON with metrics
+
+```
+$ sudo nic-xray.sh --all --metrics=3 --output json
+[
+  {
+    "device": "0000:19:00.0",
+    ...
+    "metrics": {
+      "sample_duration_seconds": 3,
+      "rx_bytes_per_sec": 893,
+      "tx_bytes_per_sec": 1010,
+      "rx_packets_per_sec": 4,
+      "tx_packets_per_sec": 5,
+      "rx_drops": 0,
+      "tx_drops": 0,
+      "rx_errors": 0,
+      "tx_errors": 0,
+      "rx_fifo_errors": 0,
+      "tx_fifo_errors": 0
+    },
     "switch_name": "switch-01.example.net",
     "port_name": "ifname xe-0/0/2"
   },
@@ -240,6 +301,12 @@ The diagram shows server NICs grouped by bond (color-coded), connected to switch
 
 See also: [`samples/topology.dot`](samples/topology.dot) | [`samples/topology.svg`](samples/topology.svg)
 
+When `--metrics` is active, each NIC node also shows real-time bandwidth (with `↓`/`↑` arrows). If any drops, errors, or FIFO errors are detected during sampling, they are shown in red.
+
+![Topology diagram with metrics](samples/topology-metrics.png)
+
+See also: [`samples/topology-metrics.dot`](samples/topology-metrics.dot) | [`samples/topology-metrics.svg`](samples/topology-metrics.svg)
+
 ## 📄 License
 
 This project is licensed under the GNU General Public License v3.0. See [LICENSE](LICENSE) for details.
@@ -253,4 +320,4 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for gui
 **Ciro Iriarte**
 
 - **Created**: 2025-06-05
-- **Updated**: 2026-02-28
+- **Updated**: 2026-03-01

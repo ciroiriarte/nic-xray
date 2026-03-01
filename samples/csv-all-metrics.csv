@@ -1,0 +1,14 @@
+Device,Driver,Firmware,Interface,MAC Address,MTU,Link,Speed/Duplex,Parent Bond,Bond MAC,LACP Status,VLAN,Rx Bytes/s,Tx Bytes/s,Rx Packets/s,Tx Packets/s,Rx Drops,Tx Drops,Rx Errors,Tx Errors,Rx FIFO Errors,Tx FIFO Errors,Sample Duration,Switch Name,Port Name
+0000:19:00.0,i40e,9.50 0x8000f25e 23.0.8,eno1np0,XX:XX:XX:XX:XX:01,9100,up,10000Mb/s (Full),bond0,XX:XX:XX:XX:XX:01,AggID:1 Peer:AA:BB:CC:DD:EE:01,100;101;102;110;111,183,576,1,5,0,0,0,0,0,0,2,switch-01.example.net,ifname xe-0/0/2
+0000:19:00.1,i40e,9.50 0x8000f25e 23.0.8,eno2np1,XX:XX:XX:XX:XX:02,9100,up,10000Mb/s (Full),bond1,XX:XX:XX:XX:XX:02,AggID:1 Peer:AA:BB:CC:DD:EE:02,200;201;202;211;212,451,591,6,7,0,0,0,0,0,0,2,switch-01.example.net,ifname xe-0/0/3
+0000:19:00.2,i40e,9.50 0x8000f25e 23.0.8,eno3np2,XX:XX:XX:XX:XX:03,1500,down,N/A (N/A),None,N/A,N/A,N/A,0,0,0,0,0,0,0,0,0,0,2,,
+0000:19:00.3,i40e,9.50 0x8000f25e 23.0.8,eno4np3,XX:XX:XX:XX:XX:04,1500,down,N/A (N/A),None,N/A,N/A,N/A,0,0,0,0,0,0,0,0,0,0,2,,
+0000:5e:00.0,i40e,9.50 0x8000f251 23.0.8,ens3f0np0,XX:XX:XX:XX:XX:05,9100,up,25000Mb/s (Full),bond2,XX:XX:XX:XX:XX:05,AggID:1 Peer:AA:BB:CC:DD:EE:03,501,73791,63130,54,50,0,0,0,0,0,0,2,switch-01.example.net,ifname et-0/0/38
+0000:5e:00.1,i40e,9.50 0x8000f251 23.0.8,ens3f1np1,XX:XX:XX:XX:XX:06,9100,up,25000Mb/s (Full),bond3,XX:XX:XX:XX:XX:06,AggID:1 Peer:AA:BB:CC:DD:EE:04,502,2357503,1490113,1095,1089,0,0,0,0,0,0,2,switch-01.example.net,ifname et-0/0/39
+0000:86:00.0,i40e,9.50 0x8000f25d 23.0.8,ens5f0np0,XX:XX:XX:XX:XX:07,9100,up,10000Mb/s (Full),bond0,XX:XX:XX:XX:XX:01,AggID:1 Peer:AA:BB:CC:DD:EE:01,100;101;102;110;111,654,875,5,6,0,0,0,0,0,0,2,switch-02.example.net,ifname xe-0/0/2
+0000:86:00.1,i40e,9.50 0x8000f25d 23.0.8,ens5f1np1,XX:XX:XX:XX:XX:08,9100,up,10000Mb/s (Full),bond1,XX:XX:XX:XX:XX:02,AggID:1 Peer:AA:BB:CC:DD:EE:02,200;201;202;211;212,718,811,10,10,0,0,0,0,0,0,2,switch-02.example.net,ifname xe-0/0/3
+0000:86:00.2,i40e,9.50 0x8000f25d 23.0.8,ens5f2np2,XX:XX:XX:XX:XX:09,1500,down,N/A (N/A),None,N/A,N/A,N/A,0,0,0,0,0,0,0,0,0,0,2,,
+0000:86:00.3,i40e,9.50 0x8000f25d 23.0.8,ens5f3np3,XX:XX:XX:XX:XX:0a,1500,down,N/A (N/A),None,N/A,N/A,N/A,0,0,0,0,0,0,0,0,0,0,2,,
+0000:d8:00.0,i40e,9.50 0x8000f251 23.0.8,ens8f0np0,XX:XX:XX:XX:XX:0b,9100,up,25000Mb/s (Full),bond2,XX:XX:XX:XX:XX:05,AggID:1 Peer:AA:BB:CC:DD:EE:03,501,1863690,142497,377,280,0,0,0,0,0,0,2,switch-02.example.net,ifname et-0/0/38
+0000:d8:00.1,i40e,9.50 0x8000f251 23.0.8,ens8f1np1,XX:XX:XX:XX:XX:0c,9100,up,25000Mb/s (Full),bond3,XX:XX:XX:XX:XX:06,AggID:1 Peer:AA:BB:CC:DD:EE:04,502,5199860,2738778,2164,2069,0,0,0,0,0,0,2,switch-02.example.net,ifname et-0/0/39
+1-14.3:1.0,cdc_ether,CDC Ethernet Device,idrac,XX:XX:XX:XX:XX:0d,1500,up,425Mb/s (Half),None,N/A,N/A,N/A,52,66,1,1,0,0,0,0,0,0,2,,
