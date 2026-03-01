@@ -27,6 +27,11 @@ provides a detailed overview of all physical network interfaces on a Linux
 system. It collects and displays PCI slot, driver name, firmware version,
 interface name, MAC address, MTU, link status, negotiated speed and duplex,
 bond membership, and LLDP peer information (switch name and port).
+Optionally: LACP status, VLAN tagging, and bond MAC address.
+With
+.BR \-\-metrics ,
+it can also sample real-time traffic metrics: bandwidth, packets/s, drops,
+errors, and FIFO errors.
 .PP
 Supports multiple output formats:
 .B table
@@ -308,7 +313,9 @@ with dashed blue borders grouping member interfaces and LACP status label
 with colored border (green=UP, red=DOWN), showing interface name, MAC address, MTU,
 and optionally traffic metrics when
 .B \-\-metrics
-is active
+is active: bandwidth with colored direction arrows
+.RB ( "green \(da" " = Rx," " blue \(ua" " = Tx" ),
+and a red error row if drops, errors, or FIFO errors are detected
 .IP \(bu
 .B Edge labels
 showing VLAN information near the NIC end and negotiated speed tier near
