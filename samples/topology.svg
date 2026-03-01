@@ -164,91 +164,94 @@
 <!-- eno3np2 -->
 <g id="node10" class="node">
 <title>eno3np2</title>
-<polygon fill="#313244" stroke="none" points="617.75,0 617.75,-64.75 713.5,-64.75 713.5,0 617.75,0"/>
-<text xml:space="preserve" text-anchor="start" x="643.12" y="-48.3" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">eno3np2</text>
-<text xml:space="preserve" text-anchor="start" x="624.75" y="-27.95" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">XX:XX:XX:XX:XX:03</text>
-<text xml:space="preserve" text-anchor="start" x="643.12" y="-8.2" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">MTU: 1500</text>
-<polygon fill="none" stroke="#f38ba8" points="617.75,0 617.75,-64.75 713.5,-64.75 713.5,0 617.75,0"/>
+<polygon fill="#313244" stroke="none" points="617.75,-432 617.75,-496.75 713.5,-496.75 713.5,-432 617.75,-432"/>
+<text xml:space="preserve" text-anchor="start" x="643.12" y="-480.3" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">eno3np2</text>
+<text xml:space="preserve" text-anchor="start" x="624.75" y="-459.95" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">XX:XX:XX:XX:XX:03</text>
+<text xml:space="preserve" text-anchor="start" x="643.12" y="-440.2" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">MTU: 1500</text>
+<polygon fill="none" stroke="#f38ba8" points="617.75,-432 617.75,-496.75 713.5,-496.75 713.5,-432 617.75,-432"/>
 </g>
 <!-- server&#45;&gt;eno3np2 -->
 <g id="edge3" class="edge">
 <title>server&#45;&gt;eno3np2</title>
-<path fill="none" stroke="#585b70" d="M89.31,-595.33C104.49,-518.64 152.77,-322.42 266.25,-208.38 364.19,-109.94 526.63,-62.16 610.62,-43.02"/>
-<polygon fill="#585b70" stroke="#585b70" points="610.89,-45.11 616.28,-41.75 609.97,-41.01 610.89,-45.11"/>
+<path fill="none" stroke="#585b70" d="M108.21,-595.44C139.91,-557.13 199.03,-494.9 266.25,-469.38 382.45,-425.25 531.82,-440.61 610.53,-453.69"/>
+<polygon fill="#585b70" stroke="#585b70" points="610.16,-455.75 616.43,-454.69 610.86,-451.61 610.16,-455.75"/>
 </g>
 <!-- eno4np3 -->
 <g id="node11" class="node">
 <title>eno4np3</title>
-<polygon fill="#313244" stroke="none" points="617.75,-432 617.75,-496.75 713.5,-496.75 713.5,-432 617.75,-432"/>
-<text xml:space="preserve" text-anchor="start" x="643.12" y="-480.3" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">eno4np3</text>
-<text xml:space="preserve" text-anchor="start" x="624.75" y="-459.95" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">XX:XX:XX:XX:XX:04</text>
-<text xml:space="preserve" text-anchor="start" x="643.12" y="-440.2" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">MTU: 1500</text>
-<polygon fill="none" stroke="#f38ba8" points="617.75,-432 617.75,-496.75 713.5,-496.75 713.5,-432 617.75,-432"/>
+<polygon fill="#313244" stroke="none" points="617.75,-324 617.75,-388.75 713.5,-388.75 713.5,-324 617.75,-324"/>
+<text xml:space="preserve" text-anchor="start" x="643.12" y="-372.3" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">eno4np3</text>
+<text xml:space="preserve" text-anchor="start" x="624.75" y="-351.95" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">XX:XX:XX:XX:XX:04</text>
+<text xml:space="preserve" text-anchor="start" x="643.12" y="-332.2" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">MTU: 1500</text>
+<polygon fill="none" stroke="#f38ba8" points="617.75,-324 617.75,-388.75 713.5,-388.75 713.5,-324 617.75,-324"/>
 </g>
 <!-- server&#45;&gt;eno4np3 -->
 <g id="edge4" class="edge">
 <title>server&#45;&gt;eno4np3</title>
-<path fill="none" stroke="#585b70" d="M108.21,-595.44C139.91,-557.13 199.03,-494.9 266.25,-469.38 382.45,-425.25 531.82,-440.61 610.53,-453.69"/>
-<polygon fill="#585b70" stroke="#585b70" points="610.16,-455.75 616.43,-454.69 610.86,-451.61 610.16,-455.75"/>
+<path fill="none" stroke="#585b70" d="M103.76,-595.56C133.55,-551.36 193.72,-472.31 266.25,-432.38 377.91,-370.89 530.87,-358.36 610.87,-356.29"/>
+<polygon fill="#585b70" stroke="#585b70" points="610.45,-358.4 616.4,-356.17 610.36,-354.2 610.45,-358.4"/>
 </g>
 <!-- ens5f2np2 -->
 <g id="node12" class="node">
 <title>ens5f2np2</title>
-<polygon fill="#313244" stroke="none" points="617.75,-324 617.75,-388.75 713.5,-388.75 713.5,-324 617.75,-324"/>
-<text xml:space="preserve" text-anchor="start" x="638.62" y="-372.3" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ens5f2np2</text>
-<text xml:space="preserve" text-anchor="start" x="624.75" y="-351.95" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">XX:XX:XX:XX:XX:09</text>
-<text xml:space="preserve" text-anchor="start" x="643.12" y="-332.2" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">MTU: 1500</text>
-<polygon fill="none" stroke="#f38ba8" points="617.75,-324 617.75,-388.75 713.5,-388.75 713.5,-324 617.75,-324"/>
+<polygon fill="#313244" stroke="none" points="617.75,-216 617.75,-280.75 713.5,-280.75 713.5,-216 617.75,-216"/>
+<text xml:space="preserve" text-anchor="start" x="638.62" y="-264.3" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ens5f2np2</text>
+<text xml:space="preserve" text-anchor="start" x="624.75" y="-243.95" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">XX:XX:XX:XX:XX:09</text>
+<text xml:space="preserve" text-anchor="start" x="643.12" y="-224.2" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">MTU: 1500</text>
+<polygon fill="none" stroke="#f38ba8" points="617.75,-216 617.75,-280.75 713.5,-280.75 713.5,-216 617.75,-216"/>
 </g>
 <!-- server&#45;&gt;ens5f2np2 -->
 <g id="edge9" class="edge">
 <title>server&#45;&gt;ens5f2np2</title>
-<path fill="none" stroke="#585b70" d="M103.76,-595.56C133.55,-551.36 193.72,-472.31 266.25,-432.38 377.91,-370.89 530.87,-358.36 610.87,-356.29"/>
-<polygon fill="#585b70" stroke="#585b70" points="610.45,-358.4 616.4,-356.17 610.36,-354.2 610.45,-358.4"/>
+<path fill="none" stroke="#585b70" d="M98.17,-595.51C124.23,-541.94 183.94,-433.88 266.25,-374.38 373.25,-297.03 529.47,-265.97 610.84,-254.48"/>
+<polygon fill="#585b70" stroke="#585b70" points="610.84,-256.6 616.5,-253.7 610.27,-252.44 610.84,-256.6"/>
 </g>
 <!-- ens5f3np3 -->
 <g id="node13" class="node">
 <title>ens5f3np3</title>
-<polygon fill="#313244" stroke="none" points="617.75,-216 617.75,-280.75 713.5,-280.75 713.5,-216 617.75,-216"/>
-<text xml:space="preserve" text-anchor="start" x="638.62" y="-264.3" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ens5f3np3</text>
-<text xml:space="preserve" text-anchor="start" x="624.75" y="-243.95" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">XX:XX:XX:XX:XX:0a</text>
-<text xml:space="preserve" text-anchor="start" x="643.12" y="-224.2" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">MTU: 1500</text>
-<polygon fill="none" stroke="#f38ba8" points="617.75,-216 617.75,-280.75 713.5,-280.75 713.5,-216 617.75,-216"/>
+<polygon fill="#313244" stroke="none" points="617.75,-108 617.75,-172.75 713.5,-172.75 713.5,-108 617.75,-108"/>
+<text xml:space="preserve" text-anchor="start" x="638.62" y="-156.3" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ens5f3np3</text>
+<text xml:space="preserve" text-anchor="start" x="624.75" y="-135.95" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">XX:XX:XX:XX:XX:0a</text>
+<text xml:space="preserve" text-anchor="start" x="643.12" y="-116.2" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">MTU: 1500</text>
+<polygon fill="none" stroke="#f38ba8" points="617.75,-108 617.75,-172.75 713.5,-172.75 713.5,-108 617.75,-108"/>
 </g>
 <!-- server&#45;&gt;ens5f3np3 -->
 <g id="edge10" class="edge">
 <title>server&#45;&gt;ens5f3np3</title>
-<path fill="none" stroke="#585b70" d="M98.17,-595.51C124.23,-541.94 183.94,-433.88 266.25,-374.38 373.25,-297.03 529.47,-265.97 610.84,-254.48"/>
-<polygon fill="#585b70" stroke="#585b70" points="610.84,-256.6 616.5,-253.7 610.27,-252.44 610.84,-256.6"/>
+<path fill="none" stroke="#585b70" d="M93.12,-595.44C113.99,-530.5 169.79,-382.04 266.25,-297.38 368.34,-207.76 527.67,-166.09 610.5,-149.57"/>
+<polygon fill="#585b70" stroke="#585b70" points="610.82,-151.65 616.3,-148.44 610.01,-147.53 610.82,-151.65"/>
 </g>
 <!-- idrac -->
 <g id="node14" class="node">
 <title>idrac</title>
-<polygon fill="#313244" stroke="none" points="617.75,-108 617.75,-172.75 713.5,-172.75 713.5,-108 617.75,-108"/>
-<text xml:space="preserve" text-anchor="start" x="652.5" y="-156.3" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">idrac</text>
-<text xml:space="preserve" text-anchor="start" x="624.75" y="-135.95" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">XX:XX:XX:XX:XX:0d</text>
-<text xml:space="preserve" text-anchor="start" x="643.12" y="-116.2" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">MTU: 1500</text>
-<polygon fill="none" stroke="#a6e3a1" points="617.75,-108 617.75,-172.75 713.5,-172.75 713.5,-108 617.75,-108"/>
+<polygon fill="#313244" stroke="none" points="617.75,0 617.75,-64.75 713.5,-64.75 713.5,0 617.75,0"/>
+<text xml:space="preserve" text-anchor="start" x="652.5" y="-48.3" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">idrac</text>
+<text xml:space="preserve" text-anchor="start" x="624.75" y="-27.95" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">XX:XX:XX:XX:XX:0d</text>
+<text xml:space="preserve" text-anchor="start" x="643.12" y="-8.2" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">MTU: 1500</text>
+<polygon fill="none" stroke="#a6e3a1" points="617.75,0 617.75,-64.75 713.5,-64.75 713.5,0 617.75,0"/>
 </g>
 <!-- server&#45;&gt;idrac -->
 <g id="edge13" class="edge">
 <title>server&#45;&gt;idrac</title>
-<path fill="none" stroke="#585b70" d="M93.12,-595.44C113.99,-530.5 169.79,-382.04 266.25,-297.38 368.34,-207.76 527.67,-166.09 610.5,-149.57"/>
-<polygon fill="#585b70" stroke="#585b70" points="610.82,-151.65 616.3,-148.44 610.01,-147.53 610.82,-151.65"/>
+<path fill="none" stroke="#585b70" d="M89.31,-595.33C104.49,-518.64 152.77,-322.42 266.25,-208.38 364.19,-109.94 526.63,-62.16 610.62,-43.02"/>
+<polygon fill="#585b70" stroke="#585b70" points="610.89,-45.11 616.28,-41.75 609.97,-41.01 610.89,-45.11"/>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_2 -->
 <g id="node15" class="node">
 <title>swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_2</title>
-<polygon fill="#313244" stroke="none" points="619.25,-820.75 619.25,-846 712,-846 712,-820.75 619.25,-820.75"/>
-<text xml:space="preserve" text-anchor="start" x="626.25" y="-829.55" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ifname xe&#45;0/0/2</text>
-<polygon fill="none" stroke="#fab387" points="619.25,-820.75 619.25,-846 712,-846 712,-820.75 619.25,-820.75"/>
+<polygon fill="#313244" stroke="none" points="619.25,-799.75 619.25,-825 712,-825 712,-799.75 619.25,-799.75"/>
+<text xml:space="preserve" text-anchor="start" x="626.25" y="-808.55" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ifname xe&#45;0/0/2</text>
+<polygon fill="none" stroke="#fab387" points="619.25,-799.75 619.25,-825 712,-825 712,-799.75 619.25,-799.75"/>
 </g>
 <!-- eno1np0&#45;&gt;swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_2 -->
 <g id="edge14" class="edge">
 <title>eno1np0&#45;&gt;swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_2</title>
-<path fill="none" stroke="#89b4fa" stroke-width="2.5" d="M378.68,-929.72C385.19,-925.4 391.52,-920.6 397,-915.38 424.09,-889.57 410.57,-863.54 443,-844.88 492.54,-816.36 559.09,-817.03 606.3,-822.64"/>
-<polygon fill="#89b4fa" stroke="#89b4fa" stroke-width="2.5" points="605.55,-826.07 615.93,-823.92 606.48,-819.13 605.55,-826.07"/>
-<text xml:space="preserve" text-anchor="start" x="443" y="-845.88" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">VLAN 100;101;102;110;111</text>
+<path fill="none" stroke="#89b4fa" stroke-width="2.5" d="M378.97,-930.55C385.51,-926.1 391.77,-921.03 397,-915.38 428.84,-880.92 403.71,-846 443,-820.38 490.99,-789.07 558.07,-791.46 605.84,-798.95"/>
+<polygon fill="#89b4fa" stroke="#89b4fa" stroke-width="2.5" points="605.2,-802.39 615.65,-800.64 606.39,-795.49 605.2,-802.39"/>
+<text xml:space="preserve" text-anchor="start" x="443" y="-831.88" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">VLAN </text>
+<text xml:space="preserve" text-anchor="start" x="473" y="-831.88" font-family="Helvetica,Arial,sans-serif" font-weight="bold" text-decoration="underline" font-size="10.00" fill="#a6adc8">100</text>
+<text xml:space="preserve" text-anchor="start" x="488.75" y="-831.88" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">;101;102;110;111</text>
+<text xml:space="preserve" text-anchor="start" x="488.38" y="-821.88" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">10GbE</text>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_2 -->
 <g id="node19" class="node">
@@ -262,91 +265,108 @@
 <title>ens5f0np0&#45;&gt;swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_2</title>
 <path fill="none" stroke="#89b4fa" stroke-width="2.5" d="M378.71,-1061.23C438.15,-1061.06 541.02,-1060.75 605.81,-1060.55"/>
 <polygon fill="#89b4fa" stroke="#89b4fa" stroke-width="2.5" points="605.65,-1064.05 615.64,-1060.52 605.63,-1057.05 605.65,-1064.05"/>
-<text xml:space="preserve" text-anchor="start" x="443" y="-1062.02" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">VLAN 100;101;102;110;111</text>
+<text xml:space="preserve" text-anchor="start" x="443" y="-1072.52" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">VLAN </text>
+<text xml:space="preserve" text-anchor="start" x="473" y="-1072.52" font-family="Helvetica,Arial,sans-serif" font-weight="bold" text-decoration="underline" font-size="10.00" fill="#a6adc8">100</text>
+<text xml:space="preserve" text-anchor="start" x="488.75" y="-1072.52" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">;101;102;110;111</text>
+<text xml:space="preserve" text-anchor="start" x="488.38" y="-1062.52" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">10GbE</text>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_3 -->
 <g id="node16" class="node">
 <title>swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_3</title>
-<polygon fill="#313244" stroke="none" points="619.25,-600.75 619.25,-626 712,-626 712,-600.75 619.25,-600.75"/>
-<text xml:space="preserve" text-anchor="start" x="626.25" y="-609.55" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ifname xe&#45;0/0/3</text>
-<polygon fill="none" stroke="#fab387" points="619.25,-600.75 619.25,-626 712,-626 712,-600.75 619.25,-600.75"/>
+<polygon fill="#313244" stroke="none" points="619.25,-605.75 619.25,-631 712,-631 712,-605.75 619.25,-605.75"/>
+<text xml:space="preserve" text-anchor="start" x="626.25" y="-614.55" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ifname xe&#45;0/0/3</text>
+<polygon fill="none" stroke="#fab387" points="619.25,-605.75 619.25,-631 712,-631 712,-605.75 619.25,-605.75"/>
 </g>
 <!-- eno2np1&#45;&gt;swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_3 -->
 <g id="edge15" class="edge">
 <title>eno2np1&#45;&gt;swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_3</title>
-<path fill="none" stroke="#f9e2af" stroke-width="2.5" d="M378.71,-532.54C438.53,-549.46 542.32,-578.8 607.03,-597.09"/>
-<polygon fill="#f9e2af" stroke="#f9e2af" stroke-width="2.5" points="606,-600.44 616.57,-599.79 607.9,-593.7 606,-600.44"/>
-<text xml:space="preserve" text-anchor="start" x="443" y="-583.97" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">VLAN 200;201;202;211;212</text>
+<path fill="none" stroke="#f9e2af" stroke-width="2.5" d="M378.71,-533.24C439.19,-551.25 544.64,-582.65 609.18,-601.87"/>
+<polygon fill="#f9e2af" stroke="#f9e2af" stroke-width="2.5" points="608.09,-605.19 618.67,-604.69 610.09,-598.49 608.09,-605.19"/>
+<text xml:space="preserve" text-anchor="start" x="443" y="-597.85" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">VLAN </text>
+<text xml:space="preserve" text-anchor="start" x="473" y="-597.85" font-family="Helvetica,Arial,sans-serif" font-weight="bold" text-decoration="underline" font-size="10.00" fill="#a6adc8">200</text>
+<text xml:space="preserve" text-anchor="start" x="488.75" y="-597.85" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">;201;202;211;212</text>
+<text xml:space="preserve" text-anchor="start" x="488.38" y="-587.85" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">10GbE</text>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_3 -->
 <g id="node20" class="node">
 <title>swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_3</title>
-<polygon fill="#313244" stroke="none" points="619.25,-901.75 619.25,-927 712,-927 712,-901.75 619.25,-901.75"/>
-<text xml:space="preserve" text-anchor="start" x="626.25" y="-910.55" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ifname xe&#45;0/0/3</text>
-<polygon fill="none" stroke="#fab387" points="619.25,-901.75 619.25,-927 712,-927 712,-901.75 619.25,-901.75"/>
+<polygon fill="#313244" stroke="none" points="619.25,-882.75 619.25,-908 712,-908 712,-882.75 619.25,-882.75"/>
+<text xml:space="preserve" text-anchor="start" x="626.25" y="-891.55" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ifname xe&#45;0/0/3</text>
+<polygon fill="none" stroke="#fab387" points="619.25,-882.75 619.25,-908 712,-908 712,-882.75 619.25,-882.75"/>
 </g>
 <!-- ens5f1np1&#45;&gt;swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_3 -->
 <g id="edge21" class="edge">
 <title>ens5f1np1&#45;&gt;swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_3</title>
-<path fill="none" stroke="#f9e2af" stroke-width="2.5" d="M374.68,-659.51C383.06,-667.5 391.08,-676.61 397,-686.38 438.69,-755.15 385.5,-805.15 443,-861.38 465.91,-883.78 548.59,-899.05 606.21,-907.25"/>
-<polygon fill="#f9e2af" stroke="#f9e2af" stroke-width="2.5" points="605.4,-910.67 615.79,-908.57 606.36,-903.74 605.4,-910.67"/>
-<text xml:space="preserve" text-anchor="start" x="443" y="-901.07" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">VLAN 200;201;202;211;212</text>
+<path fill="none" stroke="#f9e2af" stroke-width="2.5" d="M374.51,-659.61C382.9,-667.6 390.97,-676.68 397,-686.38 436.08,-749.21 389.07,-795.71 443,-846.38 466.22,-868.19 548.5,-881.99 605.98,-889.2"/>
+<polygon fill="#f9e2af" stroke="#f9e2af" stroke-width="2.5" points="605.55,-892.68 615.89,-890.4 606.39,-885.73 605.55,-892.68"/>
+<text xml:space="preserve" text-anchor="start" x="443" y="-894.35" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">VLAN </text>
+<text xml:space="preserve" text-anchor="start" x="473" y="-894.35" font-family="Helvetica,Arial,sans-serif" font-weight="bold" text-decoration="underline" font-size="10.00" fill="#a6adc8">200</text>
+<text xml:space="preserve" text-anchor="start" x="488.75" y="-894.35" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">;201;202;211;212</text>
+<text xml:space="preserve" text-anchor="start" x="488.38" y="-884.35" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">10GbE</text>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_38 -->
 <g id="node17" class="node">
 <title>swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_38</title>
-<polygon fill="#313244" stroke="none" points="617.75,-726.75 617.75,-752 713.5,-752 713.5,-726.75 617.75,-726.75"/>
-<text xml:space="preserve" text-anchor="start" x="624.75" y="-735.55" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ifname et&#45;0/0/38</text>
-<polygon fill="none" stroke="#fab387" points="617.75,-726.75 617.75,-752 713.5,-752 713.5,-726.75 617.75,-726.75"/>
+<polygon fill="#313244" stroke="none" points="617.75,-731.75 617.75,-757 713.5,-757 713.5,-731.75 617.75,-731.75"/>
+<text xml:space="preserve" text-anchor="start" x="624.75" y="-740.55" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ifname et&#45;0/0/38</text>
+<polygon fill="none" stroke="#fab387" points="617.75,-731.75 617.75,-757 713.5,-757 713.5,-731.75 617.75,-731.75"/>
 </g>
 <!-- ens3f0np0&#45;&gt;swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_38 -->
 <g id="edge18" class="edge">
 <title>ens3f0np0&#45;&gt;swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_38</title>
-<path fill="none" stroke="#94e2d5" stroke-width="3" d="M378.71,-736.8C437.41,-737.32 538.44,-738.24 603.35,-738.82"/>
-<polygon fill="#94e2d5" stroke="#94e2d5" stroke-width="3" points="603.25,-742.32 613.28,-738.91 603.31,-735.32 603.25,-742.32"/>
-<text xml:space="preserve" text-anchor="start" x="480.5" y="-739.4" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">VLAN 501</text>
+<path fill="none" stroke="#94e2d5" stroke-width="3" d="M378.71,-737.5C437.41,-738.91 538.44,-741.34 603.35,-742.9"/>
+<polygon fill="#94e2d5" stroke="#94e2d5" stroke-width="3" points="603.2,-746.4 613.28,-743.14 603.37,-739.4 603.2,-746.4"/>
+<text xml:space="preserve" text-anchor="start" x="480.5" y="-753.29" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">VLAN </text>
+<text xml:space="preserve" text-anchor="start" x="510.5" y="-753.29" font-family="Helvetica,Arial,sans-serif" font-weight="bold" text-decoration="underline" font-size="10.00" fill="#a6adc8">501</text>
+<text xml:space="preserve" text-anchor="start" x="488.38" y="-743.29" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">25GbE</text>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_38 -->
 <g id="node21" class="node">
 <title>swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_38</title>
-<polygon fill="#313244" stroke="none" points="617.75,-976.75 617.75,-1002 713.5,-1002 713.5,-976.75 617.75,-976.75"/>
-<text xml:space="preserve" text-anchor="start" x="624.75" y="-985.55" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ifname et&#45;0/0/38</text>
-<polygon fill="none" stroke="#fab387" points="617.75,-976.75 617.75,-1002 713.5,-1002 713.5,-976.75 617.75,-976.75"/>
+<polygon fill="#313244" stroke="none" points="617.75,-953.75 617.75,-979 713.5,-979 713.5,-953.75 617.75,-953.75"/>
+<text xml:space="preserve" text-anchor="start" x="624.75" y="-962.55" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ifname et&#45;0/0/38</text>
+<polygon fill="none" stroke="#fab387" points="617.75,-953.75 617.75,-979 713.5,-979 713.5,-953.75 617.75,-953.75"/>
 </g>
 <!-- ens8f0np0&#45;&gt;swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_38 -->
 <g id="edge24" class="edge">
 <title>ens8f0np0&#45;&gt;swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_38</title>
-<path fill="none" stroke="#94e2d5" stroke-width="3" d="M366.69,-876.55C387.45,-894.36 415.17,-915.61 443,-929.38 494.27,-954.72 557.68,-970.51 603.52,-979.48"/>
-<polygon fill="#94e2d5" stroke="#94e2d5" stroke-width="3" points="602.81,-982.91 613.29,-981.32 604.11,-976.03 602.81,-982.91"/>
-<text xml:space="preserve" text-anchor="start" x="480.5" y="-971.04" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">VLAN 501</text>
+<path fill="none" stroke="#94e2d5" stroke-width="3" d="M373.24,-876.65C393.3,-891 418.38,-906.97 443,-917.38 495.08,-939.39 558.39,-952.12 603.99,-959.05"/>
+<polygon fill="#94e2d5" stroke="#94e2d5" stroke-width="3" points="603.25,-962.48 613.64,-960.46 604.25,-955.56 603.25,-962.48"/>
+<text xml:space="preserve" text-anchor="start" x="480.5" y="-963.09" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">VLAN </text>
+<text xml:space="preserve" text-anchor="start" x="510.5" y="-963.09" font-family="Helvetica,Arial,sans-serif" font-weight="bold" text-decoration="underline" font-size="10.00" fill="#a6adc8">501</text>
+<text xml:space="preserve" text-anchor="start" x="488.38" y="-953.09" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">25GbE</text>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_39 -->
 <g id="node18" class="node">
 <title>swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_39</title>
-<polygon fill="#313244" stroke="none" points="617.75,-1137.75 617.75,-1163 713.5,-1163 713.5,-1137.75 617.75,-1137.75"/>
-<text xml:space="preserve" text-anchor="start" x="624.75" y="-1146.55" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ifname et&#45;0/0/39</text>
-<polygon fill="none" stroke="#fab387" points="617.75,-1137.75 617.75,-1163 713.5,-1163 713.5,-1137.75 617.75,-1137.75"/>
+<polygon fill="#313244" stroke="none" points="617.75,-1149.75 617.75,-1175 713.5,-1175 713.5,-1149.75 617.75,-1149.75"/>
+<text xml:space="preserve" text-anchor="start" x="624.75" y="-1158.55" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ifname et&#45;0/0/39</text>
+<polygon fill="none" stroke="#fab387" points="617.75,-1149.75 617.75,-1175 713.5,-1175 713.5,-1149.75 617.75,-1149.75"/>
 </g>
 <!-- ens3f1np1&#45;&gt;swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_39 -->
 <g id="edge19" class="edge">
 <title>ens3f1np1&#45;&gt;swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_39</title>
-<path fill="none" stroke="#f5c2e7" stroke-width="3" d="M378.71,-1167.57C437.41,-1164.04 538.44,-1157.97 603.35,-1154.06"/>
-<polygon fill="#f5c2e7" stroke="#f5c2e7" stroke-width="3" points="603.52,-1157.56 613.29,-1153.46 603.1,-1150.57 603.52,-1157.56"/>
-<text xml:space="preserve" text-anchor="start" x="480.5" y="-1164.34" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">VLAN 502</text>
+<path fill="none" stroke="#f5c2e7" stroke-width="3" d="M378.71,-1169.25C437.41,-1167.84 538.44,-1165.41 603.35,-1163.85"/>
+<polygon fill="#f5c2e7" stroke="#f5c2e7" stroke-width="3" points="603.37,-1167.35 613.28,-1163.61 603.2,-1160.35 603.37,-1167.35"/>
+<text xml:space="preserve" text-anchor="start" x="480.5" y="-1179.06" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">VLAN </text>
+<text xml:space="preserve" text-anchor="start" x="510.5" y="-1179.06" font-family="Helvetica,Arial,sans-serif" font-weight="bold" text-decoration="underline" font-size="10.00" fill="#a6adc8">502</text>
+<text xml:space="preserve" text-anchor="start" x="488.38" y="-1169.06" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">25GbE</text>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_39 -->
 <g id="node22" class="node">
 <title>swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_39</title>
-<polygon fill="#313244" stroke="none" points="617.75,-1236.75 617.75,-1262 713.5,-1262 713.5,-1236.75 617.75,-1236.75"/>
-<text xml:space="preserve" text-anchor="start" x="624.75" y="-1245.55" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ifname et&#45;0/0/39</text>
-<polygon fill="none" stroke="#fab387" points="617.75,-1236.75 617.75,-1262 713.5,-1262 713.5,-1236.75 617.75,-1236.75"/>
+<polygon fill="#313244" stroke="none" points="617.75,-1254.75 617.75,-1280 713.5,-1280 713.5,-1254.75 617.75,-1254.75"/>
+<text xml:space="preserve" text-anchor="start" x="624.75" y="-1263.55" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ifname et&#45;0/0/39</text>
+<polygon fill="none" stroke="#fab387" points="617.75,-1254.75 617.75,-1280 713.5,-1280 713.5,-1254.75 617.75,-1254.75"/>
 </g>
 <!-- ens8f1np1&#45;&gt;swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_39 -->
 <g id="edge25" class="edge">
 <title>ens8f1np1&#45;&gt;swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_39</title>
-<path fill="none" stroke="#f5c2e7" stroke-width="3" d="M378.36,-1274.34C437.17,-1269.21 538.88,-1260.34 603.89,-1254.67"/>
-<polygon fill="#f5c2e7" stroke="#f5c2e7" stroke-width="3" points="603.8,-1258.19 613.46,-1253.84 603.19,-1251.22 603.8,-1258.19"/>
-<text xml:space="preserve" text-anchor="start" x="480.5" y="-1269.17" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">VLAN 502</text>
+<path fill="none" stroke="#f5c2e7" stroke-width="3" d="M378.36,-1276.85C437.04,-1274.9 538.45,-1271.55 603.48,-1269.4"/>
+<polygon fill="#f5c2e7" stroke="#f5c2e7" stroke-width="3" points="603.56,-1272.9 613.44,-1269.07 603.33,-1265.9 603.56,-1272.9"/>
+<text xml:space="preserve" text-anchor="start" x="480.5" y="-1286" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">VLAN </text>
+<text xml:space="preserve" text-anchor="start" x="510.5" y="-1286" font-family="Helvetica,Arial,sans-serif" font-weight="bold" text-decoration="underline" font-size="10.00" fill="#a6adc8">502</text>
+<text xml:space="preserve" text-anchor="start" x="488.38" y="-1276" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">25GbE</text>
 </g>
 <!-- no_lldp_peer -->
 <g id="node25" class="node">
@@ -358,112 +378,96 @@
 <!-- eno3np2&#45;&gt;no_lldp_peer -->
 <g id="edge16" class="edge">
 <title>eno3np2&#45;&gt;no_lldp_peer</title>
-<path fill="none" stroke="#6c7086" stroke-dasharray="5,2" d="M702.29,-64.71C751.64,-109.45 839.37,-188.99 881.3,-227"/>
-<polygon fill="#6c7086" stroke="#6c7086" points="878.87,-229.52 888.63,-233.65 883.57,-224.34 878.87,-229.52"/>
+<path fill="none" stroke="#6c7086" stroke-dasharray="5,2" d="M702.29,-432.04C751.64,-387.3 839.37,-307.76 881.3,-269.75"/>
+<polygon fill="#6c7086" stroke="#6c7086" points="883.57,-272.41 888.63,-263.1 878.87,-267.23 883.57,-272.41"/>
 </g>
 <!-- eno4np3&#45;&gt;no_lldp_peer -->
 <g id="edge17" class="edge">
 <title>eno4np3&#45;&gt;no_lldp_peer</title>
-<path fill="none" stroke="#6c7086" stroke-dasharray="5,2" d="M702.29,-432.04C751.64,-387.3 839.37,-307.76 881.3,-269.75"/>
-<polygon fill="#6c7086" stroke="#6c7086" points="883.57,-272.41 888.63,-263.1 878.87,-267.23 883.57,-272.41"/>
+<path fill="none" stroke="#6c7086" stroke-dasharray="5,2" d="M713.41,-335.17C757.42,-315.22 822.62,-285.66 864.43,-266.71"/>
+<polygon fill="#6c7086" stroke="#6c7086" points="865.75,-269.95 873.41,-262.64 862.86,-263.58 865.75,-269.95"/>
 </g>
 <!-- ens5f2np2&#45;&gt;no_lldp_peer -->
 <g id="edge22" class="edge">
 <title>ens5f2np2&#45;&gt;no_lldp_peer</title>
-<path fill="none" stroke="#6c7086" stroke-dasharray="5,2" d="M713.41,-335.17C757.42,-315.22 822.62,-285.66 864.43,-266.71"/>
-<polygon fill="#6c7086" stroke="#6c7086" points="865.75,-269.95 873.41,-262.64 862.86,-263.58 865.75,-269.95"/>
+<path fill="none" stroke="#6c7086" stroke-dasharray="5,2" d="M713.41,-248.38C753.55,-248.38 811.31,-248.38 852.88,-248.38"/>
+<polygon fill="#6c7086" stroke="#6c7086" points="852.64,-251.88 862.64,-248.38 852.64,-244.88 852.64,-251.88"/>
 </g>
 <!-- ens5f3np3&#45;&gt;no_lldp_peer -->
 <g id="edge23" class="edge">
 <title>ens5f3np3&#45;&gt;no_lldp_peer</title>
-<path fill="none" stroke="#6c7086" stroke-dasharray="5,2" d="M713.41,-248.38C753.55,-248.38 811.31,-248.38 852.88,-248.38"/>
-<polygon fill="#6c7086" stroke="#6c7086" points="852.64,-251.88 862.64,-248.38 852.64,-244.88 852.64,-251.88"/>
+<path fill="none" stroke="#6c7086" stroke-dasharray="5,2" d="M713.41,-161.58C757.42,-181.53 822.62,-211.09 864.43,-230.04"/>
+<polygon fill="#6c7086" stroke="#6c7086" points="862.86,-233.17 873.41,-234.11 865.75,-226.8 862.86,-233.17"/>
 </g>
 <!-- idrac&#45;&gt;no_lldp_peer -->
 <g id="edge26" class="edge">
 <title>idrac&#45;&gt;no_lldp_peer</title>
-<path fill="none" stroke="#6c7086" stroke-dasharray="5,2" d="M713.41,-161.58C757.42,-181.53 822.62,-211.09 864.43,-230.04"/>
-<polygon fill="#6c7086" stroke="#6c7086" points="862.86,-233.17 873.41,-234.11 865.75,-226.8 862.86,-233.17"/>
+<path fill="none" stroke="#6c7086" stroke-dasharray="5,2" d="M702.29,-64.71C751.64,-109.45 839.37,-188.99 881.3,-227"/>
+<polygon fill="#6c7086" stroke="#6c7086" points="878.87,-229.52 888.63,-233.65 883.57,-224.34 878.87,-229.52"/>
 </g>
 <!-- sw_switch_01_example_net -->
 <g id="node23" class="node">
 <title>sw_switch_01_example_net</title>
-<path fill="#313244" stroke="none" d="M834.5,-758.25C834.5,-758.25 977.25,-758.25 977.25,-758.25 983.25,-758.25 989.25,-764.25 989.25,-770.25 989.25,-770.25 989.25,-810.5 989.25,-810.5 989.25,-816.5 983.25,-822.5 977.25,-822.5 977.25,-822.5 834.5,-822.5 834.5,-822.5 828.5,-822.5 822.5,-816.5 822.5,-810.5 822.5,-810.5 822.5,-770.25 822.5,-770.25 822.5,-764.25 828.5,-758.25 834.5,-758.25"/>
-<text xml:space="preserve" text-anchor="start" x="833.5" y="-799.2" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="14.00" fill="#fab387">switch&#45;01.example.net</text>
-<text xml:space="preserve" text-anchor="start" x="889.75" y="-770.05" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#a6adc8">Switch</text>
-<path fill="none" stroke="#fab387" d="M834.5,-758.25C834.5,-758.25 977.25,-758.25 977.25,-758.25 983.25,-758.25 989.25,-764.25 989.25,-770.25 989.25,-770.25 989.25,-810.5 989.25,-810.5 989.25,-816.5 983.25,-822.5 977.25,-822.5 977.25,-822.5 834.5,-822.5 834.5,-822.5 828.5,-822.5 822.5,-816.5 822.5,-810.5 822.5,-810.5 822.5,-770.25 822.5,-770.25 822.5,-764.25 828.5,-758.25 834.5,-758.25"/>
+<path fill="#313244" stroke="none" d="M834.5,-744.25C834.5,-744.25 977.25,-744.25 977.25,-744.25 983.25,-744.25 989.25,-750.25 989.25,-756.25 989.25,-756.25 989.25,-796.5 989.25,-796.5 989.25,-802.5 983.25,-808.5 977.25,-808.5 977.25,-808.5 834.5,-808.5 834.5,-808.5 828.5,-808.5 822.5,-802.5 822.5,-796.5 822.5,-796.5 822.5,-756.25 822.5,-756.25 822.5,-750.25 828.5,-744.25 834.5,-744.25"/>
+<text xml:space="preserve" text-anchor="start" x="833.5" y="-785.2" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="14.00" fill="#fab387">switch&#45;01.example.net</text>
+<text xml:space="preserve" text-anchor="start" x="889.75" y="-756.05" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#a6adc8">Switch</text>
+<path fill="none" stroke="#fab387" d="M834.5,-744.25C834.5,-744.25 977.25,-744.25 977.25,-744.25 983.25,-744.25 989.25,-750.25 989.25,-756.25 989.25,-756.25 989.25,-796.5 989.25,-796.5 989.25,-802.5 983.25,-808.5 977.25,-808.5 977.25,-808.5 834.5,-808.5 834.5,-808.5 828.5,-808.5 822.5,-802.5 822.5,-796.5 822.5,-796.5 822.5,-756.25 822.5,-756.25 822.5,-750.25 828.5,-744.25 834.5,-744.25"/>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_2&#45;&gt;sw_switch_01_example_net -->
 <g id="edge27" class="edge">
 <title>swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_2&#45;&gt;sw_switch_01_example_net</title>
-<path fill="none" stroke="#585b70" d="M712,-825.19C741.24,-819.91 780.25,-812.87 815.53,-806.5"/>
-<polygon fill="#585b70" stroke="#585b70" points="815.52,-808.64 821.05,-805.5 814.77,-804.5 815.52,-808.64"/>
+<path fill="none" stroke="#585b70" d="M712,-805.52C741.24,-801.1 780.25,-795.21 815.53,-789.87"/>
+<polygon fill="#585b70" stroke="#585b70" points="815.42,-792.02 821.04,-789.04 814.79,-787.86 815.42,-792.02"/>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_3&#45;&gt;sw_switch_01_example_net -->
 <g id="edge28" class="edge">
 <title>swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_3&#45;&gt;sw_switch_01_example_net</title>
-<path fill="none" stroke="#585b70" d="M683.38,-625.82C718.74,-652.09 802.15,-714.06 855.92,-754.01"/>
-<polygon fill="#585b70" stroke="#585b70" points="854.4,-755.49 860.47,-757.38 856.9,-752.12 854.4,-755.49"/>
+<path fill="none" stroke="#585b70" d="M685.32,-630.77C720.49,-654.1 797.72,-705.31 850.53,-740.34"/>
+<polygon fill="#585b70" stroke="#585b70" points="849.1,-741.91 855.27,-743.48 851.43,-738.41 849.1,-741.91"/>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_38&#45;&gt;sw_switch_01_example_net -->
 <g id="edge29" class="edge">
 <title>swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_38&#45;&gt;sw_switch_01_example_net</title>
-<path fill="none" stroke="#585b70" d="M713.41,-749.39C742.63,-755.65 781.2,-763.9 816.06,-771.36"/>
-<polygon fill="#585b70" stroke="#585b70" points="815.19,-773.32 821.5,-772.53 816.07,-769.22 815.19,-773.32"/>
+<path fill="none" stroke="#585b70" d="M713.41,-750.66C742.51,-754.57 780.88,-759.72 815.62,-764.39"/>
+<polygon fill="#585b70" stroke="#585b70" points="815.25,-766.46 821.48,-765.17 815.81,-762.29 815.25,-766.46"/>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_39&#45;&gt;sw_switch_01_example_net -->
 <g id="edge30" class="edge">
 <title>swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_39&#45;&gt;sw_switch_01_example_net</title>
-<path fill="none" stroke="#585b70" d="M677.93,-1137.87C687.76,-1126.78 702.16,-1109.95 713.5,-1094.38 780.44,-1002.44 849.12,-887.23 883.09,-828.55"/>
-<polygon fill="#585b70" stroke="#585b70" points="884.73,-829.92 885.91,-823.67 881.09,-827.82 884.73,-829.92"/>
+<path fill="none" stroke="#585b70" d="M675.5,-1150C685.1,-1136.49 700.76,-1114.14 713.5,-1094.38 777.5,-995.1 847.98,-874.94 882.83,-814.71"/>
+<polygon fill="#585b70" stroke="#585b70" points="884.56,-815.92 885.74,-809.68 880.92,-813.82 884.56,-815.92"/>
 </g>
 <!-- sw_switch_02_example_net -->
 <g id="node24" class="node">
 <title>sw_switch_02_example_net</title>
-<path fill="#313244" stroke="none" d="M834.5,-992.25C834.5,-992.25 977.25,-992.25 977.25,-992.25 983.25,-992.25 989.25,-998.25 989.25,-1004.25 989.25,-1004.25 989.25,-1044.5 989.25,-1044.5 989.25,-1050.5 983.25,-1056.5 977.25,-1056.5 977.25,-1056.5 834.5,-1056.5 834.5,-1056.5 828.5,-1056.5 822.5,-1050.5 822.5,-1044.5 822.5,-1044.5 822.5,-1004.25 822.5,-1004.25 822.5,-998.25 828.5,-992.25 834.5,-992.25"/>
-<text xml:space="preserve" text-anchor="start" x="833.5" y="-1033.2" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="14.00" fill="#fab387">switch&#45;02.example.net</text>
-<text xml:space="preserve" text-anchor="start" x="889.75" y="-1004.05" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#a6adc8">Switch</text>
-<path fill="none" stroke="#fab387" d="M834.5,-992.25C834.5,-992.25 977.25,-992.25 977.25,-992.25 983.25,-992.25 989.25,-998.25 989.25,-1004.25 989.25,-1004.25 989.25,-1044.5 989.25,-1044.5 989.25,-1050.5 983.25,-1056.5 977.25,-1056.5 977.25,-1056.5 834.5,-1056.5 834.5,-1056.5 828.5,-1056.5 822.5,-1050.5 822.5,-1044.5 822.5,-1044.5 822.5,-1004.25 822.5,-1004.25 822.5,-998.25 828.5,-992.25 834.5,-992.25"/>
+<path fill="#313244" stroke="none" d="M834.5,-981.25C834.5,-981.25 977.25,-981.25 977.25,-981.25 983.25,-981.25 989.25,-987.25 989.25,-993.25 989.25,-993.25 989.25,-1033.5 989.25,-1033.5 989.25,-1039.5 983.25,-1045.5 977.25,-1045.5 977.25,-1045.5 834.5,-1045.5 834.5,-1045.5 828.5,-1045.5 822.5,-1039.5 822.5,-1033.5 822.5,-1033.5 822.5,-993.25 822.5,-993.25 822.5,-987.25 828.5,-981.25 834.5,-981.25"/>
+<text xml:space="preserve" text-anchor="start" x="833.5" y="-1022.2" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="14.00" fill="#fab387">switch&#45;02.example.net</text>
+<text xml:space="preserve" text-anchor="start" x="889.75" y="-993.05" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#a6adc8">Switch</text>
+<path fill="none" stroke="#fab387" d="M834.5,-981.25C834.5,-981.25 977.25,-981.25 977.25,-981.25 983.25,-981.25 989.25,-987.25 989.25,-993.25 989.25,-993.25 989.25,-1033.5 989.25,-1033.5 989.25,-1039.5 983.25,-1045.5 977.25,-1045.5 977.25,-1045.5 834.5,-1045.5 834.5,-1045.5 828.5,-1045.5 822.5,-1039.5 822.5,-1033.5 822.5,-1033.5 822.5,-993.25 822.5,-993.25 822.5,-987.25 828.5,-981.25 834.5,-981.25"/>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_2&#45;&gt;sw_switch_02_example_net -->
 <g id="edge31" class="edge">
 <title>swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_2&#45;&gt;sw_switch_02_example_net</title>
-<path fill="none" stroke="#585b70" d="M712,-1053.52C741.24,-1049.1 780.25,-1043.21 815.53,-1037.87"/>
-<polygon fill="#585b70" stroke="#585b70" points="815.42,-1040.02 821.04,-1037.04 814.79,-1035.86 815.42,-1040.02"/>
+<path fill="none" stroke="#585b70" d="M712,-1051.42C741.24,-1045.66 780.25,-1037.96 815.53,-1031"/>
+<polygon fill="#585b70" stroke="#585b70" points="815.57,-1033.13 821.05,-1029.91 814.76,-1029.01 815.57,-1033.13"/>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_3&#45;&gt;sw_switch_02_example_net -->
 <g id="edge32" class="edge">
 <title>swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_3&#45;&gt;sw_switch_02_example_net</title>
-<path fill="none" stroke="#585b70" d="M693.96,-926.99C726.63,-942.08 782.69,-967.96 828.81,-989.25"/>
-<polygon fill="#585b70" stroke="#585b70" points="827.83,-991.12 834.16,-991.73 829.59,-987.3 827.83,-991.12"/>
+<path fill="none" stroke="#585b70" d="M691.67,-907.78C725.05,-924.31 785.47,-954.24 833.5,-978.02"/>
+<polygon fill="#585b70" stroke="#585b70" points="832.52,-979.88 838.83,-980.66 834.38,-976.12 832.52,-979.88"/>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_38&#45;&gt;sw_switch_02_example_net -->
 <g id="edge33" class="edge">
 <title>swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_38&#45;&gt;sw_switch_02_example_net</title>
-<path fill="none" stroke="#585b70" d="M713.41,-996.25C742.51,-1000.52 780.88,-1006.16 815.62,-1011.26"/>
-<polygon fill="#585b70" stroke="#585b70" points="815.24,-1013.33 821.48,-1012.12 815.85,-1009.17 815.24,-1013.33"/>
+<path fill="none" stroke="#585b70" d="M713.41,-975.6C742.51,-981.35 780.88,-988.91 815.62,-995.77"/>
+<polygon fill="#585b70" stroke="#585b70" points="815.2,-997.82 821.49,-996.93 816.01,-993.7 815.2,-997.82"/>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_39&#45;&gt;sw_switch_02_example_net -->
 <g id="edge34" class="edge">
 <title>swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_39&#45;&gt;sw_switch_02_example_net</title>
-<path fill="none" stroke="#585b70" d="M680.38,-1236.84C700.52,-1218.26 738.83,-1181.98 768.5,-1148.38 794.51,-1118.92 793.67,-1105.07 822.5,-1078.38 829.2,-1072.17 836.69,-1066.21 844.34,-1060.65"/>
-<polygon fill="#585b70" stroke="#585b70" points="845.3,-1062.54 848.99,-1057.36 842.88,-1059.12 845.3,-1062.54"/>
-</g>
-<!-- legend -->
-<g id="node26" class="node">
-<title>legend</title>
-<polygon fill="#1e1e2e" stroke="none" points="853.88,-1099.88 853.88,-1190.88 957.88,-1190.88 957.88,-1099.88 853.88,-1099.88"/>
-<text xml:space="preserve" text-anchor="start" x="876.62" y="-1173.42" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">Link Speed</text>
-<polygon fill="#a6adc8" stroke="none" points="858.88,-1147.38 858.88,-1164.62 888.88,-1164.62 888.88,-1147.38 858.88,-1147.38"/>
-<text xml:space="preserve" text-anchor="start" x="872.38" y="-1151.17" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
-<text xml:space="preserve" text-anchor="start" x="907.5" y="-1152.33" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">25 GbE</text>
-<polygon fill="#a6adc8" stroke="none" points="858.88,-1126.12 858.88,-1143.38 888.88,-1143.38 888.88,-1126.12 858.88,-1126.12"/>
-<text xml:space="preserve" text-anchor="start" x="872.38" y="-1129.92" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
-<text xml:space="preserve" text-anchor="start" x="907.5" y="-1131.08" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">10 GbE</text>
-<polygon fill="#a6adc8" stroke="none" points="858.88,-1104.88 858.88,-1122.12 888.88,-1122.12 888.88,-1104.88 858.88,-1104.88"/>
-<text xml:space="preserve" text-anchor="start" x="872.38" y="-1108.67" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
-<text xml:space="preserve" text-anchor="start" x="895.88" y="-1109.83" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">Fast Ethernet</text>
-<polygon fill="none" stroke="#585b70" points="853.88,-1099.88 853.88,-1190.88 957.88,-1190.88 957.88,-1099.88 853.88,-1099.88"/>
+<path fill="none" stroke="#585b70" d="M678.44,-1254.78C713.1,-1217.83 815.46,-1108.7 869.9,-1050.66"/>
+<polygon fill="#585b70" stroke="#585b70" points="871.41,-1052.12 873.98,-1046.31 868.34,-1049.25 871.41,-1052.12"/>
 </g>
 </g>
 </svg>

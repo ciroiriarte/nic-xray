@@ -234,18 +234,18 @@ digraph nic_xray {
     server -> ens8f1np1 [color="#585b70", penwidth=1.0, arrowsize=0.6];
     server -> idrac [color="#585b70", penwidth=1.0, arrowsize=0.6];
 
-    eno1np0 -> swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_2 [label=<VLAN 100;101;102;110;111>, penwidth=2.5, color="#89b4fa", fontcolor="#a6adc8"];
-    eno2np1 -> swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_3 [label=<VLAN 200;201;202;211;212>, penwidth=2.5, color="#f9e2af", fontcolor="#a6adc8"];
+    eno1np0 -> swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_2 [label=<VLAN <B><U>100</U></B>;101;102;110;111<BR/>10GbE>, penwidth=2.5, color="#89b4fa", fontcolor="#a6adc8"];
+    eno2np1 -> swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_3 [label=<VLAN <B><U>200</U></B>;201;202;211;212<BR/>10GbE>, penwidth=2.5, color="#f9e2af", fontcolor="#a6adc8"];
     eno3np2 -> no_lldp_peer [style=dashed, color="#6c7086", fontcolor="#6c7086", penwidth=1.0];
     eno4np3 -> no_lldp_peer [style=dashed, color="#6c7086", fontcolor="#6c7086", penwidth=1.0];
-    ens3f0np0 -> swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_38 [label=<VLAN 501>, penwidth=3.0, color="#94e2d5", fontcolor="#a6adc8"];
-    ens3f1np1 -> swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_39 [label=<VLAN 502>, penwidth=3.0, color="#f5c2e7", fontcolor="#a6adc8"];
-    ens5f0np0 -> swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_2 [label=<VLAN 100;101;102;110;111>, penwidth=2.5, color="#89b4fa", fontcolor="#a6adc8"];
-    ens5f1np1 -> swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_3 [label=<VLAN 200;201;202;211;212>, penwidth=2.5, color="#f9e2af", fontcolor="#a6adc8"];
+    ens3f0np0 -> swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_38 [label=<VLAN <B><U>501</U></B><BR/>25GbE>, penwidth=3.0, color="#94e2d5", fontcolor="#a6adc8"];
+    ens3f1np1 -> swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_39 [label=<VLAN <B><U>502</U></B><BR/>25GbE>, penwidth=3.0, color="#f5c2e7", fontcolor="#a6adc8"];
+    ens5f0np0 -> swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_2 [label=<VLAN <B><U>100</U></B>;101;102;110;111<BR/>10GbE>, penwidth=2.5, color="#89b4fa", fontcolor="#a6adc8"];
+    ens5f1np1 -> swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_3 [label=<VLAN <B><U>200</U></B>;201;202;211;212<BR/>10GbE>, penwidth=2.5, color="#f9e2af", fontcolor="#a6adc8"];
     ens5f2np2 -> no_lldp_peer [style=dashed, color="#6c7086", fontcolor="#6c7086", penwidth=1.0];
     ens5f3np3 -> no_lldp_peer [style=dashed, color="#6c7086", fontcolor="#6c7086", penwidth=1.0];
-    ens8f0np0 -> swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_38 [label=<VLAN 501>, penwidth=3.0, color="#94e2d5", fontcolor="#a6adc8"];
-    ens8f1np1 -> swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_39 [label=<VLAN 502>, penwidth=3.0, color="#f5c2e7", fontcolor="#a6adc8"];
+    ens8f0np0 -> swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_38 [label=<VLAN <B><U>501</U></B><BR/>25GbE>, penwidth=3.0, color="#94e2d5", fontcolor="#a6adc8"];
+    ens8f1np1 -> swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_39 [label=<VLAN <B><U>502</U></B><BR/>25GbE>, penwidth=3.0, color="#f5c2e7", fontcolor="#a6adc8"];
     idrac -> no_lldp_peer [style=dashed, color="#6c7086", fontcolor="#6c7086", penwidth=1.0];
     swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_2 -> sw_switch_01_example_net [color="#585b70", penwidth=1.0, arrowsize=0.6];
     swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_3 -> sw_switch_01_example_net [color="#585b70", penwidth=1.0, arrowsize=0.6];
@@ -256,18 +256,6 @@ digraph nic_xray {
     swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_38 -> sw_switch_02_example_net [color="#585b70", penwidth=1.0, arrowsize=0.6];
     swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_39 -> sw_switch_02_example_net [color="#585b70", penwidth=1.0, arrowsize=0.6];
 
-    legend [shape=plain, label=<
-        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="4" CELLPADDING="3" BGCOLOR="#1e1e2e" COLOR="#585b70">
-        <TR><TD COLSPAN="2"><FONT COLOR="#cdd6f4"><B>Link Speed</B></FONT></TD></TR>
-        <TR><TD WIDTH="30" HEIGHT="9" BGCOLOR="#a6adc8"> </TD>
-            <TD><FONT POINT-SIZE="9" COLOR="#a6adc8">25 GbE</FONT></TD></TR>
-        <TR><TD WIDTH="30" HEIGHT="8" BGCOLOR="#a6adc8"> </TD>
-            <TD><FONT POINT-SIZE="9" COLOR="#a6adc8">10 GbE</FONT></TD></TR>
-        <TR><TD WIDTH="30" HEIGHT="5" BGCOLOR="#a6adc8"> </TD>
-            <TD><FONT POINT-SIZE="9" COLOR="#a6adc8">Fast Ethernet</FONT></TD></TR>
-        </TABLE>
-    >];
-
     { rank=min; server; }
-    { rank=max; sw_switch_01_example_net; sw_switch_02_example_net; no_lldp_peer; legend; }
+    { rank=max; sw_switch_01_example_net; sw_switch_02_example_net; no_lldp_peer; }
 }

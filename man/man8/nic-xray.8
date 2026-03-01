@@ -264,7 +264,9 @@ with dashed blue borders grouping member interfaces and LACP status label
 with colored border (green=UP, red=DOWN), showing interface name, MAC address, and MTU
 .IP \(bu
 .B Edge labels
-showing VLAN information
+showing VLAN information near the NIC end and negotiated speed tier near
+the switch port end. PVID is bold and underlined to distinguish it from
+tagged VLANs
 .IP \(bu
 .B Edge thickness
 scales with negotiated speed tier (thicker = faster): Fast Ethernet, 1 GbE,
@@ -272,9 +274,6 @@ scales with negotiated speed tier (thicker = faster): Fast Ethernet, 1 GbE,
 .IP \(bu
 .B Edge color
 green for UP links, red for DOWN links
-.IP \(bu
-.B Link Speed legend
-showing only the detected speed tiers with proportional thickness bars
 .IP \(bu
 .B Switch nodes
 with orange border on the right

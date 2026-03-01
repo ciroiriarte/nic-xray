@@ -939,7 +939,6 @@ DOTHEADER
     printf '\n'
 
     # --- Edges: interfaces -> switch ports / stubs ---
-    declare -A DETECTED_SPEEDS
     for ((i = 0; i < ROW_COUNT; i++)); do
         local IFACE="${DATA_IFACE[$i]}"
         local NODE_ID
@@ -953,11 +952,6 @@ DOTHEADER
 
         local PW
         PW=$(dot_penwidth "$SPEED_RAW")
-
-        # Track detected speed tiers for the legend
-        local TIER
-        TIER=$(dot_speed_tier "$SPEED_RAW")
-        [[ -n "$TIER" ]] && DETECTED_SPEEDS["$TIER"]=1
 
         if [[ -n "$SW" && -n "$PORT" ]]; then
             local PORT_ID
@@ -973,10 +967,32 @@ DOTHEADER
                 EDGE_COLOR="$RED_COLOR"
             fi
 
-            # Build edge label (VLAN only — speed/MAC are in the nodes)
+            # Build centered edge label: VLAN on top, speed below
             local EDGE_LABEL=""
             if [[ -n "$VLAN" && "$VLAN" != "N/A" ]]; then
-                EDGE_LABEL="VLAN $(dot_escape "$VLAN")"
+                # Format VLANs: bold+underline PVID entries, plain tagged
+                local VLAN_TEXT=""
+                local IFS_SAVE="$IFS"
+                IFS=';' read -ra VLAN_PARTS <<< "$VLAN"
+                IFS="$IFS_SAVE"
+                for V in "${VLAN_PARTS[@]}"; do
+                    [[ -z "$V" ]] && continue
+                    [[ -n "$VLAN_TEXT" ]] && VLAN_TEXT+=";"
+                    if [[ "$V" == *"[P]"* ]]; then
+                        local VID="${V%%\[P\]*}"
+                        VLAN_TEXT+="<B><U>$(dot_escape "$VID")</U></B>"
+                    else
+                        VLAN_TEXT+="$(dot_escape "$V")"
+                    fi
+                done
+                EDGE_LABEL="VLAN ${VLAN_TEXT}"
+            fi
+
+            local TIER
+            TIER=$(dot_speed_tier "$SPEED_RAW")
+            if [[ -n "$TIER" ]]; then
+                [[ -n "$EDGE_LABEL" ]] && EDGE_LABEL+="<BR/>"
+                EDGE_LABEL+="$TIER"
             fi
 
             printf '    %s -> %s [label=<%s>, penwidth=%s, color="%s", fontcolor="%s"];\n' \
@@ -1021,55 +1037,17 @@ DOTHEADER
     unset EMITTED_SW_EDGES
     printf '\n'
 
-    # --- Legend node (only detected speed tiers) ---
-    local HAS_LEGEND=false
-    if [[ ${#DETECTED_SPEEDS[@]} -gt 0 ]]; then
-        HAS_LEGEND=true
-        # Ordered tiers from fastest to slowest with their penwidths
-        local -a TIER_ORDER=("800GbE" "400GbE" "100GbE" "25GbE" "10GbE" "1GbE" "Fast")
-        local -A TIER_PW=(
-            ["800GbE"]="6.0" ["400GbE"]="5.0" ["100GbE"]="4.0"
-            ["25GbE"]="3.0" ["10GbE"]="2.5" ["1GbE"]="2.0" ["Fast"]="1.5"
-        )
-        local -A TIER_LABEL=(
-            ["800GbE"]="800 GbE" ["400GbE"]="400 GbE" ["100GbE"]="100 GbE"
-            ["25GbE"]="25 GbE" ["10GbE"]="10 GbE" ["1GbE"]="1 GbE" ["Fast"]="Fast Ethernet"
-        )
-
-        printf '    legend [shape=plain, label=<\n'
-        printf '        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="4" CELLPADDING="3"'
-        printf ' BGCOLOR="%s" COLOR="%s">\n' "$BG_COLOR" "$BORDER_COLOR"
-        printf '        <TR><TD COLSPAN="2"><FONT COLOR="%s"><B>Link Speed</B></FONT></TD></TR>\n' \
-            "$FG_COLOR"
-        for T in "${TIER_ORDER[@]}"; do
-            [[ -z "${DETECTED_SPEEDS[$T]+x}" ]] && continue
-            # HEIGHT proportional to penwidth (scaled ×3 for visibility)
-            local BAR_H
-            BAR_H=$(awk "BEGIN { printf \"%.0f\", ${TIER_PW[$T]} * 3 }")
-            printf '        <TR><TD WIDTH="30" HEIGHT="%s" BGCOLOR="%s"> </TD>\n' \
-                "$BAR_H" "$SUBTEXT_COLOR"
-            printf '            <TD><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
-                "$SUBTEXT_COLOR" "${TIER_LABEL[$T]}"
-        done
-        printf '        </TABLE>\n'
-        printf '    >];\n\n'
-    fi
-    unset DETECTED_SPEEDS
-
     # --- Rank constraints ---
     printf '    { rank=min; server; }\n'
 
     # Switch nodes on the right
-    if [[ ${#SEEN_SWITCHES[@]} -gt 0 || "$HAS_DISCONNECTED" == true || "$HAS_LEGEND" == true ]]; then
+    if [[ ${#SEEN_SWITCHES[@]} -gt 0 || "$HAS_DISCONNECTED" == true ]]; then
         printf '    { rank=max;'
         for SW_NAME in $(printf '%s\n' "${!SEEN_SWITCHES[@]}" | sort); do
             printf ' %s;' "$(dot_id "sw_${SW_NAME}")"
         done
         if [[ "$HAS_DISCONNECTED" == true ]]; then
             printf ' no_lldp_peer;'
-        fi
-        if [[ "$HAS_LEGEND" == true ]]; then
-            printf ' legend;'
         fi
         printf ' }\n'
     fi
