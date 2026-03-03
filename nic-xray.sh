@@ -60,6 +60,8 @@
 #                         - Lane variance detection (>2dB flags outlier channel)
 #                         - Optics supported across all output formats
 #                           (table, CSV, JSON, DOT/SVG/PNG)
+#   - 2026-03-03: v2.9.0 - Enhanced DOT diagram nodes with hardware/software
+#                         descriptions, serial numbers, and generation timestamp
 #   - 2026-03-03: v2.8.0 - Added --watch mode for continuous refresh during
 #                         recabling (alternate screen buffer, clean Ctrl-C exit)
 #                       - Combines with --metrics: sampling duration = watch interval
@@ -73,9 +75,9 @@
 #                           colorize_nonzero() helpers
 #                         - Delta clamping via nameref loop
 #
-# Version: 2.8.0
+# Version: 2.9.0
 
-SCRIPT_VERSION="2.8.0"
+SCRIPT_VERSION="2.9.0"
 SCRIPT_YEAR="2026"
 
 # Interface name pattern to skip (virtual, bond masters, etc.)
