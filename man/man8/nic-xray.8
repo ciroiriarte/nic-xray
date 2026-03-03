@@ -390,7 +390,11 @@ Visual elements:
 .PD 0
 .IP \(bu 3
 .B Server node
-on the left with hostname
+on the left with hostname, hardware vendor and model (from DMI), and operating
+system (from
+.IR /etc/os\-release ).
+Falls back to a plain \(lqServer\(rq label when hardware information is
+unavailable (e.g., in containers or VMs without DMI)
 .IP \(bu
 .B Bond clusters
 with dashed blue borders grouping member interfaces and LACP status label
@@ -416,7 +420,10 @@ scales with negotiated speed tier (thicker = faster): Fast Ethernet, 1 GbE,
 green for UP links, red for DOWN links
 .IP \(bu
 .B Switch nodes
-with orange border on the right
+with orange border on the right, showing hardware brand, model, and firmware
+version parsed from the LLDP SysDescr field. Supports Juniper, Cisco (NX-OS
+and IOS), and Arista patterns. Falls back to raw SysDescr text (truncated)
+or a plain \(lqSwitch\(rq label when no LLDP data is available
 .IP \(bu
 .B Disconnected interfaces
 shown with dashed gray lines to a \(lqNo LLDP peer\(rq label

@@ -934,6 +934,7 @@ declare -a DATA_MET_RX_DROP DATA_MET_TX_DROP
 declare -a DATA_MET_RX_ERR DATA_MET_TX_ERR
 declare -a DATA_MET_RX_FIFO DATA_MET_TX_FIFO
 declare -A BOND_MODE_MAP
+declare -A DATA_SWITCH_DESCR
 declare -a RENDER_ORDER
 ROW_COUNT=0
 
@@ -953,6 +954,19 @@ collect_data() {
     DATA_OPTICS_VENDOR=(); DATA_OPTICS_WAVELENGTH=()
     DATA_OPTICS_TX_LANES=(); DATA_OPTICS_RX_LANES=(); DATA_OPTICS_LANE_COUNT=()
     BOND_MODE_MAP=()
+    DATA_SWITCH_DESCR=()
+
+    # --- Server hardware & OS info (for diagram) ---
+    SERVER_VENDOR=""
+    SERVER_MODEL=""
+    SERVER_OS=""
+    [[ -r /sys/devices/virtual/dmi/id/sys_vendor ]] && \
+        SERVER_VENDOR=$(< /sys/devices/virtual/dmi/id/sys_vendor)
+    [[ -r /sys/devices/virtual/dmi/id/product_name ]] && \
+        SERVER_MODEL=$(< /sys/devices/virtual/dmi/id/product_name)
+    if [[ -r /etc/os-release ]]; then
+        SERVER_OS=$(. /etc/os-release 2>/dev/null && printf '%s' "$PRETTY_NAME")
+    fi
 
     # --- Metrics: Snapshot 1 (before data collection) ---
 if $SHOW_METRICS; then
@@ -1086,6 +1100,11 @@ for _IFACE_PATH in /sys/class/net/*; do
     # LLDP PortAggregID (link aggregation group on the switch side)
     LLDP_AGGID=$(echo "$LLDP_OUTPUT" | awk '/PortAggregID:/ {print $NF}')
     [[ -z "$LLDP_AGGID" ]] && LLDP_AGGID="N/A"
+
+    # Switch SysDescr (for diagram — deduplicated by switch name)
+    if [[ -n "$SWITCH_NAME" && -z "${DATA_SWITCH_DESCR[$SWITCH_NAME]+x}" ]]; then
+        DATA_SWITCH_DESCR["$SWITCH_NAME"]=$(echo "$LLDP_OUTPUT" | awk -F'SysDescr:' '/SysDescr:/ {sub(/^[ \t]+/, "", $2); print $2; exit}')
+    fi
 
     # VLAN Info from LLDP
     VLAN_INFO=""
@@ -1537,6 +1556,73 @@ dot_escape() {
     printf '%s' "$STR"
 }
 
+# Parse switch SysDescr into brand, model, and software components.
+# Uses nameref variables: sets _BRAND, _MODEL, _SOFTWARE in the caller.
+# Falls back to truncated raw string if no known vendor pattern matches.
+parse_switch_descr() {
+    local _DESCR="$1"
+    local -n _BRAND="$2" _MODEL="$3" _SOFTWARE="$4"
+    _BRAND="" _MODEL="" _SOFTWARE=""
+
+    [[ -z "$_DESCR" ]] && return
+
+    # Juniper: "Juniper Networks, Inc. qfx5120-48y-8c Ethernet Switch, kernel JUNOS 23.4R2-S4.11, ..."
+    if [[ "$_DESCR" == "Juniper Networks"* ]]; then
+        _BRAND="Juniper"
+        if [[ "$_DESCR" =~ Juniper\ Networks,\ Inc\.\ ([^ ]+) ]]; then
+            _MODEL="${BASH_REMATCH[1]}"
+        fi
+        if [[ "$_DESCR" =~ JUNOS\ ([^,]+) ]]; then
+            _SOFTWARE="JUNOS ${BASH_REMATCH[1]}"
+        fi
+        return
+    fi
+
+    # Cisco NX-OS: "Cisco NX-OS(tm) n9000, Software (n9000-dk9), Version 9.3(8), ..."
+    if [[ "$_DESCR" == "Cisco NX-OS"* ]]; then
+        _BRAND="Cisco"
+        if [[ "$_DESCR" =~ NX-OS\(tm\)\ ([^,]+) ]]; then
+            _MODEL="${BASH_REMATCH[1]}"
+        fi
+        if [[ "$_DESCR" =~ Version\ ([^,]+) ]]; then
+            _SOFTWARE="NX-OS ${BASH_REMATCH[1]}"
+        fi
+        return
+    fi
+
+    # Cisco IOS: "Cisco IOS Software, ... (cat3k_caa-universalk9), Version 16.12.3a, ..."
+    if [[ "$_DESCR" == "Cisco IOS"* ]]; then
+        _BRAND="Cisco"
+        local _PAREN_RE='[(]([^)]+)[)]'
+        if [[ "$_DESCR" =~ $_PAREN_RE ]]; then
+            _MODEL="${BASH_REMATCH[1]}"
+        fi
+        if [[ "$_DESCR" =~ Version\ ([^,]+) ]]; then
+            _SOFTWARE="IOS ${BASH_REMATCH[1]}"
+        fi
+        return
+    fi
+
+    # Arista: "Arista Networks EOS version 4.23.0F running on an Arista Networks DCS-7050CX3-32S"
+    if [[ "$_DESCR" == "Arista"* ]]; then
+        _BRAND="Arista"
+        if [[ "$_DESCR" =~ (DCS-[^ ]+) ]]; then
+            _MODEL="${BASH_REMATCH[1]}"
+        fi
+        if [[ "$_DESCR" =~ EOS\ version\ ([^ ]+) ]]; then
+            _SOFTWARE="EOS ${BASH_REMATCH[1]}"
+        fi
+        return
+    fi
+
+    # Fallback: truncate to 60 chars, show as brand (no model/software split)
+    if (( ${#_DESCR} > 60 )); then
+        _BRAND="${_DESCR:0:57}..."
+    else
+        _BRAND="$_DESCR"
+    fi
+}
+
 # Map speed (Mb/s) to edge pen width
 dot_penwidth() {
     local RAW="$1"
@@ -1668,7 +1754,17 @@ DOTHEADER
     printf 'BGCOLOR="%s" COLOR="%s">\n' "$SURFACE_COLOR" "$BORDER_COLOR"
     printf '        <TR><TD COLSPAN="2"><FONT POINT-SIZE="14" COLOR="%s"><B>%s</B></FONT></TD></TR>\n' \
         "$MAUVE_COLOR" "$(dot_escape "$HOSTNAME")"
-    printf '        <TR><TD COLSPAN="2"><FONT COLOR="%s">Server</FONT></TD></TR>\n' "$SUBTEXT_COLOR"
+    if [[ -n "$SERVER_VENDOR" || -n "$SERVER_MODEL" ]]; then
+        local _SERVER_HW="${SERVER_VENDOR}${SERVER_MODEL:+ $SERVER_MODEL}"
+        printf '        <TR><TD COLSPAN="2"><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
+            "$SUBTEXT_COLOR" "$(dot_escape "$_SERVER_HW")"
+    fi
+    if [[ -n "$SERVER_OS" ]]; then
+        printf '        <TR><TD COLSPAN="2"><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
+            "$SUBTEXT_COLOR" "$(dot_escape "$SERVER_OS")"
+    elif [[ -z "$SERVER_VENDOR" && -z "$SERVER_MODEL" ]]; then
+        printf '        <TR><TD COLSPAN="2"><FONT COLOR="%s">Server</FONT></TD></TR>\n' "$SUBTEXT_COLOR"
+    fi
     printf '        </TABLE>\n'
     printf '    >];\n\n'
 
@@ -1892,7 +1988,29 @@ DOTHEADER
         printf 'BGCOLOR="%s" COLOR="%s" STYLE="ROUNDED">\n' "$SURFACE_COLOR" "$PEACH_COLOR"
         printf '        <TR><TD><FONT POINT-SIZE="14" COLOR="%s"><B>%s</B></FONT></TD></TR>\n' \
             "$PEACH_COLOR" "$(dot_escape "$SW_NAME")"
-        printf '        <TR><TD><FONT COLOR="%s">Switch</FONT></TD></TR>\n' "$SUBTEXT_COLOR"
+
+        local _SW_DESCR="${DATA_SWITCH_DESCR[$SW_NAME]:-}"
+        if [[ -n "$_SW_DESCR" ]]; then
+            local _SW_BRAND="" _SW_MODEL="" _SW_SOFT=""
+            parse_switch_descr "$_SW_DESCR" _SW_BRAND _SW_MODEL _SW_SOFT
+            if [[ -n "$_SW_MODEL" ]]; then
+                # Parsed successfully: brand + model, then software
+                printf '        <TR><TD><FONT POINT-SIZE="9" COLOR="%s">%s %s</FONT></TD></TR>\n' \
+                    "$SUBTEXT_COLOR" "$(dot_escape "$_SW_BRAND")" "$(dot_escape "$_SW_MODEL")"
+                [[ -n "$_SW_SOFT" ]] && \
+                    printf '        <TR><TD><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
+                        "$SUBTEXT_COLOR" "$(dot_escape "$_SW_SOFT")"
+            elif [[ -n "$_SW_BRAND" ]]; then
+                # Fallback: truncated SysDescr as single row
+                printf '        <TR><TD><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
+                    "$SUBTEXT_COLOR" "$(dot_escape "$_SW_BRAND")"
+            else
+                printf '        <TR><TD><FONT COLOR="%s">Switch</FONT></TD></TR>\n' "$SUBTEXT_COLOR"
+            fi
+        else
+            printf '        <TR><TD><FONT COLOR="%s">Switch</FONT></TD></TR>\n' "$SUBTEXT_COLOR"
+        fi
+
         printf '        </TABLE>\n'
         printf '    >];\n\n'
     done
