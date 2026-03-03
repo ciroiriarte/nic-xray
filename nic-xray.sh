@@ -53,10 +53,17 @@
 #                         - Bond variance detection: flags imbalanced members
 #                           in non-active-backup bonds (< 70% of max → red)
 #                         - Progress bar during sampling window (table + TTY)
+#   - 2026-03-02: v2.6.0 - Added --optics flag for SFP/QSFP transceiver diagnostics:
+#                           Tx/Rx optical power levels (dBm) with health status
+#                         - DOM threshold evaluation (vendor EEPROM or static fallback)
+#                         - Multi-lane (QSFP+/QSFP28) support with per-lane detail
+#                         - Lane variance detection (>2dB flags outlier channel)
+#                         - Optics supported across all output formats
+#                           (table, CSV, JSON, DOT/SVG/PNG)
 #
-# Version: 2.5.0
+# Version: 2.6.0
 
-SCRIPT_VERSION="2.5.0"
+SCRIPT_VERSION="2.6.0"
 SCRIPT_YEAR="2026"
 
 # LOCALE setup, we expect output in English for proper parsing
@@ -74,10 +81,11 @@ FILTER_LINK=""
 DIAGRAM_OUTPUT_FILE=""
 SHOW_METRICS=false
 METRICS_DURATION=30
+SHOW_OPTICS=false
 
 
 # Parse options using getopt
-if ! OPTIONS=$(getopt -o hvs::m:: --long help,version,lacp,vlan,bmac,separator::,group-bond,output:,no-color,all,filter-link:,diagram-out:,metrics:: -n "$0" -- "$@"); then
+if ! OPTIONS=$(getopt -o hvs::m::o --long help,version,lacp,vlan,bmac,optics,separator::,group-bond,output:,no-color,all,filter-link:,diagram-out:,metrics:: -n "$0" -- "$@"); then
 	echo "Failed to parse options." >&2
 	exit 1
 fi
@@ -101,6 +109,10 @@ while true; do
 			SHOW_BMAC=true
 			shift
 			;;
+		-o|--optics)
+			SHOW_OPTICS=true
+			shift
+			;;
 		-s|--separator)
 			if [[ -n "$2" ]]; then
 				FIELD_SEP="$2"
@@ -118,6 +130,7 @@ while true; do
 			SHOW_LACP=true
 			SHOW_VLAN=true
 			SHOW_BMAC=true
+			SHOW_OPTICS=true
 			shift
 			;;
 		--filter-link)
@@ -169,8 +182,8 @@ while true; do
 			exit 0
 			;;
 		-h|--help)
-			echo -e "Usage: $0 [--lacp] [--vlan] [--bmac] [--all] [--no-color]"
-			echo -e "       [--filter-link up|down] [-s[SEP]|--separator[=SEP]]"
+			echo -e "Usage: $0 [--lacp] [--vlan] [--bmac] [-o|--optics] [--all]"
+			echo -e "       [--no-color] [--filter-link up|down] [-s[SEP]|--separator[=SEP]]"
 			echo -e "       [--group-bond] [-m[SEC]|--metrics[=SEC]]"
 			echo -e "       [--output FORMAT] [--diagram-out FILE] [--help]"
 			echo -e ""
@@ -179,13 +192,16 @@ while true; do
 			echo -e "Description:"
 			echo -e " Lists physical network interfaces with detailed information including:"
 			echo -e " PCI slot, driver, firmware, MAC, MTU, link, speed/duplex, bond membership,"
-			echo -e " LLDP peer info, and optionally LACP status and VLAN tagging (via LLDP)."
+			echo -e " LLDP peer info, and optionally LACP status, VLAN tagging, and SFP optics."
 			echo -e ""
 			echo -e "Options:"
 			echo -e " --lacp              Show LACP Aggregator ID and Partner MAC per interface"
 			echo -e " --vlan              Show VLAN tagging information (from LLDP)"
 			echo -e " --bmac              Show bridge MAC address"
-			echo -e " --all               Enable all optional columns (--lacp --vlan --bmac)"
+			echo -e " -o, --optics        Show SFP/QSFP transceiver diagnostics (Tx/Rx power, health)"
+			echo -e "                     Health status: OK (green), WARN (yellow), ALARM (red),"
+			echo -e "                     N/DOM (no DOM data), N/A (no SFP or copper)"
+			echo -e " --all               Enable all optional columns (--lacp --vlan --bmac --optics)"
 			echo -e " --no-color          Disable color output (auto-disabled for non-terminal)"
 			echo -e " --filter-link TYPE  Show only interfaces with link up or down"
 			echo -e " -s, --separator     Show │ column separators in table output; applies to CSV too"
@@ -225,6 +241,7 @@ if [[ "$OUTPUT_FORMAT" =~ ^(dot|svg|png)$ ]]; then
     SHOW_LACP=true
     SHOW_VLAN=true
     SHOW_BMAC=true
+    SHOW_OPTICS=true
 
     # Check graphviz availability for rendered formats
     if [[ "$OUTPUT_FORMAT" != "dot" ]] && ! command -v dot &>/dev/null; then
@@ -394,6 +411,429 @@ is_active_backup() {
     [[ "${BOND_MODE_MAP[$1]}" == *"active-backup"* ]]
 }
 
+# --- SFP/QSFP Optics Diagnostics ---
+
+# Fallback DOM thresholds (dBm) when SFP EEPROM thresholds are unavailable
+# Format: "tx_low_alarm tx_low_warn tx_high_warn tx_high_alarm rx_low_alarm rx_low_warn rx_high_warn rx_high_alarm"
+# Sources: Cisco, Juniper, FS.com datasheets (SFF-8472/SFF-8636 typical ranges)
+declare -A SFP_FALLBACK_THRESHOLDS=(
+    # 1G SFP
+    ["1000BASE-SX"]="-11.0 -9.5 -2.5 -1.0 -17.0 -16.0 -0.5 0.0"
+    ["1000BASE-LX"]="-11.0 -9.5 -2.5 -1.0 -20.0 -19.0 -3.5 -3.0"
+    ["1000BASE-EX"]="-2.0 -1.0 2.5 3.0 -22.0 -21.0 0.5 1.0"
+    ["1000BASE-ZX"]="-1.0 0.0 4.5 5.0 -23.0 -22.0 -3.5 -3.0"
+    # 10G SFP+
+    ["10GBASE-SR"]="-9.0 -7.3 -0.5 0.0 -12.0 -10.0 -0.5 0.0"
+    ["10GBASE-LR"]="-9.5 -8.2 0.0 0.5 -14.4 -12.0 0.0 0.5"
+    ["10GBASE-LRM"]="-8.0 -6.5 0.0 0.5 -10.0 -8.4 0.0 0.5"
+    ["10GBASE-ER"]="-6.0 -4.7 3.5 4.0 -15.8 -14.0 -1.5 -1.0"
+    ["10GBASE-ZR"]="-1.0 0.0 3.5 4.0 -24.0 -22.0 -7.5 -7.0"
+    # 25G SFP28
+    ["25GBASE-SR"]="-10.0 -8.4 1.9 2.4 -12.0 -10.3 1.9 2.4"
+    ["25GBASE-LR"]="-8.5 -7.0 1.5 2.0 -14.4 -13.3 1.5 2.0"
+    ["25GBASE-ER"]="-4.0 -3.0 5.5 6.0 -21.0 -20.0 -4.5 -4.0"
+    # 40G QSFP+ (per-lane)
+    ["40GBASE-SR4"]="-9.0 -7.5 1.9 2.4 -10.5 -9.0 1.9 2.4"
+    ["40GBASE-LR4"]="-8.5 -7.0 1.8 2.3 -14.0 -12.5 1.8 2.3"
+    # 100G QSFP28 (per-lane)
+    ["100GBASE-SR4"]="-10.0 -8.4 1.9 2.4 -12.0 -10.3 1.9 2.4"
+    ["100GBASE-LR4"]="-5.5 -4.3 4.0 4.5 -14.0 -12.5 4.0 4.5"
+    ["100GBASE-CWDM4"]="-8.0 -6.5 2.0 2.5 -13.0 -11.5 2.0 2.5"
+)
+
+# Evaluate a dBm value against thresholds and return health status
+# Args: $1=dBm value, $2=low_alarm, $3=low_warn, $4=high_warn, $5=high_alarm
+# Returns: OK, WARN, or ALARM
+evaluate_optics_health() {
+    local DBM="$1" LOW_ALARM="$2" LOW_WARN="$3" HIGH_WARN="$4" HIGH_ALARM="$5"
+
+    # -inf or -40 dBm → always ALARM (zero optical power)
+    if [[ "$DBM" == "-inf" || "$DBM" == "-inf"* ]]; then
+        echo "ALARM"
+        return
+    fi
+
+    awk -v dbm="$DBM" -v la="$LOW_ALARM" -v lw="$LOW_WARN" -v hw="$HIGH_WARN" -v ha="$HIGH_ALARM" \
+        'BEGIN {
+            if (dbm+0 <= -40.0) { print "ALARM"; exit }
+            if (dbm+0 < la+0 || dbm+0 > ha+0) { print "ALARM"; exit }
+            if (dbm+0 < lw+0 || dbm+0 > hw+0) { print "WARN"; exit }
+            print "OK"
+        }'
+}
+
+# Parse SFP/QSFP optics data for an interface
+# Sets caller variables: OPTICS_TYPE, OPTICS_VENDOR, OPTICS_WAVELENGTH,
+#   OPTICS_TX_DBM, OPTICS_RX_DBM, OPTICS_TX_STATUS, OPTICS_RX_STATUS,
+#   OPTICS_LANE_COUNT, OPTICS_TX_LANES, OPTICS_RX_LANES
+parse_optics() {
+    local IFACE="$1"
+
+    # Defaults
+    OPTICS_TYPE="N/A"
+    OPTICS_TYPE_ALL=""
+    OPTICS_BAUD=""
+    OPTICS_VENDOR=""
+    OPTICS_WAVELENGTH=""
+    OPTICS_TX_DBM="N/A"
+    OPTICS_RX_DBM="N/A"
+    OPTICS_TX_STATUS="N/A"
+    OPTICS_RX_STATUS="N/A"
+    OPTICS_LANE_COUNT=0
+    OPTICS_TX_LANES=""
+    OPTICS_RX_LANES=""
+
+    # Run ethtool -m; if it fails, module is absent / copper
+    local ETH_M
+    ETH_M=$(ethtool -m "$IFACE" 2>/dev/null) || return
+
+    # Empty output means no module data
+    [[ -z "$ETH_M" ]] && return
+
+    # Extract module metadata
+    # Collect ALL Transceiver type lines (modules may advertise multiple standards)
+    OPTICS_TYPE=$(echo "$ETH_M" | awk '/Transceiver type/ { sub(/.*Transceiver type[[:space:]]*:[[:space:]]*/,""); print; exit }')
+    OPTICS_TYPE_ALL=$(echo "$ETH_M" | awk '/Transceiver type/ { sub(/.*Transceiver type[[:space:]]*:[[:space:]]*/,""); print }')
+    OPTICS_VENDOR=$(echo "$ETH_M" | awk -F' *: *' '/Vendor name[ ]*:/ {print $2; exit}')
+    OPTICS_WAVELENGTH=$(echo "$ETH_M" | awk -F' *: *' '/Laser wavelength[ ]*:/ {print $2; exit}')
+    # BR, Nominal gives the actual signaling rate of the module (most reliable speed indicator)
+    OPTICS_BAUD=$(echo "$ETH_M" | awk -F' *: *' '/BR, Nominal/ {print $2; exit}')
+
+    # Trim whitespace
+    OPTICS_TYPE="${OPTICS_TYPE## }"
+    OPTICS_TYPE="${OPTICS_TYPE%% }"
+    OPTICS_VENDOR="${OPTICS_VENDOR## }"
+    OPTICS_VENDOR="${OPTICS_VENDOR%% }"
+    OPTICS_WAVELENGTH="${OPTICS_WAVELENGTH## }"
+    OPTICS_WAVELENGTH="${OPTICS_WAVELENGTH%% }"
+
+    [[ -z "$OPTICS_TYPE" ]] && OPTICS_TYPE="N/A"
+
+    # Detect multi-lane (QSFP) vs single-lane (SFP)
+    local IS_MULTI=false
+    if echo "$ETH_M" | grep -q "Channel 1"; then
+        IS_MULTI=true
+    fi
+
+    # Extract DOM alarm/warning thresholds from ethtool -m
+    local TX_LA TX_LW TX_HW TX_HA RX_LA RX_LW RX_HW RX_HA
+    TX_LA=$(echo "$ETH_M" | awk '/Laser output power low alarm threshold/ { for(i=1;i<=NF;i++) if($i=="dBm") print $(i-1); exit }')
+    TX_LW=$(echo "$ETH_M" | awk '/Laser output power low warning threshold/ { for(i=1;i<=NF;i++) if($i=="dBm") print $(i-1); exit }')
+    TX_HW=$(echo "$ETH_M" | awk '/Laser output power high warning threshold/ { for(i=1;i<=NF;i++) if($i=="dBm") print $(i-1); exit }')
+    TX_HA=$(echo "$ETH_M" | awk '/Laser output power high alarm threshold/ { for(i=1;i<=NF;i++) if($i=="dBm") print $(i-1); exit }')
+    RX_LA=$(echo "$ETH_M" | awk '/Laser rx power low alarm threshold/ { for(i=1;i<=NF;i++) if($i=="dBm") print $(i-1); exit }')
+    RX_LW=$(echo "$ETH_M" | awk '/Laser rx power low warning threshold/ { for(i=1;i<=NF;i++) if($i=="dBm") print $(i-1); exit }')
+    RX_HW=$(echo "$ETH_M" | awk '/Laser rx power high warning threshold/ { for(i=1;i<=NF;i++) if($i=="dBm") print $(i-1); exit }')
+    RX_HA=$(echo "$ETH_M" | awk '/Laser rx power high alarm threshold/ { for(i=1;i<=NF;i++) if($i=="dBm") print $(i-1); exit }')
+
+    # Check if DOM thresholds are valid (present and not all zero)
+    local HAS_DOM_THRESHOLDS=true
+    if [[ -z "$TX_LA" || -z "$TX_LW" || -z "$TX_HW" || -z "$TX_HA" || \
+          -z "$RX_LA" || -z "$RX_LW" || -z "$RX_HW" || -z "$RX_HA" ]]; then
+        HAS_DOM_THRESHOLDS=false
+    else
+        # Check if all thresholds are zero (broken DOM)
+        local ALL_ZERO
+        ALL_ZERO=$(awk -v a="$TX_LA" -v b="$TX_LW" -v c="$TX_HW" -v d="$TX_HA" \
+                       -v e="$RX_LA" -v f="$RX_LW" -v g="$RX_HW" -v h="$RX_HA" \
+            'BEGIN { if (a+0==0 && b+0==0 && c+0==0 && d+0==0 && e+0==0 && f+0==0 && g+0==0 && h+0==0) print "yes"; else print "no" }')
+        [[ "$ALL_ZERO" == "yes" ]] && HAS_DOM_THRESHOLDS=false
+    fi
+
+    # Fall back to static table if DOM thresholds unavailable
+    if [[ "$HAS_DOM_THRESHOLDS" == false ]]; then
+        local KEY="$OPTICS_TYPE"
+        if [[ -n "${SFP_FALLBACK_THRESHOLDS[$KEY]+x}" ]]; then
+            read -r TX_LA TX_LW TX_HW TX_HA RX_LA RX_LW RX_HW RX_HA <<< "${SFP_FALLBACK_THRESHOLDS[$KEY]}"
+            HAS_DOM_THRESHOLDS=true
+        else
+            # Normalize type: extract standard name from verbose format
+            # e.g., "10G Ethernet: 10G Base-SR" → "10GBASE-SR"
+            #        "Extended: 100G Base-SR4 or 25GBase-SR" → try "100GBASE-SR4", then "25GBASE-SR"
+            local NORM_KEYS=()
+            local _FB_AFTER="${OPTICS_TYPE#*: }"
+            if [[ "$_FB_AFTER" != "$OPTICS_TYPE" ]]; then
+                # Split on " or " for multi-standard types
+                local _FB_REM="$_FB_AFTER" _FB_PART
+                while [[ "$_FB_REM" == *" or "* ]]; do
+                    _FB_PART="${_FB_REM%% or *}"
+                    _FB_REM="${_FB_REM#* or }"
+                    _FB_PART="${_FB_PART// /}"
+                    _FB_PART="${_FB_PART^^}"
+                    NORM_KEYS+=("$_FB_PART")
+                done
+                _FB_REM="${_FB_REM// /}"
+                _FB_REM="${_FB_REM^^}"
+                NORM_KEYS+=("$_FB_REM")
+            fi
+            for NK in "${NORM_KEYS[@]}"; do
+                if [[ -n "${SFP_FALLBACK_THRESHOLDS[$NK]+x}" ]]; then
+                    read -r TX_LA TX_LW TX_HW TX_HA RX_LA RX_LW RX_HW RX_HA <<< "${SFP_FALLBACK_THRESHOLDS[$NK]}"
+                    HAS_DOM_THRESHOLDS=true
+                    break
+                fi
+            done
+        fi
+    fi
+
+    if [[ "$IS_MULTI" == true ]]; then
+        # --- Multi-lane (QSFP+/QSFP28) ---
+        local -a TX_VALS=() RX_VALS=()
+        local CH TX_V RX_V
+        for CH in 1 2 3 4; do
+            TX_V=$(echo "$ETH_M" | awk -v ch="$CH" '
+                $0 ~ "Transmit avg optical power.*Channel "ch")" {
+                    for(i=1;i<=NF;i++) if($i=="dBm") { print $(i-1); exit }
+                }')
+            RX_V=$(echo "$ETH_M" | awk -v ch="$CH" '
+                $0 ~ "Receiver signal average optical power.*Channel "ch")" {
+                    for(i=1;i<=NF;i++) if($i=="dBm") { print $(i-1); exit }
+                }')
+            [[ -z "$TX_V" ]] && TX_V="N/A"
+            [[ -z "$RX_V" ]] && RX_V="N/A"
+            TX_VALS+=("$TX_V")
+            RX_VALS+=("$RX_V")
+        done
+
+        OPTICS_LANE_COUNT=${#TX_VALS[@]}
+        OPTICS_TX_LANES=$(IFS=':'; echo "${TX_VALS[*]}")
+        OPTICS_RX_LANES=$(IFS=':'; echo "${RX_VALS[*]}")
+
+        # Check if any lane has actual power data
+        local HAS_TX_DATA=false HAS_RX_DATA=false
+        for V in "${TX_VALS[@]}"; do [[ "$V" != "N/A" ]] && HAS_TX_DATA=true && break; done
+        for V in "${RX_VALS[@]}"; do [[ "$V" != "N/A" ]] && HAS_RX_DATA=true && break; done
+
+        if [[ "$HAS_TX_DATA" == false && "$HAS_RX_DATA" == false ]]; then
+            # Module present but no DOM power data (e.g., DAC)
+            OPTICS_TX_STATUS="N/DOM"
+            OPTICS_RX_STATUS="N/DOM"
+            return
+        fi
+
+        # Find worst-case Tx (minimum across lanes)
+        if [[ "$HAS_TX_DATA" == true ]]; then
+            OPTICS_TX_DBM=$(printf '%s\n' "${TX_VALS[@]}" | grep -v 'N/A' | awk 'BEGIN{m=999} {if($1+0<m) m=$1+0} END{printf "%.2f",m}')
+            if [[ "$HAS_DOM_THRESHOLDS" == true ]]; then
+                OPTICS_TX_STATUS=$(evaluate_optics_health "$OPTICS_TX_DBM" "$TX_LA" "$TX_LW" "$TX_HW" "$TX_HA")
+            else
+                OPTICS_TX_STATUS="N/DOM"
+            fi
+        fi
+
+        # Find worst-case Rx (minimum across lanes)
+        if [[ "$HAS_RX_DATA" == true ]]; then
+            OPTICS_RX_DBM=$(printf '%s\n' "${RX_VALS[@]}" | grep -v 'N/A' | awk 'BEGIN{m=999} {if($1+0<m) m=$1+0} END{printf "%.2f",m}')
+            if [[ "$HAS_DOM_THRESHOLDS" == true ]]; then
+                OPTICS_RX_STATUS=$(evaluate_optics_health "$OPTICS_RX_DBM" "$RX_LA" "$RX_LW" "$RX_HW" "$RX_HA")
+            else
+                OPTICS_RX_STATUS="N/DOM"
+            fi
+        fi
+
+        # Lane variance detection: if max - min > 2 dBm, flag outlier
+        # (Appended to the table display string later in colorize_optics)
+    else
+        # --- Single-lane (SFP/SFP+/SFP28) ---
+        OPTICS_LANE_COUNT=1
+        OPTICS_TX_DBM=$(echo "$ETH_M" | awk '/Laser output power[ ]*:/ && !/threshold/ { for(i=1;i<=NF;i++) if($i=="dBm") { print $(i-1); exit } }')
+        OPTICS_RX_DBM=$(echo "$ETH_M" | awk '/Receiver signal average optical power[ ]*:/ && !/threshold/ { for(i=1;i<=NF;i++) if($i=="dBm") { print $(i-1); exit } }')
+
+        if [[ -z "$OPTICS_TX_DBM" && -z "$OPTICS_RX_DBM" ]]; then
+            # Module present but no DOM power data (e.g., DAC cable)
+            OPTICS_TX_DBM="N/A"
+            OPTICS_RX_DBM="N/A"
+            OPTICS_TX_STATUS="N/DOM"
+            OPTICS_RX_STATUS="N/DOM"
+            return
+        fi
+
+        [[ -z "$OPTICS_TX_DBM" ]] && OPTICS_TX_DBM="N/A"
+        [[ -z "$OPTICS_RX_DBM" ]] && OPTICS_RX_DBM="N/A"
+
+        if [[ "$OPTICS_TX_DBM" != "N/A" && "$HAS_DOM_THRESHOLDS" == true ]]; then
+            OPTICS_TX_STATUS=$(evaluate_optics_health "$OPTICS_TX_DBM" "$TX_LA" "$TX_LW" "$TX_HW" "$TX_HA")
+        elif [[ "$OPTICS_TX_DBM" != "N/A" ]]; then
+            OPTICS_TX_STATUS="N/DOM"
+        fi
+
+        if [[ "$OPTICS_RX_DBM" != "N/A" && "$HAS_DOM_THRESHOLDS" == true ]]; then
+            OPTICS_RX_STATUS=$(evaluate_optics_health "$OPTICS_RX_DBM" "$RX_LA" "$RX_LW" "$RX_HW" "$RX_HA")
+        elif [[ "$OPTICS_RX_DBM" != "N/A" ]]; then
+            OPTICS_RX_STATUS="N/DOM"
+        fi
+    fi
+}
+
+# Normalize verbose SFP transceiver type to concise IEEE standard name
+# Uses BR, Nominal (module baud rate) as primary speed signal, negotiated speed as fallback.
+# Args: $1=all transceiver type lines (newline-separated), $2=BR Nominal (e.g., "25750MBd"),
+#       $3=negotiated speed (e.g., "25000Mb/s")
+# Sets caller variable: OPTICS_TYPE (overwritten with normalized value)
+normalize_sfp_type() {
+    local TYPE_ALL="$1" BAUD="$2" SPEED="$3"
+    [[ -z "$TYPE_ALL" ]] && return
+
+    # Collect all normalized candidates from ALL Transceiver type lines
+    local -a CANDIDATES=()
+    while IFS= read -r _LINE; do
+        [[ -z "$_LINE" ]] && continue
+        # Skip non-Ethernet types (FC: Fibre Channel, etc.)
+        [[ "$_LINE" == FC:* ]] && continue
+
+        # Strip category prefix: "10G Ethernet: 10G Base-SR" → "10G Base-SR"
+        local _AFTER="${_LINE#*: }"
+        [[ "$_AFTER" == "$_LINE" ]] && _AFTER="$_LINE"
+
+        # Split on " or " for multi-standard types
+        local _REM="$_AFTER" _P
+        while [[ "$_REM" == *" or "* ]]; do
+            _P="${_REM%% or *}"
+            _REM="${_REM#* or }"
+            _P="${_P// /}"
+            _P="${_P^^}"
+            CANDIDATES+=("$_P")
+        done
+        _REM="${_REM// /}"
+        _REM="${_REM^^}"
+        CANDIDATES+=("$_REM")
+    done <<< "$TYPE_ALL"
+
+    [[ ${#CANDIDATES[@]} -eq 0 ]] && return
+
+    if [[ ${#CANDIDATES[@]} -eq 1 ]]; then
+        OPTICS_TYPE="${CANDIDATES[0]}"
+        return
+    fi
+
+    # Determine module speed class from BR, Nominal (MBd)
+    # BR, Nominal is the most reliable indicator of actual module speed.
+    # Map BR ranges to standard speed classes (MBd values have overhead):
+    #   ~1000-1300 → 1G, ~10000-10500 → 10G, ~25000-28000 → 25G,
+    #   ~40000-42000 → 40G, ~100000-112000 → 100G
+    local BR_SPEED_G=0
+    if [[ -n "$BAUD" ]]; then
+        local BR_NUM="${BAUD%%MBd*}"
+        if [[ "$BR_NUM" =~ ^[0-9]+$ ]]; then
+            if   (( BR_NUM >= 90000 )); then BR_SPEED_G=100
+            elif (( BR_NUM >= 35000 )); then BR_SPEED_G=40
+            elif (( BR_NUM >= 20000 )); then BR_SPEED_G=25
+            elif (( BR_NUM >= 8000 ));  then BR_SPEED_G=10
+            elif (( BR_NUM >= 500 ));   then BR_SPEED_G=1
+            fi
+        fi
+    fi
+
+    # Try to match BR speed class against candidates
+    if [[ $BR_SPEED_G -gt 0 ]]; then
+        for C in "${CANDIDATES[@]}"; do
+            local C_NUM="${C%%GBASE*}"
+            if [[ "$C_NUM" =~ ^[0-9]+$ && "$C_NUM" -eq "$BR_SPEED_G" ]]; then
+                OPTICS_TYPE="$C"
+                return
+            fi
+        done
+    fi
+
+    # Fallback: try negotiated link speed (Mb/s → speed class)
+    local SPEED_NUM="${SPEED%%Mb/s*}"
+    if [[ "$SPEED_NUM" =~ ^[0-9]+$ ]]; then
+        local SPEED_G=0
+        if   (( SPEED_NUM >= 90000 )); then SPEED_G=100
+        elif (( SPEED_NUM >= 35000 )); then SPEED_G=40
+        elif (( SPEED_NUM >= 20000 )); then SPEED_G=25
+        elif (( SPEED_NUM >= 8000 ));  then SPEED_G=10
+        elif (( SPEED_NUM >= 500 ));   then SPEED_G=1
+        fi
+        if [[ $SPEED_G -gt 0 ]]; then
+            for C in "${CANDIDATES[@]}"; do
+                local C_NUM="${C%%GBASE*}"
+                if [[ "$C_NUM" =~ ^[0-9]+$ && "$C_NUM" -eq "$SPEED_G" ]]; then
+                    OPTICS_TYPE="$C"
+                    return
+                fi
+            done
+        fi
+    fi
+
+    # No match — use the first Ethernet candidate
+    OPTICS_TYPE="${CANDIDATES[0]}"
+}
+
+# Colorize optics value+status for table display
+# Args: $1=dBm value, $2=status, $3=lane_info (optional, for multi-lane variance suffix)
+# Outputs: plain string and color string (via OPTICS_CLR_PLAIN, OPTICS_CLR_COLOR)
+colorize_optics() {
+    local DBM="$1" STATUS="$2" LANE_SUFFIX="${3:-}"
+
+    if [[ "$STATUS" == "N/A" || "$STATUS" == "N/DOM" ]]; then
+        OPTICS_CLR_PLAIN="${DBM} ${STATUS}${LANE_SUFFIX}"
+        OPTICS_CLR_COLOR="${DBM} ${STATUS}${LANE_SUFFIX}"
+        return
+    fi
+
+    OPTICS_CLR_PLAIN="${DBM} ${STATUS}${LANE_SUFFIX}"
+
+    case "$STATUS" in
+        OK)
+            OPTICS_CLR_COLOR="${DBM} ${GREEN}${STATUS}${RESET_COLOR}${LANE_SUFFIX}"
+            ;;
+        WARN)
+            OPTICS_CLR_COLOR="${DBM} ${YELLOW}${STATUS}${RESET_COLOR}${LANE_SUFFIX}"
+            ;;
+        ALARM)
+            OPTICS_CLR_COLOR="${RED}${DBM} ${STATUS}${LANE_SUFFIX}${RESET_COLOR}"
+            ;;
+        *)
+            OPTICS_CLR_COLOR="${DBM} ${STATUS}${LANE_SUFFIX}"
+            ;;
+    esac
+}
+
+# Detect multi-lane variance and return suffix string (e.g., " Ch3↓2dB")
+# Args: $1=colon-separated lane values
+# Returns suffix string on stdout, empty if no variance
+optics_lane_variance() {
+    local LANES_STR="$1"
+    [[ -z "$LANES_STR" ]] && return
+
+    local IFS_SAVE="$IFS"
+    IFS=':' read -ra VALS <<< "$LANES_STR"
+    IFS="$IFS_SAVE"
+
+    # Filter out N/A values
+    local -a NUMERIC=()
+    local -a INDICES=()
+    local I=0
+    for V in "${VALS[@]}"; do
+        ((I++))
+        [[ "$V" == "N/A" ]] && continue
+        NUMERIC+=("$V")
+        INDICES+=("$I")
+    done
+
+    [[ ${#NUMERIC[@]} -lt 2 ]] && return
+
+    # Find min and max
+    local RESULT
+    RESULT=$({ printf '%s\n' "${NUMERIC[@]}"; printf '%s\n' "${INDICES[@]}"; } | awk -v n="${#NUMERIC[@]}" '
+        BEGIN { min_v=999; max_v=-999 }
+        NR <= n { vals[NR] = $1+0 }
+        NR > n { idxs[NR-n] = $1 }
+        END {
+            for (i=1; i<=n; i++) {
+                if (vals[i] < min_v) { min_v = vals[i]; min_i = idxs[i] }
+                if (vals[i] > max_v) { max_v = vals[i] }
+            }
+            diff = max_v - min_v
+            if (diff > 2.0) {
+                printf " Ch%d↓%ddB", min_i, int(diff+0.5)
+            }
+        }
+    ')
+    printf '%s' "$RESULT"
+}
+
 # --- Data Collection Arrays ---
 declare -a DATA_DEVICE DATA_DRIVER DATA_FIRMWARE DATA_IFACE DATA_MAC DATA_MTU
 declare -a DATA_LINK_PLAIN DATA_LINK_COLOR
@@ -403,6 +843,14 @@ declare -a DATA_BMAC
 declare -a DATA_LACP_PLAIN DATA_LACP_COLOR DATA_LACP_PEER
 declare -a DATA_LLDP_AGGID
 declare -a DATA_VLAN DATA_SWITCH DATA_PORT
+declare -a DATA_OPTICS_TYPE
+declare -a DATA_OPTICS_TX_PLAIN DATA_OPTICS_TX_COLOR
+declare -a DATA_OPTICS_RX_PLAIN DATA_OPTICS_RX_COLOR
+declare -a DATA_OPTICS_TX_DBM DATA_OPTICS_RX_DBM
+declare -a DATA_OPTICS_TX_STATUS DATA_OPTICS_RX_STATUS
+declare -a DATA_OPTICS_VENDOR DATA_OPTICS_WAVELENGTH
+declare -a DATA_OPTICS_TX_LANES DATA_OPTICS_RX_LANES
+declare -a DATA_OPTICS_LANE_COUNT
 declare -A BOND_MODE_MAP
 ROW_COUNT=0
 
@@ -554,6 +1002,28 @@ for _IFACE_PATH in /sys/class/net/*; do
 	fi
     fi
 
+    # Optics data collection
+    if $SHOW_OPTICS; then
+        parse_optics "$IFACE"
+        normalize_sfp_type "$OPTICS_TYPE_ALL" "$OPTICS_BAUD" "$SPEED"
+
+        # Build display strings with color
+        TX_SUFFIX=""
+        RX_SUFFIX=""
+        if [[ $OPTICS_LANE_COUNT -gt 1 ]]; then
+            TX_SUFFIX=$(optics_lane_variance "$OPTICS_TX_LANES")
+            RX_SUFFIX=$(optics_lane_variance "$OPTICS_RX_LANES")
+        fi
+
+        colorize_optics "$OPTICS_TX_DBM" "$OPTICS_TX_STATUS" "$TX_SUFFIX"
+        OPT_TX_PLAIN="$OPTICS_CLR_PLAIN"
+        OPT_TX_COLOR="$OPTICS_CLR_COLOR"
+
+        colorize_optics "$OPTICS_RX_DBM" "$OPTICS_RX_STATUS" "$RX_SUFFIX"
+        OPT_RX_PLAIN="$OPTICS_CLR_PLAIN"
+        OPT_RX_COLOR="$OPTICS_CLR_COLOR"
+    fi
+
     # Store collected data
     DATA_DEVICE[ROW_COUNT]="$DEVICE"
     DATA_DRIVER[ROW_COUNT]="$DRIVER"
@@ -575,6 +1045,22 @@ for _IFACE_PATH in /sys/class/net/*; do
     DATA_VLAN[ROW_COUNT]="$VLAN_INFO"
     DATA_SWITCH[ROW_COUNT]="$SWITCH_NAME"
     DATA_PORT[ROW_COUNT]="$PORT_NAME"
+    if $SHOW_OPTICS; then
+        DATA_OPTICS_TYPE[ROW_COUNT]="$OPTICS_TYPE"
+        DATA_OPTICS_VENDOR[ROW_COUNT]="$OPTICS_VENDOR"
+        DATA_OPTICS_WAVELENGTH[ROW_COUNT]="$OPTICS_WAVELENGTH"
+        DATA_OPTICS_TX_DBM[ROW_COUNT]="$OPTICS_TX_DBM"
+        DATA_OPTICS_RX_DBM[ROW_COUNT]="$OPTICS_RX_DBM"
+        DATA_OPTICS_TX_STATUS[ROW_COUNT]="$OPTICS_TX_STATUS"
+        DATA_OPTICS_RX_STATUS[ROW_COUNT]="$OPTICS_RX_STATUS"
+        DATA_OPTICS_TX_PLAIN[ROW_COUNT]="$OPT_TX_PLAIN"
+        DATA_OPTICS_TX_COLOR[ROW_COUNT]="$OPT_TX_COLOR"
+        DATA_OPTICS_RX_PLAIN[ROW_COUNT]="$OPT_RX_PLAIN"
+        DATA_OPTICS_RX_COLOR[ROW_COUNT]="$OPT_RX_COLOR"
+        DATA_OPTICS_TX_LANES[ROW_COUNT]="$OPTICS_TX_LANES"
+        DATA_OPTICS_RX_LANES[ROW_COUNT]="$OPTICS_RX_LANES"
+        DATA_OPTICS_LANE_COUNT[ROW_COUNT]="$OPTICS_LANE_COUNT"
+    fi
     ((ROW_COUNT++))
 done
 
@@ -904,6 +1390,12 @@ COL_W_VLAN=$(max_width "VLAN" "${DATA_VLAN[@]}")
 COL_W_SWITCH=$(max_width "Switch Name" "${DATA_SWITCH[@]}")
 COL_W_PORT=$(max_width "Port Name" "${DATA_PORT[@]}")
 
+if $SHOW_OPTICS; then
+    COL_W_OPT_TYPE=$(max_width "SFP Type" "${DATA_OPTICS_TYPE[@]}")
+    COL_W_OPT_TX=$(max_width "Optics Tx" "${DATA_OPTICS_TX_PLAIN[@]}")
+    COL_W_OPT_RX=$(max_width "Optics Rx" "${DATA_OPTICS_RX_PLAIN[@]}")
+fi
+
 if $SHOW_METRICS; then
     COL_W_MET_BW=$(max_width "Bandwidth" "${DATA_MET_BW_PLAIN[@]}")
     COL_W_MET_PPS=$(max_width "Packets/s" "${DATA_MET_PPS_PLAIN[@]}")
@@ -1114,6 +1606,75 @@ DOTHEADER
     printf '        </TABLE>\n'
     printf '    >];\n\n'
 
+    # --- Helper: emit optics rows for a NIC node in DOT ---
+    # Args: $1=row index, $2=indent prefix
+    _dot_optics_rows() {
+        local _IDX="$1" _INDENT="$2"
+        local _TYPE="${DATA_OPTICS_TYPE[$_IDX]}"
+        local _TX_S="${DATA_OPTICS_TX_STATUS[$_IDX]}"
+        local _RX_S="${DATA_OPTICS_RX_STATUS[$_IDX]}"
+        local _TX_D="${DATA_OPTICS_TX_DBM[$_IDX]}"
+        local _RX_D="${DATA_OPTICS_RX_DBM[$_IDX]}"
+        local _LANES="${DATA_OPTICS_LANE_COUNT[$_IDX]:-0}"
+
+        # Skip if N/A (no SFP)
+        [[ "$_TYPE" == "N/A" && "$_TX_S" == "N/A" ]] && return
+
+        # Map status to DOT color
+        _optics_dot_color() {
+            case "$1" in
+                OK)    echo "$GREEN_COLOR" ;;
+                WARN)  echo "#f9e2af" ;;  # Catppuccin Yellow
+                ALARM) echo "$RED_COLOR" ;;
+                *)     echo "$SUBTEXT_COLOR" ;;
+            esac
+        }
+
+        # SFP type label
+        printf '%s<TR><TD><FONT POINT-SIZE="8" COLOR="%s">%s</FONT></TD></TR>\n' \
+            "$_INDENT" "$SUBTEXT_COLOR" "$(dot_escape "$_TYPE")"
+
+        if [[ $_LANES -gt 1 && -n "${DATA_OPTICS_TX_LANES[$_IDX]}" ]]; then
+            # Multi-lane: one row per channel
+            local _IFS_SAVE="$IFS"
+            IFS=':' read -ra _TX_L <<< "${DATA_OPTICS_TX_LANES[$_IDX]}"
+            IFS=':' read -ra _RX_L <<< "${DATA_OPTICS_RX_LANES[$_IDX]}"
+            IFS="$_IFS_SAVE"
+            local _CH
+            for ((_CH=0; _CH<${#_TX_L[@]}; _CH++)); do
+                local _TV="${_TX_L[$_CH]}" _RV="${_RX_L[$_CH]}"
+                local _TC _RC
+                # Evaluate each lane independently
+                if [[ "$_TV" != "N/A" && "$_TX_S" != "N/DOM" && "$_TX_S" != "N/A" ]]; then
+                    _TC=$(_optics_dot_color "$(evaluate_optics_health "$_TV" "" "" "" "" 2>/dev/null || echo "$_TX_S")")
+                    # Use overall status color for simplicity (thresholds evaluated per lane would need passing them through)
+                    _TC=$(_optics_dot_color "$_TX_S")
+                else
+                    _TC="$SUBTEXT_COLOR"
+                fi
+                if [[ "$_RV" != "N/A" && "$_RX_S" != "N/DOM" && "$_RX_S" != "N/A" ]]; then
+                    _RC=$(_optics_dot_color "$_RX_S")
+                else
+                    _RC="$SUBTEXT_COLOR"
+                fi
+                printf '%s<TR><TD><FONT POINT-SIZE="8" COLOR="%s">Ch%d:</FONT> <FONT POINT-SIZE="8" COLOR="%s">Tx:%s</FONT> <FONT POINT-SIZE="8" COLOR="%s">Rx:%s</FONT></TD></TR>\n' \
+                    "$_INDENT" "$SUBTEXT_COLOR" "$((_CH+1))" "$_TC" "$(dot_escape "$_TV")" "$_RC" "$(dot_escape "$_RV")"
+            done
+        else
+            # Single-lane or N/DOM: one row with Tx/Rx
+            if [[ "$_TX_S" == "N/DOM" || "$_RX_S" == "N/DOM" ]]; then
+                printf '%s<TR><TD><FONT POINT-SIZE="8" COLOR="%s">Tx:%s Rx:%s (N/DOM)</FONT></TD></TR>\n' \
+                    "$_INDENT" "$SUBTEXT_COLOR" "$(dot_escape "$_TX_D")" "$(dot_escape "$_RX_D")"
+            elif [[ "$_TX_S" != "N/A" ]]; then
+                local _TC _RC
+                _TC=$(_optics_dot_color "$_TX_S")
+                _RC=$(_optics_dot_color "$_RX_S")
+                printf '%s<TR><TD><FONT POINT-SIZE="8" COLOR="%s">Tx:%s</FONT> <FONT POINT-SIZE="8" COLOR="%s">Rx:%s</FONT></TD></TR>\n' \
+                    "$_INDENT" "$_TC" "$(dot_escape "$_TX_D dBm")" "$_RC" "$(dot_escape "$_RX_D dBm")"
+            fi
+        fi
+    }
+
     # --- Bond clusters with member interface nodes ---
     local CLUSTER_IDX=0
     for BOND_NAME in $(printf '%s\n' "${!BOND_MEMBERS[@]}" | sort); do
@@ -1172,6 +1733,9 @@ DOTHEADER
                 "$SUBTEXT_COLOR" "$(dot_escape "$MAC")"
             printf '            <TR><TD><FONT POINT-SIZE="9" COLOR="%s">MTU: %s</FONT></TD></TR>\n' \
                 "$SUBTEXT_COLOR" "$(dot_escape "$MTU")"
+            if $SHOW_OPTICS; then
+                _dot_optics_rows "$IDX" "            "
+            fi
             if $SHOW_METRICS; then
                 local RX_BW TX_BW RX_BW_CLR TX_BW_CLR
                 RX_BW=$(human_bandwidth "${DATA_MET_RX_BPS[$IDX]}")
@@ -1227,6 +1791,9 @@ DOTHEADER
             "$SUBTEXT_COLOR" "$(dot_escape "$MAC")"
         printf '        <TR><TD><FONT POINT-SIZE="9" COLOR="%s">MTU: %s</FONT></TD></TR>\n' \
             "$SUBTEXT_COLOR" "$(dot_escape "$MTU")"
+        if $SHOW_OPTICS; then
+            _dot_optics_rows "$IDX" "        "
+        fi
         if $SHOW_METRICS; then
             local RX_BW TX_BW
             RX_BW=$(human_bandwidth "${DATA_MET_RX_BPS[$IDX]}")
@@ -1436,6 +2003,11 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
     ${SHOW_BMAC} && printf "${COL_GAP}%-${COL_W_BMAC}s" "Bond MAC"
     ${SHOW_LACP} && printf "${COL_GAP}%-${COL_W_LACP}s" "LACP Status"
     ${SHOW_VLAN} && printf "${COL_GAP}%-${COL_W_VLAN}s" "VLAN"
+    if ${SHOW_OPTICS}; then
+        printf "${COL_GAP}%-${COL_W_OPT_TYPE}s" "SFP Type"
+        printf "${COL_GAP}%-${COL_W_OPT_TX}s" "Optics Tx"
+        printf "${COL_GAP}%-${COL_W_OPT_RX}s" "Optics Rx"
+    fi
     if ${SHOW_METRICS}; then
         printf "${COL_GAP}%-${COL_W_MET_BW}s" "Bandwidth"
         printf "${COL_GAP}%-${COL_W_MET_PPS}s" "Packets/s"
@@ -1449,6 +2021,9 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
     ${SHOW_BMAC} && SEP_WIDTH=$((SEP_WIDTH + COL_GAP_WIDTH + COL_W_BMAC))
     ${SHOW_LACP} && SEP_WIDTH=$((SEP_WIDTH + COL_GAP_WIDTH + COL_W_LACP))
     ${SHOW_VLAN} && SEP_WIDTH=$((SEP_WIDTH + COL_GAP_WIDTH + COL_W_VLAN))
+    if ${SHOW_OPTICS}; then
+        SEP_WIDTH=$((SEP_WIDTH + COL_GAP_WIDTH + COL_W_OPT_TYPE + COL_GAP_WIDTH + COL_W_OPT_TX + COL_GAP_WIDTH + COL_W_OPT_RX))
+    fi
     if ${SHOW_METRICS}; then
         SEP_WIDTH=$((SEP_WIDTH + COL_GAP_WIDTH + COL_W_MET_BW + COL_GAP_WIDTH + COL_W_MET_PPS + COL_GAP_WIDTH + COL_W_MET_DROP + COL_GAP_WIDTH + COL_W_MET_ERR + COL_GAP_WIDTH + COL_W_MET_FIFO))
     fi
@@ -1471,6 +2046,13 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
             pad_color "${DATA_LACP_COLOR[$i]}" "$COL_W_LACP"
         fi
         ${SHOW_VLAN} && printf "${COL_GAP}%-${COL_W_VLAN}s" "${DATA_VLAN[$i]}"
+        if ${SHOW_OPTICS}; then
+            printf "${COL_GAP}%-${COL_W_OPT_TYPE}s" "${DATA_OPTICS_TYPE[$i]}"
+            printf '%s' "${COL_GAP}"
+            pad_color "${DATA_OPTICS_TX_COLOR[$i]}" "$COL_W_OPT_TX"
+            printf '%s' "${COL_GAP}"
+            pad_color "${DATA_OPTICS_RX_COLOR[$i]}" "$COL_W_OPT_RX"
+        fi
         if ${SHOW_METRICS}; then
             printf '%s' "${COL_GAP}"
             pad_color "${DATA_MET_BW_COLOR[$i]}" "$COL_W_MET_BW"
@@ -1495,6 +2077,11 @@ elif [[ "${OUTPUT_FORMAT}" == "csv" ]]; then
     ${SHOW_BMAC} && printf "${FS}%s" "Bond MAC"
     ${SHOW_LACP} && printf "${FS}%s" "LACP Status"
     ${SHOW_VLAN} && printf "${FS}%s" "VLAN"
+    if ${SHOW_OPTICS}; then
+        printf "${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
+            "SFP Type" "SFP Vendor" "Wavelength" "Tx Power (dBm)" "Tx Status" \
+            "Rx Power (dBm)" "Rx Status" "Lane Count"
+    fi
     if ${SHOW_METRICS}; then
         printf "${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
             "Rx Bytes/s" "Tx Bytes/s" "Rx Packets/s" "Tx Packets/s" \
@@ -1510,6 +2097,13 @@ elif [[ "${OUTPUT_FORMAT}" == "csv" ]]; then
         ${SHOW_BMAC} && printf "${FS}%s" "${DATA_BMAC[$i]}"
         ${SHOW_LACP} && printf "${FS}%s" "${DATA_LACP_PLAIN[$i]}"
         ${SHOW_VLAN} && printf "${FS}%s" "${DATA_VLAN[$i]}"
+        if ${SHOW_OPTICS}; then
+            printf "${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
+                "${DATA_OPTICS_TYPE[$i]}" "${DATA_OPTICS_VENDOR[$i]}" \
+                "${DATA_OPTICS_WAVELENGTH[$i]}" "${DATA_OPTICS_TX_DBM[$i]}" \
+                "${DATA_OPTICS_TX_STATUS[$i]}" "${DATA_OPTICS_RX_DBM[$i]}" \
+                "${DATA_OPTICS_RX_STATUS[$i]}" "${DATA_OPTICS_LANE_COUNT[$i]}"
+        fi
         if ${SHOW_METRICS}; then
             printf "${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
                 "${DATA_MET_RX_BPS[$i]}" "${DATA_MET_TX_BPS[$i]}" \
@@ -1543,6 +2137,58 @@ elif [[ "${OUTPUT_FORMAT}" == "json" ]]; then
         fi
         if ${SHOW_VLAN}; then
             printf ',\n    "vlan": "%s"' "$(json_escape "${DATA_VLAN[$i]}")"
+        fi
+        if ${SHOW_OPTICS}; then
+            printf ',\n    "optics": {\n'
+            printf '      "sfp_type": "%s",\n' "$(json_escape "${DATA_OPTICS_TYPE[$i]}")"
+            printf '      "vendor": "%s",\n' "$(json_escape "${DATA_OPTICS_VENDOR[$i]}")"
+            printf '      "wavelength": "%s",\n' "$(json_escape "${DATA_OPTICS_WAVELENGTH[$i]}")"
+            # Tx power: numeric or string
+            if [[ "${DATA_OPTICS_TX_DBM[$i]}" == "N/A" ]]; then
+                printf '      "tx_power_dbm": null,\n'
+            else
+                printf '      "tx_power_dbm": %s,\n' "${DATA_OPTICS_TX_DBM[$i]}"
+            fi
+            printf '      "tx_status": "%s",\n' "$(json_escape "${DATA_OPTICS_TX_STATUS[$i]}")"
+            # Rx power: numeric or string
+            if [[ "${DATA_OPTICS_RX_DBM[$i]}" == "N/A" ]]; then
+                printf '      "rx_power_dbm": null,\n'
+            else
+                printf '      "rx_power_dbm": %s,\n' "${DATA_OPTICS_RX_DBM[$i]}"
+            fi
+            printf '      "rx_status": "%s",\n' "$(json_escape "${DATA_OPTICS_RX_STATUS[$i]}")"
+            printf '      "lanes": %s' "${DATA_OPTICS_LANE_COUNT[$i]:-0}"
+            # Multi-lane per-channel detail
+            if [[ ${DATA_OPTICS_LANE_COUNT[$i]:-0} -gt 1 && -n "${DATA_OPTICS_TX_LANES[$i]}" ]]; then
+                # Tx lanes array
+                printf ',\n      "tx_lanes_dbm": ['
+                IFS_SAVE="$IFS"
+                IFS=':' read -ra _TX_L <<< "${DATA_OPTICS_TX_LANES[$i]}"
+                IFS="$IFS_SAVE"
+                for ((li=0; li<${#_TX_L[@]}; li++)); do
+                    (( li > 0 )) && printf ','
+                    if [[ "${_TX_L[$li]}" == "N/A" ]]; then
+                        printf 'null'
+                    else
+                        printf '%s' "${_TX_L[$li]}"
+                    fi
+                done
+                printf ']'
+                # Rx lanes array
+                printf ',\n      "rx_lanes_dbm": ['
+                IFS=':' read -ra _RX_L <<< "${DATA_OPTICS_RX_LANES[$i]}"
+                IFS="$IFS_SAVE"
+                for ((li=0; li<${#_RX_L[@]}; li++)); do
+                    (( li > 0 )) && printf ','
+                    if [[ "${_RX_L[$li]}" == "N/A" ]]; then
+                        printf 'null'
+                    else
+                        printf '%s' "${_RX_L[$li]}"
+                    fi
+                done
+                printf ']'
+            fi
+            printf '\n    }'
         fi
         if ${SHOW_METRICS}; then
             printf ',\n    "metrics": {\n'

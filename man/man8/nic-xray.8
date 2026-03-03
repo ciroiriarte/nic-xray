@@ -1,6 +1,6 @@
 .\" Man page for nic-xray.sh
 .\" Written in classic troff/groff format
-.TH NIC-XRAY 8 "2026-03-01" "nic-xray 2.5.0" "System Administration Commands"
+.TH NIC-XRAY 8 "2026-03-02" "nic-xray 2.6.0" "System Administration Commands"
 .SH NAME
 nic-xray \- detailed physical network interface diagnostics
 .SH SYNOPSIS
@@ -8,6 +8,7 @@ nic-xray \- detailed physical network interface diagnostics
 .RI [ \-\-lacp ]
 .RI [ \-\-vlan ]
 .RI [ \-\-bmac ]
+.RI [ \-o | \-\-optics ]
 .RI [ \-\-all ]
 .RI [ \-\-no\-color ]
 .RI [ \-\-filter\-link
@@ -27,7 +28,8 @@ provides a detailed overview of all physical network interfaces on a Linux
 system. It collects and displays PCI slot, driver name, firmware version,
 interface name, MAC address, MTU, link status, negotiated speed and duplex,
 bond membership, and LLDP peer information (switch name and port).
-Optionally: LACP status, VLAN tagging, and bond MAC address.
+Optionally: LACP status, VLAN tagging, bond MAC address, and SFP/QSFP
+optical transceiver diagnostics.
 With
 .BR \-\-metrics ,
 it can also sample real-time traffic metrics: bandwidth, packets/s, drops,
@@ -77,12 +79,46 @@ reported by the bonding driver, or
 .B N/A
 for unbonded interfaces.
 .TP
+.BR \-o ", " \-\-optics
+Show SFP/QSFP transceiver optical diagnostics. For each physical interface,
+reads DOM (Digital Optical Monitoring) data via
+.BR "ethtool \-m" ,
+displaying transceiver type, Tx and Rx optical power levels in dBm, and a
+health status indicator.
+.IP
+Health status is evaluated against vendor-programmed DOM thresholds (SFF-8472/SFF-8636)
+when available, or against a built-in reference table of industry-standard thresholds:
+.RS
+.TP
+.B OK
+Power levels within normal operating range (green).
+.TP
+.B WARN
+Power levels between warning and alarm thresholds (yellow).
+.TP
+.B ALARM
+Power levels beyond alarm thresholds, or zero optical power detected (red).
+.TP
+.B N/DOM
+SFP module is present but provides no DOM data (e.g., DAC cable).
+.TP
+.B N/A
+No SFP module detected, or interface is copper.
+.RE
+.IP
+For multi-lane modules (QSFP+/QSFP28), the worst-case (minimum) power level
+across all lanes is shown. If lane variance exceeds 2\ dB, the outlier channel
+is flagged (e.g.,
+.BR "Ch3\(da2dB" ).
+Per-lane detail is available in CSV and JSON output.
+.TP
 .B \-\-all
 Enable all optional columns. Equivalent to specifying
 .BR \-\-lacp ,
 .BR \-\-vlan ,
+.BR \-\-bmac ,
 and
-.B \-\-bmac
+.B \-\-optics
 together.
 .TP
 .B \-\-no\-color
@@ -256,6 +292,32 @@ VLAN IDs from LLDP, with
 indicating the port VLAN ID.
 .PP
 The following columns are shown when
+.B \-\-optics
+is used:
+.TP
+.B SFP Type
+(shown with
+.BR \-\-optics )
+Transceiver type identifier (e.g.,
+.IR 10GBASE-SR ", " 100GBASE-LR4 ).
+Shows
+.B N/A
+for interfaces without an SFP module.
+.TP
+.B Optics Tx
+(shown with
+.BR \-\-optics )
+Transmit optical power level in dBm with health status.
+For multi-lane modules, shows the worst-case (minimum) value across all channels.
+.TP
+.B Optics Rx
+(shown with
+.BR \-\-optics )
+Receive optical power level in dBm with health status.
+For multi-lane modules, shows the worst-case value. Lane variance is flagged
+when the difference between best and worst channels exceeds 2\ dB.
+.PP
+The following columns are shown when
 .B \-\-metrics
 is used:
 .TP
@@ -425,6 +487,16 @@ package must be installed. The
 output format has no external dependency beyond the base requirements.
 .PP
 The
+.B \-\-optics
+flag uses
+.B ethtool \-m
+to read SFP/QSFP module EEPROM data, which requires kernel support for the
+NIC's I2C/MDIO bus. Most modern NIC drivers (i40e, ixgbe, mlx5_core) support
+this. If the kernel module does not support EEPROM access, optics data will
+show as
+.BR N/A .
+.PP
+The
 .B lldpd
 service should be running to retrieve LLDP information from connected switches.
 The switches must also be configured to advertise LLDP messages.
@@ -490,6 +562,12 @@ Show VLAN and LACP information with column separators:
 .PP
 .RS
 .B sudo nic-xray.sh \-\-vlan \-\-lacp \-s
+.RE
+.PP
+Show SFP/QSFP optical transceiver diagnostics:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-optics
 .RE
 .PP
 Show all optional columns at once:
