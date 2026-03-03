@@ -60,11 +60,23 @@
 #                         - Lane variance detection (>2dB flags outlier channel)
 #                         - Optics supported across all output formats
 #                           (table, CSV, JSON, DOT/SVG/PNG)
+#   - 2026-03-02: v2.7.0 - Internal refactoring for maintainability:
+#                         - Extracted collect_data(), compute_layout(), render_output()
+#                           functions (enables future --watch mode)
+#                         - Deduplicated DOT diagram generation with helper functions:
+#                           _dot_nic_node(), _dot_metrics_rows(), _dot_link_color(),
+#                           _dot_edge_color()
+#                         - Extracted IFACE_SKIP_PATTERN, read_sysfs(),
+#                           colorize_nonzero() helpers
+#                         - Delta clamping via nameref loop
 #
-# Version: 2.6.0
+# Version: 2.7.0
 
-SCRIPT_VERSION="2.6.0"
+SCRIPT_VERSION="2.7.0"
 SCRIPT_YEAR="2026"
+
+# Interface name pattern to skip (virtual, bond masters, etc.)
+IFACE_SKIP_PATTERN='^(lo|vnet|virbr|br|bond|docker|tap|tun)'
 
 # LOCALE setup, we expect output in English for proper parsing
 LANG=en_US.UTF-8
@@ -409,6 +421,18 @@ human_bandwidth() {
 # Check if a bond is in active-backup mode
 is_active_backup() {
     [[ "${BOND_MODE_MAP[$1]}" == *"active-backup"* ]]
+}
+
+# Read a sysfs attribute for a network interface
+read_sysfs() { cat "/sys/class/net/${1}/${2}" 2>/dev/null; }
+
+# Wrap a counter value with RED color if nonzero (for metrics display)
+colorize_nonzero() {
+    if (( $1 > 0 )); then
+        printf '%b%s%b' "$RED" "$1" "$RESET_COLOR"
+    else
+        printf '%s' "$1"
+    fi
 }
 
 # --- SFP/QSFP Optics Diagnostics ---
@@ -851,10 +875,25 @@ declare -a DATA_OPTICS_TX_STATUS DATA_OPTICS_RX_STATUS
 declare -a DATA_OPTICS_VENDOR DATA_OPTICS_WAVELENGTH
 declare -a DATA_OPTICS_TX_LANES DATA_OPTICS_RX_LANES
 declare -a DATA_OPTICS_LANE_COUNT
+declare -a DATA_MET_BW_PLAIN DATA_MET_BW_COLOR
+declare -a DATA_MET_PPS_PLAIN DATA_MET_PPS_COLOR
+declare -a DATA_MET_DROP_PLAIN DATA_MET_DROP_COLOR
+declare -a DATA_MET_ERR_PLAIN DATA_MET_ERR_COLOR
+declare -a DATA_MET_FIFO_PLAIN DATA_MET_FIFO_COLOR
+declare -a DATA_MET_RX_BPS DATA_MET_TX_BPS
+declare -a DATA_MET_RX_PPS DATA_MET_TX_PPS
+declare -a DATA_MET_RX_DROP DATA_MET_TX_DROP
+declare -a DATA_MET_RX_ERR DATA_MET_TX_ERR
+declare -a DATA_MET_RX_FIFO DATA_MET_TX_FIFO
 declare -A BOND_MODE_MAP
+declare -a RENDER_ORDER
 ROW_COUNT=0
 
-# --- Metrics: Snapshot 1 (before data collection) ---
+# --- Data collection: metrics snapshots, interface enumeration, LACP validation ---
+collect_data() {
+    ROW_COUNT=0
+
+    # --- Metrics: Snapshot 1 (before data collection) ---
 if $SHOW_METRICS; then
     declare -A S1_rx_bytes S1_tx_bytes S1_rx_packets S1_tx_packets
     declare -A S1_rx_dropped S1_tx_dropped S1_rx_errors S1_tx_errors
@@ -862,7 +901,7 @@ if $SHOW_METRICS; then
     METRICS_IFACES=()
     for _IFACE in /sys/class/net/*; do
         _IFACE="${_IFACE##*/}"
-        [[ "$_IFACE" =~ ^(lo|vnet|virbr|br|bond|docker|tap|tun) ]] && continue
+        [[ "$_IFACE" =~ $IFACE_SKIP_PATTERN ]] && continue
         [[ "$_IFACE" == *.* ]] && continue
         [[ ! -e "/sys/class/net/$_IFACE/device" ]] && continue
         METRICS_IFACES+=("$_IFACE")
@@ -874,7 +913,7 @@ fi
 # --- Data Collection ---
 for _IFACE_PATH in /sys/class/net/*; do
     IFACE="${_IFACE_PATH##*/}"
-    [[ "$IFACE" =~ ^(lo|vnet|virbr|br|bond|docker|tap|tun) ]] && continue
+    [[ "$IFACE" =~ $IFACE_SKIP_PATTERN ]] && continue
     [[ "$IFACE" == *.* ]] && continue
 
     DEVICE_PATH="/sys/class/net/$IFACE/device"
@@ -884,9 +923,9 @@ for _IFACE_PATH in /sys/class/net/*; do
     ETHTOOL_I=$(ethtool -i "$IFACE" 2>/dev/null)
     FIRMWARE=$(echo "$ETHTOOL_I" | awk -F': ' '/firmware-version/ {print $2}')
     DRIVER=$(echo "$ETHTOOL_I" | awk -F': ' '/^driver:/ {print $2}')
-    MTU=$(cat "/sys/class/net/$IFACE/mtu" 2>/dev/null)
+    MTU=$(read_sysfs "$IFACE" mtu)
 
-    LINK_RAW=$(cat "/sys/class/net/$IFACE/operstate" 2>/dev/null)
+    LINK_RAW=$(read_sysfs "$IFACE" operstate)
     if [[ "$LINK_RAW" == "up" ]]; then
         LINK_PLAIN="up"
         LINK_COLOR="${GREEN}up${RESET_COLOR}"
@@ -927,7 +966,7 @@ for _IFACE_PATH in /sys/class/net/*; do
     else
         BOND_COLOR="$BOND_MASTER"
         BOND_PLAIN="$BOND_MASTER"
-        MAC=$(cat "/sys/class/net/${IFACE}/address" 2>/dev/null)
+        MAC=$(read_sysfs "$IFACE" address)
         BMAC="N/A"
     fi
 
@@ -1139,18 +1178,6 @@ fi
 
 # --- Metrics: Sleep, Snapshot 2, Delta Computation ---
 if $SHOW_METRICS; then
-    # Metrics data arrays (plain, color, and raw)
-    declare -a DATA_MET_BW_PLAIN DATA_MET_BW_COLOR
-    declare -a DATA_MET_PPS_PLAIN DATA_MET_PPS_COLOR
-    declare -a DATA_MET_DROP_PLAIN DATA_MET_DROP_COLOR
-    declare -a DATA_MET_ERR_PLAIN DATA_MET_ERR_COLOR
-    declare -a DATA_MET_FIFO_PLAIN DATA_MET_FIFO_COLOR
-    declare -a DATA_MET_RX_BPS DATA_MET_TX_BPS
-    declare -a DATA_MET_RX_PPS DATA_MET_TX_PPS
-    declare -a DATA_MET_RX_DROP DATA_MET_TX_DROP
-    declare -a DATA_MET_RX_ERR DATA_MET_TX_ERR
-    declare -a DATA_MET_RX_FIFO DATA_MET_TX_FIFO
-
     # Compute remaining sleep time
     METRICS_NOW=$(date +%s)
     METRICS_ELAPSED_SO_FAR=$((METRICS_NOW - METRICS_START))
@@ -1201,16 +1228,13 @@ if $SHOW_METRICS; then
         D_TX_FIFO=$(( S2_tx_fifo_errors["$local_iface"] - S1_tx_fifo_errors["$local_iface"] ))
 
         # Clamp negative deltas (counter wrap)
-        (( D_RX_BYTES < 0 )) && D_RX_BYTES=0
-        (( D_TX_BYTES < 0 )) && D_TX_BYTES=0
-        (( D_RX_PKTS < 0 )) && D_RX_PKTS=0
-        (( D_TX_PKTS < 0 )) && D_TX_PKTS=0
-        (( D_RX_DROP < 0 )) && D_RX_DROP=0
-        (( D_TX_DROP < 0 )) && D_TX_DROP=0
-        (( D_RX_ERR < 0 )) && D_RX_ERR=0
-        (( D_TX_ERR < 0 )) && D_TX_ERR=0
-        (( D_RX_FIFO < 0 )) && D_RX_FIFO=0
-        (( D_TX_FIFO < 0 )) && D_TX_FIFO=0
+        for _VAR in D_RX_BYTES D_TX_BYTES D_RX_PKTS D_TX_PKTS \
+                    D_RX_DROP D_TX_DROP D_RX_ERR D_TX_ERR \
+                    D_RX_FIFO D_TX_FIFO; do
+            declare -n _REF="$_VAR"
+            (( _REF < 0 )) && _REF=0
+        done
+        unset -n _REF
 
         # Rates (per second)
         RX_BPS=$((D_RX_BYTES / METRICS_ELAPSED))
@@ -1247,40 +1271,16 @@ if $SHOW_METRICS; then
         RX_PPS_CLR="${RX_PPS}"
         TX_PPS_CLR="${TX_PPS}"
 
-        if (( D_RX_DROP > 0 )); then
-            RX_DROP_CLR="${RED}${D_RX_DROP}${RESET_COLOR}"
-        else
-            RX_DROP_CLR="${D_RX_DROP}"
-        fi
-        if (( D_TX_DROP > 0 )); then
-            TX_DROP_CLR="${RED}${D_TX_DROP}${RESET_COLOR}"
-        else
-            TX_DROP_CLR="${D_TX_DROP}"
-        fi
+        RX_DROP_CLR=$(colorize_nonzero "$D_RX_DROP")
+        TX_DROP_CLR=$(colorize_nonzero "$D_TX_DROP")
         DATA_MET_DROP_COLOR[i]="Rx:${RX_DROP_CLR} Tx:${TX_DROP_CLR}"
 
-        if (( D_RX_ERR > 0 )); then
-            RX_ERR_CLR="${RED}${D_RX_ERR}${RESET_COLOR}"
-        else
-            RX_ERR_CLR="${D_RX_ERR}"
-        fi
-        if (( D_TX_ERR > 0 )); then
-            TX_ERR_CLR="${RED}${D_TX_ERR}${RESET_COLOR}"
-        else
-            TX_ERR_CLR="${D_TX_ERR}"
-        fi
+        RX_ERR_CLR=$(colorize_nonzero "$D_RX_ERR")
+        TX_ERR_CLR=$(colorize_nonzero "$D_TX_ERR")
         DATA_MET_ERR_COLOR[i]="Rx:${RX_ERR_CLR} Tx:${TX_ERR_CLR}"
 
-        if (( D_RX_FIFO > 0 )); then
-            RX_FIFO_CLR="${RED}${D_RX_FIFO}${RESET_COLOR}"
-        else
-            RX_FIFO_CLR="${D_RX_FIFO}"
-        fi
-        if (( D_TX_FIFO > 0 )); then
-            TX_FIFO_CLR="${RED}${D_TX_FIFO}${RESET_COLOR}"
-        else
-            TX_FIFO_CLR="${D_TX_FIFO}"
-        fi
+        RX_FIFO_CLR=$(colorize_nonzero "$D_RX_FIFO")
+        TX_FIFO_CLR=$(colorize_nonzero "$D_TX_FIFO")
         DATA_MET_FIFO_COLOR[i]="Rx:${RX_FIFO_CLR} Tx:${TX_FIFO_CLR}"
 
         # Bandwidth and PPS color (initially no color; bond variance applied next)
@@ -1373,6 +1373,10 @@ if $SHOW_METRICS; then
     done
     unset MET_BOND_MEMBERS
 fi
+}
+
+# --- Layout computation: column widths and render order ---
+compute_layout() {
 
 # --- Compute Dynamic Column Widths ---
 COL_W_DEVICE=$(max_width "Device" "${DATA_DEVICE[@]}")
@@ -1413,7 +1417,7 @@ fi
 COL_GAP_WIDTH=${#COL_GAP}
 
 # --- Build Render Order ---
-declare -a RENDER_ORDER
+RENDER_ORDER=()
 if $SORT_BY_BOND; then
     # Collect unique bond names (excluding None)
     declare -A SEEN_BONDS
@@ -1451,6 +1455,7 @@ else
         RENDER_ORDER+=("$i")
     done
 fi
+}
 
 # --- DOT Diagram Helpers ---
 
@@ -1675,6 +1680,79 @@ DOTHEADER
         fi
     }
 
+    # --- Helper: map link state to DOT border color ---
+    _dot_link_color() {
+        [[ "$1" == "up" ]] && printf '%s' "$GREEN_COLOR" || printf '%s' "$RED_COLOR"
+    }
+
+    # --- Helper: emit DOT metrics rows for a NIC node ---
+    # Args: $1=row index, $2=indent prefix
+    _dot_metrics_rows() {
+        local _IDX="$1" _INDENT="$2"
+        local _RX_BW _TX_BW _RX_CLR="$SUBTEXT_COLOR" _TX_CLR="$SUBTEXT_COLOR"
+        _RX_BW=$(human_bandwidth "${DATA_MET_RX_BPS[$_IDX]}")
+        _TX_BW=$(human_bandwidth "${DATA_MET_TX_BPS[$_IDX]}")
+        # Bond variance detection (harmless for standalone — never contains RED)
+        [[ "${DATA_MET_BW_COLOR[$_IDX]}" == *$'\033[1;31m'*"Rx:"* ]] && _RX_CLR="$RED_COLOR"
+        [[ "${DATA_MET_BW_COLOR[$_IDX]}" == *"Tx:"*$'\033[1;31m'* ]] && _TX_CLR="$RED_COLOR"
+        printf '%s<TR><TD><FONT POINT-SIZE="11" COLOR="%s"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="%s">%s</FONT> <FONT POINT-SIZE="11" COLOR="%s"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
+            "$_INDENT" "$RX_ARROW_COLOR" "$_RX_CLR" "$(dot_escape "$_RX_BW")" "$TX_ARROW_COLOR" "$_TX_CLR" "$(dot_escape "$_TX_BW")"
+        # Error summary row (only if any > 0)
+        local _TOTAL=$(( DATA_MET_RX_DROP[_IDX] + DATA_MET_TX_DROP[_IDX] + DATA_MET_RX_ERR[_IDX] + DATA_MET_TX_ERR[_IDX] + DATA_MET_RX_FIFO[_IDX] + DATA_MET_TX_FIFO[_IDX] ))
+        if (( _TOTAL > 0 )); then
+            printf '%s<TR><TD><FONT POINT-SIZE="8" COLOR="%s">Drop:%d/Err:%d/FIFO:%d</FONT></TD></TR>\n' \
+                "$_INDENT" "$RED_COLOR" \
+                "$(( DATA_MET_RX_DROP[_IDX] + DATA_MET_TX_DROP[_IDX] ))" \
+                "$(( DATA_MET_RX_ERR[_IDX] + DATA_MET_TX_ERR[_IDX] ))" \
+                "$(( DATA_MET_RX_FIFO[_IDX] + DATA_MET_TX_FIFO[_IDX] ))"
+        fi
+    }
+
+    # --- Helper: emit a NIC node (HTML table) for the DOT diagram ---
+    # Args: $1=row index, $2=indent prefix
+    _dot_nic_node() {
+        local _IDX="$1" _INDENT="$2"
+        local _INDENT2="${_INDENT}    "
+        local _IFACE="${DATA_IFACE[$_IDX]}"
+        local _MAC="${DATA_MAC[$_IDX]}"
+        local _LINK="${DATA_LINK_PLAIN[$_IDX]}"
+        local _MTU="${DATA_MTU[$_IDX]}"
+        local _NODE_ID
+        _NODE_ID=$(dot_id "$_IFACE")
+        local _BORDER
+        _BORDER=$(_dot_link_color "$_LINK")
+
+        printf '%s%s [shape=plain, label=<\n' "$_INDENT" "$_NODE_ID"
+        printf '%s<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" ' "$_INDENT2"
+        printf 'BGCOLOR="%s" COLOR="%s">\n' "$SURFACE_COLOR" "$_BORDER"
+        printf '%s<TR><TD><FONT COLOR="%s"><B>%s</B></FONT></TD></TR>\n' \
+            "$_INDENT2" "$TEXT_COLOR" "$(dot_escape "$_IFACE")"
+        printf '%s<TR><TD><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
+            "$_INDENT2" "$SUBTEXT_COLOR" "$(dot_escape "$_MAC")"
+        printf '%s<TR><TD><FONT POINT-SIZE="9" COLOR="%s">MTU: %s</FONT></TD></TR>\n' \
+            "$_INDENT2" "$SUBTEXT_COLOR" "$(dot_escape "$_MTU")"
+        if $SHOW_OPTICS; then
+            _dot_optics_rows "$_IDX" "$_INDENT2"
+        fi
+        if $SHOW_METRICS; then
+            _dot_metrics_rows "$_IDX" "$_INDENT2"
+        fi
+        printf '%s</TABLE>\n' "$_INDENT2"
+        printf '%s>];\n' "$_INDENT"
+    }
+
+    # --- Helper: determine edge color (bond color or link state) ---
+    # Args: $1=bond name, $2=link state
+    _dot_edge_color() {
+        if [[ "$1" != "None" && -n "${BOND_COLOR_MAP[$1]+x}" ]]; then
+            printf '%s' "${BOND_COLOR_MAP[$1]}"
+        elif [[ "$2" == "up" ]]; then
+            printf '%s' "$GREEN_COLOR"
+        else
+            printf '%s' "$RED_COLOR"
+        fi
+    }
+
     # --- Bond clusters with member interface nodes ---
     local CLUSTER_IDX=0
     for BOND_NAME in $(printf '%s\n' "${!BOND_MEMBERS[@]}" | sort); do
@@ -1709,56 +1787,7 @@ DOTHEADER
         printf '        penwidth=1.5;\n\n'
 
         for IDX in "${MEMBERS_ARR[@]}"; do
-            local IFACE="${DATA_IFACE[$IDX]}"
-            local MAC="${DATA_MAC[$IDX]}"
-            local LINK="${DATA_LINK_PLAIN[$IDX]}"
-            local NODE_ID
-            NODE_ID=$(dot_id "$IFACE")
-
-            local NODE_BORDER
-            if [[ "$LINK" == "up" ]]; then
-                NODE_BORDER="$GREEN_COLOR"
-            else
-                NODE_BORDER="$RED_COLOR"
-            fi
-
-            local MTU="${DATA_MTU[$IDX]}"
-
-            printf '        %s [shape=plain, label=<\n' "$NODE_ID"
-            printf '            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" '
-            printf 'BGCOLOR="%s" COLOR="%s">\n' "$SURFACE_COLOR" "$NODE_BORDER"
-            printf '            <TR><TD><FONT COLOR="%s"><B>%s</B></FONT></TD></TR>\n' \
-                "$TEXT_COLOR" "$(dot_escape "$IFACE")"
-            printf '            <TR><TD><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
-                "$SUBTEXT_COLOR" "$(dot_escape "$MAC")"
-            printf '            <TR><TD><FONT POINT-SIZE="9" COLOR="%s">MTU: %s</FONT></TD></TR>\n' \
-                "$SUBTEXT_COLOR" "$(dot_escape "$MTU")"
-            if $SHOW_OPTICS; then
-                _dot_optics_rows "$IDX" "            "
-            fi
-            if $SHOW_METRICS; then
-                local RX_BW TX_BW RX_BW_CLR TX_BW_CLR
-                RX_BW=$(human_bandwidth "${DATA_MET_RX_BPS[$IDX]}")
-                TX_BW=$(human_bandwidth "${DATA_MET_TX_BPS[$IDX]}")
-                # Check if bond variance flagged this value (RED in color string)
-                RX_BW_CLR="$SUBTEXT_COLOR"
-                TX_BW_CLR="$SUBTEXT_COLOR"
-                [[ "${DATA_MET_BW_COLOR[$IDX]}" == *$'\033[1;31m'*"Rx:"* ]] && RX_BW_CLR="$RED_COLOR"
-                [[ "${DATA_MET_BW_COLOR[$IDX]}" == *"Tx:"*$'\033[1;31m'* ]] && TX_BW_CLR="$RED_COLOR"
-                printf '            <TR><TD><FONT POINT-SIZE="11" COLOR="%s"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="%s">%s</FONT> <FONT POINT-SIZE="11" COLOR="%s"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
-                    "$RX_ARROW_COLOR" "$RX_BW_CLR" "$(dot_escape "$RX_BW")" "$TX_ARROW_COLOR" "$TX_BW_CLR" "$(dot_escape "$TX_BW")"
-                # Error row (only if any > 0)
-                local TOTAL_ERR=$(( DATA_MET_RX_DROP[IDX] + DATA_MET_TX_DROP[IDX] + DATA_MET_RX_ERR[IDX] + DATA_MET_TX_ERR[IDX] + DATA_MET_RX_FIFO[IDX] + DATA_MET_TX_FIFO[IDX] ))
-                if (( TOTAL_ERR > 0 )); then
-                    printf '            <TR><TD><FONT POINT-SIZE="8" COLOR="%s">Drop:%d/Err:%d/FIFO:%d</FONT></TD></TR>\n' \
-                        "$RED_COLOR" \
-                        "$(( DATA_MET_RX_DROP[IDX] + DATA_MET_TX_DROP[IDX] ))" \
-                        "$(( DATA_MET_RX_ERR[IDX] + DATA_MET_TX_ERR[IDX] ))" \
-                        "$(( DATA_MET_RX_FIFO[IDX] + DATA_MET_TX_FIFO[IDX] ))"
-                fi
-            fi
-            printf '            </TABLE>\n'
-            printf '        >];\n'
+            _dot_nic_node "$IDX" "        "
         done
 
         printf '    }\n\n'
@@ -1767,51 +1796,8 @@ DOTHEADER
 
     # --- Standalone interface nodes ---
     for IDX in "${STANDALONE_INDICES[@]}"; do
-        local IFACE="${DATA_IFACE[$IDX]}"
-        local MAC="${DATA_MAC[$IDX]}"
-        local LINK="${DATA_LINK_PLAIN[$IDX]}"
-        local NODE_ID
-        NODE_ID=$(dot_id "$IFACE")
-
-        local NODE_BORDER
-        if [[ "$LINK" == "up" ]]; then
-            NODE_BORDER="$GREEN_COLOR"
-        else
-            NODE_BORDER="$RED_COLOR"
-        fi
-
-        local MTU="${DATA_MTU[$IDX]}"
-
-        printf '    %s [shape=plain, label=<\n' "$NODE_ID"
-        printf '        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" '
-        printf 'BGCOLOR="%s" COLOR="%s">\n' "$SURFACE_COLOR" "$NODE_BORDER"
-        printf '        <TR><TD><FONT COLOR="%s"><B>%s</B></FONT></TD></TR>\n' \
-            "$TEXT_COLOR" "$(dot_escape "$IFACE")"
-        printf '        <TR><TD><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
-            "$SUBTEXT_COLOR" "$(dot_escape "$MAC")"
-        printf '        <TR><TD><FONT POINT-SIZE="9" COLOR="%s">MTU: %s</FONT></TD></TR>\n' \
-            "$SUBTEXT_COLOR" "$(dot_escape "$MTU")"
-        if $SHOW_OPTICS; then
-            _dot_optics_rows "$IDX" "        "
-        fi
-        if $SHOW_METRICS; then
-            local RX_BW TX_BW
-            RX_BW=$(human_bandwidth "${DATA_MET_RX_BPS[$IDX]}")
-            TX_BW=$(human_bandwidth "${DATA_MET_TX_BPS[$IDX]}")
-            printf '        <TR><TD><FONT POINT-SIZE="11" COLOR="%s"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="%s">%s</FONT> <FONT POINT-SIZE="11" COLOR="%s"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
-                "$RX_ARROW_COLOR" "$SUBTEXT_COLOR" "$(dot_escape "$RX_BW")" "$TX_ARROW_COLOR" "$SUBTEXT_COLOR" "$(dot_escape "$TX_BW")"
-            # Error row (only if any > 0)
-            local TOTAL_ERR=$(( DATA_MET_RX_DROP[IDX] + DATA_MET_TX_DROP[IDX] + DATA_MET_RX_ERR[IDX] + DATA_MET_TX_ERR[IDX] + DATA_MET_RX_FIFO[IDX] + DATA_MET_TX_FIFO[IDX] ))
-            if (( TOTAL_ERR > 0 )); then
-                printf '        <TR><TD><FONT POINT-SIZE="8" COLOR="%s">Drop:%d/Err:%d/FIFO:%d</FONT></TD></TR>\n' \
-                    "$RED_COLOR" \
-                    "$(( DATA_MET_RX_DROP[IDX] + DATA_MET_TX_DROP[IDX] ))" \
-                    "$(( DATA_MET_RX_ERR[IDX] + DATA_MET_TX_ERR[IDX] ))" \
-                    "$(( DATA_MET_RX_FIFO[IDX] + DATA_MET_TX_FIFO[IDX] ))"
-            fi
-        fi
-        printf '        </TABLE>\n'
-        printf '    >];\n\n'
+        _dot_nic_node "$IDX" "    "
+        printf '\n'
     done
 
     # --- Switch port nodes ---
@@ -1897,15 +1883,8 @@ DOTHEADER
             local PORT_ID
             PORT_ID=$(dot_id "swport_${SW}_${PORT}")
 
-            # Determine edge color: use bond color if bonded, otherwise green/red
             local EDGE_COLOR
-            if [[ "$BOND" != "None" && -n "${BOND_COLOR_MAP[$BOND]+x}" ]]; then
-                EDGE_COLOR="${BOND_COLOR_MAP[$BOND]}"
-            elif [[ "$LINK" == "up" ]]; then
-                EDGE_COLOR="$GREEN_COLOR"
-            else
-                EDGE_COLOR="$RED_COLOR"
-            fi
+            EDGE_COLOR=$(_dot_edge_color "$BOND" "$LINK")
 
             # Build centered edge label: VLAN on top, speed below
             local EDGE_LABEL=""
@@ -1944,13 +1923,7 @@ DOTHEADER
             local SW_ID
             SW_ID=$(dot_id "sw_${SW}")
             local EDGE_COLOR
-            if [[ "$BOND" != "None" && -n "${BOND_COLOR_MAP[$BOND]+x}" ]]; then
-                EDGE_COLOR="${BOND_COLOR_MAP[$BOND]}"
-            elif [[ "$LINK" == "up" ]]; then
-                EDGE_COLOR="$GREEN_COLOR"
-            else
-                EDGE_COLOR="$RED_COLOR"
-            fi
+            EDGE_COLOR=$(_dot_edge_color "$BOND" "$LINK")
             printf '    %s -> %s [penwidth=%s, color="%s"];\n' \
                 "$NODE_ID" "$SW_ID" "$PW" "$EDGE_COLOR"
         else
@@ -1995,7 +1968,9 @@ DOTHEADER
     printf '}\n'
 }
 
-# --- Output ---
+# --- Output rendering: table, CSV, JSON, DOT/SVG/PNG ---
+render_output() {
+
 if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
     # Header
     printf "%-${COL_W_DEVICE}s${COL_GAP}%-${COL_W_DRIVER}s${COL_GAP}%-${COL_W_FIRMWARE}s${COL_GAP}%-${COL_W_IFACE}s${COL_GAP}%-${COL_W_MAC}s${COL_GAP}%-${COL_W_MTU}s${COL_GAP}%-${COL_W_LINK}s${COL_GAP}%-${COL_W_SPEED}s${COL_GAP}%-${COL_W_BOND}s" \
@@ -2228,3 +2203,9 @@ elif [[ "$OUTPUT_FORMAT" == "svg" || "$OUTPUT_FORMAT" == "png" ]]; then
         exit 1
     fi
 fi
+}
+
+# --- Main Flow ---
+collect_data
+compute_layout
+render_output
