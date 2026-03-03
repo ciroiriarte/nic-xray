@@ -935,6 +935,7 @@ declare -a DATA_MET_RX_ERR DATA_MET_TX_ERR
 declare -a DATA_MET_RX_FIFO DATA_MET_TX_FIFO
 declare -A BOND_MODE_MAP
 declare -A DATA_SWITCH_DESCR
+declare -A DATA_SWITCH_SERIAL
 declare -a RENDER_ORDER
 ROW_COUNT=0
 
@@ -955,15 +956,19 @@ collect_data() {
     DATA_OPTICS_TX_LANES=(); DATA_OPTICS_RX_LANES=(); DATA_OPTICS_LANE_COUNT=()
     BOND_MODE_MAP=()
     DATA_SWITCH_DESCR=()
+    DATA_SWITCH_SERIAL=()
 
     # --- Server hardware & OS info (for diagram) ---
     SERVER_VENDOR=""
     SERVER_MODEL=""
+    SERVER_SERIAL=""
     SERVER_OS=""
     [[ -r /sys/devices/virtual/dmi/id/sys_vendor ]] && \
         SERVER_VENDOR=$(< /sys/devices/virtual/dmi/id/sys_vendor)
     [[ -r /sys/devices/virtual/dmi/id/product_name ]] && \
         SERVER_MODEL=$(< /sys/devices/virtual/dmi/id/product_name)
+    [[ -r /sys/devices/virtual/dmi/id/product_serial ]] && \
+        SERVER_SERIAL=$(< /sys/devices/virtual/dmi/id/product_serial)
     if [[ -r /etc/os-release ]]; then
         SERVER_OS=$(. /etc/os-release 2>/dev/null && printf '%s' "$PRETTY_NAME")
     fi
@@ -1101,9 +1106,10 @@ for _IFACE_PATH in /sys/class/net/*; do
     LLDP_AGGID=$(echo "$LLDP_OUTPUT" | awk '/PortAggregID:/ {print $NF}')
     [[ -z "$LLDP_AGGID" ]] && LLDP_AGGID="N/A"
 
-    # Switch SysDescr (for diagram — deduplicated by switch name)
+    # Switch SysDescr & serial (for diagram — deduplicated by switch name)
     if [[ -n "$SWITCH_NAME" && -z "${DATA_SWITCH_DESCR[$SWITCH_NAME]+x}" ]]; then
         DATA_SWITCH_DESCR["$SWITCH_NAME"]=$(echo "$LLDP_OUTPUT" | awk -F'SysDescr:' '/SysDescr:/ {sub(/^[ \t]+/, "", $2); print $2; exit}')
+        DATA_SWITCH_SERIAL["$SWITCH_NAME"]=$(parse_lldp_serial "$LLDP_OUTPUT")
     fi
 
     # VLAN Info from LLDP
@@ -1556,6 +1562,52 @@ dot_escape() {
     printf '%s' "$STR"
 }
 
+# Decode comma-separated hex bytes to an ASCII string.
+# Example: "58,48,33,31" → "XH31"
+_decode_hex_ascii() {
+    local _HEX="$1" _OUT="" _BYTE
+    local _IFS_SAVE="$IFS"
+    IFS=',' read -ra _BYTES <<< "$_HEX"
+    IFS="$_IFS_SAVE"
+    for _BYTE in "${_BYTES[@]}"; do
+        _BYTE="${_BYTE// /}"
+        [[ -z "$_BYTE" ]] && continue
+        printf -v _CH '\\x%s' "$_BYTE"
+        printf -v _CH '%b' "$_CH"
+        _OUT+="$_CH"
+    done
+    printf '%s' "$_OUT"
+}
+
+# Extract switch serial number from LLDP vendor-specific TLVs.
+# Supports multiple vendors via OUI matching; extensible by adding new
+# OUI/SubType patterns below. Returns empty string if no match.
+#
+# Vendor support:
+#   Juniper  — OUI 00,90,69  SubType 1  (ASCII-encoded serial)
+#   Cisco    — OUI 00,01,42  SubType 11 (ASCII-encoded serial)
+parse_lldp_serial() {
+    local _LLDP="$1" _LINE _HEX
+
+    # Juniper: OUI 00,90,69, SubType: 1
+    _LINE=$(echo "$_LLDP" | grep 'OUI: 00,90,69, SubType: 1,' | head -1)
+    if [[ -n "$_LINE" ]]; then
+        _HEX="${_LINE##*Len: }"
+        _HEX="${_HEX#* }"
+        _decode_hex_ascii "$_HEX"
+        return
+    fi
+
+    # Cisco: OUI 00,01,42, SubType: 11
+    _LINE=$(echo "$_LLDP" | grep 'OUI: 00,01,42, SubType: 11,' | head -1)
+    if [[ -n "$_LINE" ]]; then
+        _HEX="${_LINE##*Len: }"
+        _HEX="${_HEX#* }"
+        _decode_hex_ascii "$_HEX"
+        return
+    fi
+}
+
 # Parse switch SysDescr into brand, model, and software components.
 # Uses nameref variables: sets _BRAND, _MODEL, _SOFTWARE in the caller.
 # Falls back to truncated raw string if no known vendor pattern matches.
@@ -1758,6 +1810,10 @@ DOTHEADER
         local _SERVER_HW="${SERVER_VENDOR}${SERVER_MODEL:+ $SERVER_MODEL}"
         printf '        <TR><TD COLSPAN="2"><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
             "$SUBTEXT_COLOR" "$(dot_escape "$_SERVER_HW")"
+    fi
+    if [[ -n "$SERVER_SERIAL" ]]; then
+        printf '        <TR><TD COLSPAN="2"><FONT POINT-SIZE="9" COLOR="%s">[%s]</FONT></TD></TR>\n' \
+            "$SUBTEXT_COLOR" "$(dot_escape "$SERVER_SERIAL")"
     fi
     if [[ -n "$SERVER_OS" ]]; then
         printf '        <TR><TD COLSPAN="2"><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
@@ -1990,13 +2046,17 @@ DOTHEADER
             "$PEACH_COLOR" "$(dot_escape "$SW_NAME")"
 
         local _SW_DESCR="${DATA_SWITCH_DESCR[$SW_NAME]:-}"
+        local _SW_SER="${DATA_SWITCH_SERIAL[$SW_NAME]:-}"
         if [[ -n "$_SW_DESCR" ]]; then
             local _SW_BRAND="" _SW_MODEL="" _SW_SOFT=""
             parse_switch_descr "$_SW_DESCR" _SW_BRAND _SW_MODEL _SW_SOFT
             if [[ -n "$_SW_MODEL" ]]; then
-                # Parsed successfully: brand + model, then software
+                # Parsed successfully: brand + model, then serial, then software
                 printf '        <TR><TD><FONT POINT-SIZE="9" COLOR="%s">%s %s</FONT></TD></TR>\n' \
                     "$SUBTEXT_COLOR" "$(dot_escape "$_SW_BRAND")" "$(dot_escape "$_SW_MODEL")"
+                [[ -n "$_SW_SER" ]] && \
+                    printf '        <TR><TD><FONT POINT-SIZE="9" COLOR="%s">[%s]</FONT></TD></TR>\n' \
+                        "$SUBTEXT_COLOR" "$(dot_escape "$_SW_SER")"
                 [[ -n "$_SW_SOFT" ]] && \
                     printf '        <TR><TD><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
                         "$SUBTEXT_COLOR" "$(dot_escape "$_SW_SOFT")"
@@ -2004,6 +2064,9 @@ DOTHEADER
                 # Fallback: truncated SysDescr as single row
                 printf '        <TR><TD><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
                     "$SUBTEXT_COLOR" "$(dot_escape "$_SW_BRAND")"
+                [[ -n "$_SW_SER" ]] && \
+                    printf '        <TR><TD><FONT POINT-SIZE="9" COLOR="%s">[%s]</FONT></TD></TR>\n' \
+                        "$SUBTEXT_COLOR" "$(dot_escape "$_SW_SER")"
             else
                 printf '        <TR><TD><FONT COLOR="%s">Switch</FONT></TD></TR>\n' "$SUBTEXT_COLOR"
             fi

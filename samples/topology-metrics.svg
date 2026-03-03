@@ -37,11 +37,12 @@
 <!-- server -->
 <g id="node1" class="node">
 <title>server</title>
-<polygon fill="#313244" stroke="none" points="0,-805.5 0,-894 165.25,-894 165.25,-805.5 0,-805.5"/>
-<text xml:space="preserve" text-anchor="start" x="11" y="-870.7" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="14.00" fill="#cba6f7">server&#45;01.example.net</text>
-<text xml:space="preserve" text-anchor="start" x="28.62" y="-843.45" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">Dell Inc. PowerEdge R740</text>
-<text xml:space="preserve" text-anchor="start" x="11.75" y="-817.7" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">Debian GNU/Linux 12 (bookworm)</text>
-<polygon fill="none" stroke="#585b70" points="0,-805.5 0,-894 165.25,-894 165.25,-805.5 0,-805.5"/>
+<polygon fill="#313244" stroke="none" points="0,-792.62 0,-906.88 165.25,-906.88 165.25,-792.62 0,-792.62"/>
+<text xml:space="preserve" text-anchor="start" x="11" y="-883.58" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="14.00" fill="#cba6f7">server&#45;01.example.net</text>
+<text xml:space="preserve" text-anchor="start" x="28.62" y="-856.33" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">Dell Inc. PowerEdge R740</text>
+<text xml:space="preserve" text-anchor="start" x="47.38" y="-830.58" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">[SN&#45;SERVER&#45;01]</text>
+<text xml:space="preserve" text-anchor="start" x="11.75" y="-804.83" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">Debian GNU/Linux 12 (bookworm)</text>
+<polygon fill="none" stroke="#585b70" points="0,-792.62 0,-906.88 165.25,-906.88 165.25,-792.62 0,-792.62"/>
 </g>
 <!-- eno1np0 -->
 <g id="node2" class="node">
@@ -51,20 +52,20 @@
 <text xml:space="preserve" text-anchor="start" x="291.38" y="-1386.7" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">XX:XX:XX:XX:XX:01</text>
 <text xml:space="preserve" text-anchor="start" x="309.75" y="-1366.95" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">MTU: 9100</text>
 <text xml:space="preserve" text-anchor="start" x="307.12" y="-1348.15" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6adc8">10GBASE&#45;SR</text>
-<text xml:space="preserve" text-anchor="start" x="281.62" y="-1328.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Tx:&#45;2.34 dBm</text>
+<text xml:space="preserve" text-anchor="start" x="281.62" y="-1328.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Tx:&#45;2.32 dBm</text>
 <text xml:space="preserve" text-anchor="start" x="330.38" y="-1328.05" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
-<text xml:space="preserve" text-anchor="start" x="333.38" y="-1328.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Rx:&#45;2.90 dBm</text>
-<text xml:space="preserve" text-anchor="start" x="291.75" y="-1306.8" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#a6e3a1">↓</text>
-<text xml:space="preserve" text-anchor="start" x="297" y="-1306.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">4.4 KB/s</text>
-<text xml:space="preserve" text-anchor="start" x="330.75" y="-1306.8" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
-<text xml:space="preserve" text-anchor="start" x="333.75" y="-1306.8" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#89b4fa">↑</text>
-<text xml:space="preserve" text-anchor="start" x="339" y="-1306.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">6.5 KB/s</text>
+<text xml:space="preserve" text-anchor="start" x="333.38" y="-1328.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Rx:&#45;2.91 dBm</text>
+<text xml:space="preserve" text-anchor="start" x="293.25" y="-1306.8" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#a6e3a1">↓</text>
+<text xml:space="preserve" text-anchor="start" x="298.5" y="-1306.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">493 B/s</text>
+<text xml:space="preserve" text-anchor="start" x="329.25" y="-1306.8" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
+<text xml:space="preserve" text-anchor="start" x="332.25" y="-1306.8" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#89b4fa">↑</text>
+<text xml:space="preserve" text-anchor="start" x="337.5" y="-1306.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">2.3 KB/s</text>
 <polygon fill="none" stroke="#a6e3a1" points="274.62,-1298 274.62,-1423.5 389.88,-1423.5 389.88,-1298 274.62,-1298"/>
 </g>
 <!-- server&#45;&gt;eno1np0 -->
 <g id="edge1" class="edge">
 <title>server&#45;&gt;eno1np0</title>
-<path fill="none" stroke="#585b70" d="M99.19,-893.96C127.55,-972.34 191.67,-1139.71 266.25,-1270.75 270.35,-1277.95 274.9,-1285.26 279.64,-1292.46"/>
+<path fill="none" stroke="#585b70" d="M103.85,-906.77C134.19,-989.49 195.52,-1146.46 266.25,-1270.75 270.35,-1277.95 274.9,-1285.26 279.64,-1292.46"/>
 <polygon fill="#585b70" stroke="#585b70" points="277.73,-1293.39 282.82,-1297.21 281.23,-1291.05 277.73,-1293.39"/>
 </g>
 <!-- ens5f0np0 -->
@@ -75,20 +76,20 @@
 <text xml:space="preserve" text-anchor="start" x="291.38" y="-1555.7" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">XX:XX:XX:XX:XX:07</text>
 <text xml:space="preserve" text-anchor="start" x="309.75" y="-1535.95" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">MTU: 9100</text>
 <text xml:space="preserve" text-anchor="start" x="307.12" y="-1517.15" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6adc8">10GBASE&#45;SR</text>
-<text xml:space="preserve" text-anchor="start" x="281.62" y="-1497.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Tx:&#45;2.64 dBm</text>
+<text xml:space="preserve" text-anchor="start" x="281.62" y="-1497.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Tx:&#45;2.63 dBm</text>
 <text xml:space="preserve" text-anchor="start" x="330.38" y="-1497.05" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
-<text xml:space="preserve" text-anchor="start" x="333.38" y="-1497.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Rx:&#45;3.55 dBm</text>
+<text xml:space="preserve" text-anchor="start" x="333.38" y="-1497.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Rx:&#45;3.54 dBm</text>
 <text xml:space="preserve" text-anchor="start" x="286.5" y="-1475.8" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#a6e3a1">↓</text>
-<text xml:space="preserve" text-anchor="start" x="291.75" y="-1475.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">16.4 KB/s</text>
+<text xml:space="preserve" text-anchor="start" x="291.75" y="-1475.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">13.4 KB/s</text>
 <text xml:space="preserve" text-anchor="start" x="330.75" y="-1475.8" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
 <text xml:space="preserve" text-anchor="start" x="333.75" y="-1475.8" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#89b4fa">↑</text>
-<text xml:space="preserve" text-anchor="start" x="339" y="-1475.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">27.5 KB/s</text>
+<text xml:space="preserve" text-anchor="start" x="339" y="-1475.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">12.9 KB/s</text>
 <polygon fill="none" stroke="#a6e3a1" points="274.62,-1467 274.62,-1592.5 389.88,-1592.5 389.88,-1467 274.62,-1467"/>
 </g>
 <!-- server&#45;&gt;ens5f0np0 -->
 <g id="edge7" class="edge">
 <title>server&#45;&gt;ens5f0np0</title>
-<path fill="none" stroke="#585b70" d="M91.6,-893.98C111.1,-995.61 166.98,-1251.88 266.25,-1444.75 269.06,-1450.21 272.23,-1455.68 275.62,-1461.06"/>
+<path fill="none" stroke="#585b70" d="M94.11,-906.85C115.62,-1015.93 170.94,-1259.56 266.25,-1444.75 269.06,-1450.21 272.23,-1455.68 275.62,-1461.06"/>
 <polygon fill="#585b70" stroke="#585b70" points="273.84,-1462.17 278.86,-1466.07 277.36,-1459.89 273.84,-1462.17"/>
 </g>
 <!-- eno2np1 -->
@@ -99,21 +100,21 @@
 <text xml:space="preserve" text-anchor="start" x="291.38" y="-706.7" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">XX:XX:XX:XX:XX:02</text>
 <text xml:space="preserve" text-anchor="start" x="309.75" y="-686.95" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">MTU: 9100</text>
 <text xml:space="preserve" text-anchor="start" x="307.12" y="-668.15" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6adc8">25GBASE&#45;SR</text>
-<text xml:space="preserve" text-anchor="start" x="281.62" y="-648.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Tx:&#45;0.97 dBm</text>
+<text xml:space="preserve" text-anchor="start" x="281.62" y="-648.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Tx:&#45;0.99 dBm</text>
 <text xml:space="preserve" text-anchor="start" x="330.38" y="-648.05" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
-<text xml:space="preserve" text-anchor="start" x="333.38" y="-648.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Rx:&#45;2.74 dBm</text>
+<text xml:space="preserve" text-anchor="start" x="333.38" y="-648.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Rx:&#45;2.71 dBm</text>
 <text xml:space="preserve" text-anchor="start" x="294.75" y="-626.8" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#a6e3a1">↓</text>
-<text xml:space="preserve" text-anchor="start" x="300" y="-626.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">646 B/s</text>
+<text xml:space="preserve" text-anchor="start" x="300" y="-626.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">496 B/s</text>
 <text xml:space="preserve" text-anchor="start" x="330.75" y="-626.8" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
 <text xml:space="preserve" text-anchor="start" x="333.75" y="-626.8" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#89b4fa">↑</text>
-<text xml:space="preserve" text-anchor="start" x="339" y="-626.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">656 B/s</text>
+<text xml:space="preserve" text-anchor="start" x="339" y="-626.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">479 B/s</text>
 <polygon fill="none" stroke="#a6e3a1" points="274.62,-618 274.62,-743.5 389.88,-743.5 389.88,-618 274.62,-618"/>
 </g>
 <!-- server&#45;&gt;eno2np1 -->
 <g id="edge2" class="edge">
 <title>server&#45;&gt;eno2np1</title>
-<path fill="none" stroke="#585b70" d="M148.36,-805.57C185.63,-780.13 232.23,-748.33 269.06,-723.19"/>
-<polygon fill="#585b70" stroke="#585b70" points="269.86,-725.19 273.64,-720.07 267.5,-721.72 269.86,-725.19"/>
+<path fill="none" stroke="#585b70" d="M165.05,-794.18C198.75,-771.18 237.21,-744.93 268.64,-723.48"/>
+<polygon fill="#585b70" stroke="#585b70" points="269.81,-725.22 273.58,-720.11 267.44,-721.75 269.81,-725.22"/>
 </g>
 <!-- ens5f1np1 -->
 <g id="node5" class="node">
@@ -123,14 +124,14 @@
 <text xml:space="preserve" text-anchor="start" x="291.38" y="-875.7" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">XX:XX:XX:XX:XX:08</text>
 <text xml:space="preserve" text-anchor="start" x="309.75" y="-855.95" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">MTU: 9100</text>
 <text xml:space="preserve" text-anchor="start" x="307.12" y="-837.15" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6adc8">25GBASE&#45;SR</text>
-<text xml:space="preserve" text-anchor="start" x="281.62" y="-817.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Tx:&#45;0.94 dBm</text>
+<text xml:space="preserve" text-anchor="start" x="281.62" y="-817.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Tx:&#45;0.95 dBm</text>
 <text xml:space="preserve" text-anchor="start" x="330.38" y="-817.05" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
-<text xml:space="preserve" text-anchor="start" x="333.38" y="-817.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Rx:&#45;3.07 dBm</text>
-<text xml:space="preserve" text-anchor="start" x="292.12" y="-795.8" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#a6e3a1">↓</text>
-<text xml:space="preserve" text-anchor="start" x="297.38" y="-795.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">808 B/s</text>
-<text xml:space="preserve" text-anchor="start" x="328.12" y="-795.8" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
-<text xml:space="preserve" text-anchor="start" x="331.12" y="-795.8" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#89b4fa">↑</text>
-<text xml:space="preserve" text-anchor="start" x="336.38" y="-795.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">1021 B/s</text>
+<text xml:space="preserve" text-anchor="start" x="333.38" y="-817.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Rx:&#45;3.15 dBm</text>
+<text xml:space="preserve" text-anchor="start" x="294.75" y="-795.8" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#a6e3a1">↓</text>
+<text xml:space="preserve" text-anchor="start" x="300" y="-795.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">595 B/s</text>
+<text xml:space="preserve" text-anchor="start" x="330.75" y="-795.8" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
+<text xml:space="preserve" text-anchor="start" x="333.75" y="-795.8" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#89b4fa">↑</text>
+<text xml:space="preserve" text-anchor="start" x="339" y="-795.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">801 B/s</text>
 <polygon fill="none" stroke="#a6e3a1" points="274.62,-787 274.62,-912.5 389.88,-912.5 389.88,-787 274.62,-787"/>
 </g>
 <!-- server&#45;&gt;ens5f1np1 -->
@@ -149,19 +150,19 @@
 <text xml:space="preserve" text-anchor="start" x="307.12" y="-1008.15" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6adc8">25GBASE&#45;SR</text>
 <text xml:space="preserve" text-anchor="start" x="281.62" y="-988.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Tx:&#45;1.99 dBm</text>
 <text xml:space="preserve" text-anchor="start" x="330.38" y="-988.05" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
-<text xml:space="preserve" text-anchor="start" x="333.38" y="-988.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Rx:&#45;2.09 dBm</text>
+<text xml:space="preserve" text-anchor="start" x="333.38" y="-988.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Rx:&#45;2.08 dBm</text>
 <text xml:space="preserve" text-anchor="start" x="286.5" y="-966.8" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#a6e3a1">↓</text>
-<text xml:space="preserve" text-anchor="start" x="291.75" y="-966.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">96.8 KB/s</text>
+<text xml:space="preserve" text-anchor="start" x="291.75" y="-966.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">69.5 KB/s</text>
 <text xml:space="preserve" text-anchor="start" x="330.75" y="-966.8" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
 <text xml:space="preserve" text-anchor="start" x="333.75" y="-966.8" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#89b4fa">↑</text>
-<text xml:space="preserve" text-anchor="start" x="339" y="-966.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">68.0 KB/s</text>
+<text xml:space="preserve" text-anchor="start" x="339" y="-966.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">61.5 KB/s</text>
 <polygon fill="none" stroke="#a6e3a1" points="274.62,-958 274.62,-1083.5 389.88,-1083.5 389.88,-958 274.62,-958"/>
 </g>
 <!-- server&#45;&gt;ens3f0np0 -->
 <g id="edge5" class="edge">
 <title>server&#45;&gt;ens3f0np0</title>
-<path fill="none" stroke="#585b70" d="M147.39,-893.79C184.8,-919.62 231.85,-952.11 269,-977.76"/>
-<polygon fill="#585b70" stroke="#585b70" points="267.49,-979.27 273.62,-980.96 269.88,-975.82 267.49,-979.27"/>
+<path fill="none" stroke="#585b70" d="M165.05,-905.98C198.89,-929.35 237.53,-956.03 269.04,-977.79"/>
+<polygon fill="#585b70" stroke="#585b70" points="267.46,-979.25 273.59,-980.93 269.84,-975.79 267.46,-979.25"/>
 </g>
 <!-- ens8f0np0 -->
 <g id="node7" class="node">
@@ -175,16 +176,16 @@
 <text xml:space="preserve" text-anchor="start" x="330.38" y="-1157.05" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
 <text xml:space="preserve" text-anchor="start" x="333.38" y="-1157.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Rx:&#45;2.43 dBm</text>
 <text xml:space="preserve" text-anchor="start" x="281.25" y="-1135.8" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#a6e3a1">↓</text>
-<text xml:space="preserve" text-anchor="start" x="286.5" y="-1135.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">922.5 KB/s</text>
+<text xml:space="preserve" text-anchor="start" x="286.5" y="-1135.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">715.6 KB/s</text>
 <text xml:space="preserve" text-anchor="start" x="330.75" y="-1135.8" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
 <text xml:space="preserve" text-anchor="start" x="333.75" y="-1135.8" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#89b4fa">↑</text>
-<text xml:space="preserve" text-anchor="start" x="339" y="-1135.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">168.4 KB/s</text>
+<text xml:space="preserve" text-anchor="start" x="339" y="-1135.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">157.0 KB/s</text>
 <polygon fill="none" stroke="#a6e3a1" points="274.25,-1127 274.25,-1252.5 390.25,-1252.5 390.25,-1127 274.25,-1127"/>
 </g>
 <!-- server&#45;&gt;ens8f0np0 -->
 <g id="edge11" class="edge">
 <title>server&#45;&gt;ens8f0np0</title>
-<path fill="none" stroke="#585b70" d="M114.56,-893.82C150.55,-944.89 211.99,-1031.44 266.25,-1104.75 270.31,-1110.24 274.55,-1115.9 278.82,-1121.58"/>
+<path fill="none" stroke="#585b70" d="M123.74,-906.84C160.41,-958.76 216.36,-1037.35 266.25,-1104.75 270.31,-1110.24 274.55,-1115.9 278.82,-1121.58"/>
 <polygon fill="#585b70" stroke="#585b70" points="276.9,-1122.52 282.19,-1126.04 280.25,-1119.99 276.9,-1122.52"/>
 </g>
 <!-- ens3f1np1 -->
@@ -197,18 +198,18 @@
 <text xml:space="preserve" text-anchor="start" x="307.12" y="-1688.15" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6adc8">25GBASE&#45;SR</text>
 <text xml:space="preserve" text-anchor="start" x="281.62" y="-1668.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Tx:&#45;2.79 dBm</text>
 <text xml:space="preserve" text-anchor="start" x="330.38" y="-1668.05" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
-<text xml:space="preserve" text-anchor="start" x="333.38" y="-1668.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Rx:&#45;2.44 dBm</text>
+<text xml:space="preserve" text-anchor="start" x="333.38" y="-1668.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Rx:&#45;2.29 dBm</text>
 <text xml:space="preserve" text-anchor="start" x="285.75" y="-1646.8" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#a6e3a1">↓</text>
-<text xml:space="preserve" text-anchor="start" x="291" y="-1646.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">3.0 MB/s</text>
+<text xml:space="preserve" text-anchor="start" x="291" y="-1646.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">2.5 MB/s</text>
 <text xml:space="preserve" text-anchor="start" x="326.25" y="-1646.8" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
 <text xml:space="preserve" text-anchor="start" x="329.25" y="-1646.8" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#89b4fa">↑</text>
-<text xml:space="preserve" text-anchor="start" x="334.5" y="-1646.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">955.5 KB/s</text>
+<text xml:space="preserve" text-anchor="start" x="334.5" y="-1646.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">470.4 KB/s</text>
 <polygon fill="none" stroke="#a6e3a1" points="274.62,-1638 274.62,-1763.5 389.88,-1763.5 389.88,-1638 274.62,-1638"/>
 </g>
 <!-- server&#45;&gt;ens3f1np1 -->
 <g id="edge6" class="edge">
 <title>server&#45;&gt;ens3f1np1</title>
-<path fill="none" stroke="#585b70" d="M88.14,-893.76C101.69,-1013.71 148.59,-1354.55 266.25,-1610.75 269.51,-1617.86 273.38,-1624.97 277.57,-1631.92"/>
+<path fill="none" stroke="#585b70" d="M89.62,-906.64C104.93,-1036.61 152.56,-1363.19 266.25,-1610.75 269.51,-1617.86 273.38,-1624.97 277.57,-1631.92"/>
 <polygon fill="#585b70" stroke="#585b70" points="275.75,-1632.97 280.7,-1636.95 279.31,-1630.75 275.75,-1632.97"/>
 </g>
 <!-- ens8f1np1 -->
@@ -221,9 +222,9 @@
 <text xml:space="preserve" text-anchor="start" x="307.12" y="-1857.15" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6adc8">25GBASE&#45;SR</text>
 <text xml:space="preserve" text-anchor="start" x="281.62" y="-1837.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Tx:&#45;0.64 dBm</text>
 <text xml:space="preserve" text-anchor="start" x="330.38" y="-1837.05" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
-<text xml:space="preserve" text-anchor="start" x="333.38" y="-1837.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Rx:&#45;2.05 dBm</text>
+<text xml:space="preserve" text-anchor="start" x="333.38" y="-1837.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Rx:&#45;2.04 dBm</text>
 <text xml:space="preserve" text-anchor="start" x="290.25" y="-1815.8" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#a6e3a1">↓</text>
-<text xml:space="preserve" text-anchor="start" x="295.5" y="-1815.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">2.9 MB/s</text>
+<text xml:space="preserve" text-anchor="start" x="295.5" y="-1815.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">4.2 MB/s</text>
 <text xml:space="preserve" text-anchor="start" x="330.75" y="-1815.8" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
 <text xml:space="preserve" text-anchor="start" x="333.75" y="-1815.8" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#89b4fa">↑</text>
 <text xml:space="preserve" text-anchor="start" x="339" y="-1815.8" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">1.2 MB/s</text>
@@ -232,7 +233,7 @@
 <!-- server&#45;&gt;ens8f1np1 -->
 <g id="edge12" class="edge">
 <title>server&#45;&gt;ens8f1np1</title>
-<path fill="none" stroke="#585b70" d="M85.16,-893.8C91.4,-1031.59 122.02,-1464.25 266.25,-1784.75 268.72,-1790.23 271.6,-1795.68 274.75,-1801.02"/>
+<path fill="none" stroke="#585b70" d="M85.77,-906.72C93.3,-1056.94 126.26,-1473.67 266.25,-1784.75 268.72,-1790.23 271.6,-1795.68 274.75,-1801.02"/>
 <polygon fill="#585b70" stroke="#585b70" points="272.84,-1801.94 277.77,-1805.95 276.42,-1799.74 272.84,-1801.94"/>
 </g>
 <!-- eno3np2 -->
@@ -256,7 +257,7 @@
 <!-- server&#45;&gt;eno3np2 -->
 <g id="edge3" class="edge">
 <title>server&#45;&gt;eno3np2</title>
-<path fill="none" stroke="#585b70" d="M98.22,-805.75C121.98,-742.16 175.72,-626.91 266.25,-578.75 381.76,-517.3 529.87,-602.63 613.27,-663.94"/>
+<path fill="none" stroke="#585b70" d="M103.24,-792.73C129.13,-727.46 181.6,-623.78 266.25,-578.75 381.76,-517.3 529.87,-602.63 613.27,-663.94"/>
 <polygon fill="#585b70" stroke="#585b70" points="611.88,-665.53 617.95,-667.41 614.38,-662.15 611.88,-665.53"/>
 </g>
 <!-- eno4np3 -->
@@ -267,7 +268,7 @@
 <text xml:space="preserve" text-anchor="start" x="638" y="-573.7" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">XX:XX:XX:XX:XX:04</text>
 <text xml:space="preserve" text-anchor="start" x="656.38" y="-553.95" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">MTU: 1500</text>
 <text xml:space="preserve" text-anchor="start" x="653.75" y="-535.15" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6adc8">25GBASE&#45;SR</text>
-<text xml:space="preserve" text-anchor="start" x="626" y="-515.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Tx:&#45;0.81 dBm</text>
+<text xml:space="preserve" text-anchor="start" x="626" y="-515.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Tx:&#45;0.82 dBm</text>
 <text xml:space="preserve" text-anchor="start" x="674.75" y="-515.05" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
 <text xml:space="preserve" text-anchor="start" x="677.75" y="-515.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#f38ba8">Rx:&#45;40.00 dBm</text>
 <text xml:space="preserve" text-anchor="start" x="651.88" y="-493.8" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#a6e3a1">↓</text>
@@ -280,7 +281,7 @@
 <!-- server&#45;&gt;eno4np3 -->
 <g id="edge4" class="edge">
 <title>server&#45;&gt;eno4np3</title>
-<path fill="none" stroke="#585b70" d="M93.7,-805.53C112.86,-733.74 162.25,-595.11 266.25,-547.75 378.9,-496.46 527.54,-514.57 611.9,-531.65"/>
+<path fill="none" stroke="#585b70" d="M97.23,-792.8C118.59,-718.42 168.11,-592.44 266.25,-547.75 378.9,-496.46 527.54,-514.57 611.9,-531.65"/>
 <polygon fill="#585b70" stroke="#585b70" points="611.33,-533.68 617.63,-532.84 612.18,-529.57 611.33,-533.68"/>
 </g>
 <!-- ens5f2np2 -->
@@ -291,7 +292,7 @@
 <text xml:space="preserve" text-anchor="start" x="638" y="-404.7" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">XX:XX:XX:XX:XX:09</text>
 <text xml:space="preserve" text-anchor="start" x="656.38" y="-384.95" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">MTU: 1500</text>
 <text xml:space="preserve" text-anchor="start" x="653.75" y="-366.15" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6adc8">10GBASE&#45;SR</text>
-<text xml:space="preserve" text-anchor="start" x="626" y="-346.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Tx:&#45;2.24 dBm</text>
+<text xml:space="preserve" text-anchor="start" x="626" y="-346.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Tx:&#45;2.25 dBm</text>
 <text xml:space="preserve" text-anchor="start" x="674.75" y="-346.05" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
 <text xml:space="preserve" text-anchor="start" x="677.75" y="-346.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#f38ba8">Rx:&#45;26.78 dBm</text>
 <text xml:space="preserve" text-anchor="start" x="651.88" y="-324.8" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#a6e3a1">↓</text>
@@ -304,7 +305,7 @@
 <!-- server&#45;&gt;ens5f2np2 -->
 <g id="edge9" class="edge">
 <title>server&#45;&gt;ens5f2np2</title>
-<path fill="none" stroke="#585b70" d="M93.32,-805.56C112.3,-730.4 161.97,-578.74 266.25,-505.75 373.11,-430.95 525.43,-399.12 611.66,-386.43"/>
+<path fill="none" stroke="#585b70" d="M96.69,-792.63C117.87,-714.12 167.65,-574.77 266.25,-505.75 373.11,-430.95 525.43,-399.12 611.66,-386.43"/>
 <polygon fill="#585b70" stroke="#585b70" points="611.9,-388.52 617.54,-385.59 611.3,-384.36 611.9,-388.52"/>
 </g>
 <!-- ens5f3np3 -->
@@ -315,7 +316,7 @@
 <text xml:space="preserve" text-anchor="start" x="638" y="-235.7" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">XX:XX:XX:XX:XX:0a</text>
 <text xml:space="preserve" text-anchor="start" x="656.38" y="-215.95" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">MTU: 1500</text>
 <text xml:space="preserve" text-anchor="start" x="653.75" y="-197.15" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6adc8">10GBASE&#45;SR</text>
-<text xml:space="preserve" text-anchor="start" x="626" y="-177.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Tx:&#45;2.46 dBm</text>
+<text xml:space="preserve" text-anchor="start" x="626" y="-177.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#a6e3a1">Tx:&#45;2.47 dBm</text>
 <text xml:space="preserve" text-anchor="start" x="674.75" y="-177.05" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
 <text xml:space="preserve" text-anchor="start" x="677.75" y="-177.05" font-family="Helvetica,Arial,sans-serif" font-size="8.00" fill="#f38ba8">Rx:&#45;26.78 dBm</text>
 <text xml:space="preserve" text-anchor="start" x="651.88" y="-155.8" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#a6e3a1">↓</text>
@@ -328,7 +329,7 @@
 <!-- server&#45;&gt;ens5f3np3 -->
 <g id="edge10" class="edge">
 <title>server&#45;&gt;ens5f3np3</title>
-<path fill="none" stroke="#585b70" d="M92.57,-805.78C111.4,-722.95 162.26,-542.06 266.25,-429.75 363.66,-324.53 523.09,-259.66 612.24,-229.63"/>
+<path fill="none" stroke="#585b70" d="M95.59,-792.82C116.55,-705.26 167.4,-536.52 266.25,-429.75 363.66,-324.53 523.09,-259.66 612.24,-229.63"/>
 <polygon fill="#585b70" stroke="#585b70" points="612.87,-231.63 617.89,-227.74 611.54,-227.65 612.87,-231.63"/>
 </g>
 <!-- idrac -->
@@ -339,16 +340,16 @@
 <text xml:space="preserve" text-anchor="start" x="638" y="-66.95" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">XX:XX:XX:XX:XX:0d</text>
 <text xml:space="preserve" text-anchor="start" x="656.38" y="-47.2" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">MTU: 1500</text>
 <text xml:space="preserve" text-anchor="start" x="646.62" y="-26.55" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#a6e3a1">↓</text>
-<text xml:space="preserve" text-anchor="start" x="651.88" y="-26.55" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">52 B/s</text>
+<text xml:space="preserve" text-anchor="start" x="651.88" y="-26.55" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">43 B/s</text>
 <text xml:space="preserve" text-anchor="start" x="677.38" y="-26.55" font-family="Helvetica,Arial,sans-serif" font-size="11.00" fill="#cdd6f4"> </text>
 <text xml:space="preserve" text-anchor="start" x="680.38" y="-26.55" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#89b4fa">↑</text>
-<text xml:space="preserve" text-anchor="start" x="685.62" y="-26.55" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">76 B/s</text>
+<text xml:space="preserve" text-anchor="start" x="685.62" y="-26.55" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">63 B/s</text>
 <polygon fill="none" stroke="#a6e3a1" points="631,-17.75 631,-103.75 726.75,-103.75 726.75,-17.75 631,-17.75"/>
 </g>
 <!-- server&#45;&gt;idrac -->
 <g id="edge13" class="edge">
 <title>server&#45;&gt;idrac</title>
-<path fill="none" stroke="#585b70" d="M88.81,-805.56C102.2,-708.18 145.75,-471.69 266.25,-319.75 363.82,-196.73 536.84,-115.77 624.21,-80.68"/>
+<path fill="none" stroke="#585b70" d="M90.63,-792.76C105.93,-688.74 150.74,-465.39 266.25,-319.75 363.82,-196.73 536.84,-115.77 624.21,-80.68"/>
 <polygon fill="#585b70" stroke="#585b70" points="624.92,-82.66 629.71,-78.49 623.36,-78.75 624.92,-82.66"/>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_2 -->
@@ -384,62 +385,62 @@
 <!-- swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_3 -->
 <g id="node16" class="node">
 <title>swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_3</title>
-<polygon fill="#313244" stroke="none" points="632.5,-947.12 632.5,-972.38 725.25,-972.38 725.25,-947.12 632.5,-947.12"/>
-<text xml:space="preserve" text-anchor="start" x="639.5" y="-955.92" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ifname xe&#45;0/0/3</text>
-<polygon fill="none" stroke="#fab387" points="632.5,-947.12 632.5,-972.38 725.25,-972.38 725.25,-947.12 632.5,-947.12"/>
+<polygon fill="#313244" stroke="none" points="632.5,-888.12 632.5,-913.38 725.25,-913.38 725.25,-888.12 632.5,-888.12"/>
+<text xml:space="preserve" text-anchor="start" x="639.5" y="-896.92" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ifname xe&#45;0/0/3</text>
+<polygon fill="none" stroke="#fab387" points="632.5,-888.12 632.5,-913.38 725.25,-913.38 725.25,-888.12 632.5,-888.12"/>
 </g>
 <!-- eno2np1&#45;&gt;swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_3 -->
 <g id="edge15" class="edge">
 <title>eno2np1&#45;&gt;swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_3</title>
-<path fill="none" stroke="#f9e2af" stroke-width="2.5" d="M389.77,-726.51C465.36,-787.7 596.28,-893.69 651.79,-938.63"/>
-<polygon fill="#f9e2af" stroke="#f9e2af" stroke-width="2.5" points="649.53,-941.3 659.5,-944.88 653.93,-935.86 649.53,-941.3"/>
-<text xml:space="preserve" text-anchor="start" x="444.25" y="-873.04" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">VLAN 200;201;202;211;212</text>
-<text xml:space="preserve" text-anchor="start" x="489.62" y="-862.54" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">10GbE</text>
+<path fill="none" stroke="#f9e2af" stroke-width="2.5" d="M389.77,-716.83C463.22,-763.72 588.91,-843.96 646.9,-880.98"/>
+<polygon fill="#f9e2af" stroke="#f9e2af" stroke-width="2.5" points="644.7,-883.72 655.01,-886.15 648.47,-877.82 644.7,-883.72"/>
+<text xml:space="preserve" text-anchor="start" x="444.25" y="-834.81" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">VLAN 200;201;202;211;212</text>
+<text xml:space="preserve" text-anchor="start" x="489.62" y="-824.31" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">10GbE</text>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_3 -->
 <g id="node20" class="node">
 <title>swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_3</title>
-<polygon fill="#313244" stroke="none" points="632.5,-1357.12 632.5,-1382.38 725.25,-1382.38 725.25,-1357.12 632.5,-1357.12"/>
-<text xml:space="preserve" text-anchor="start" x="639.5" y="-1365.92" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ifname xe&#45;0/0/3</text>
-<polygon fill="none" stroke="#fab387" points="632.5,-1357.12 632.5,-1382.38 725.25,-1382.38 725.25,-1357.12 632.5,-1357.12"/>
+<polygon fill="#313244" stroke="none" points="632.5,-1364.12 632.5,-1389.38 725.25,-1389.38 725.25,-1364.12 632.5,-1364.12"/>
+<text xml:space="preserve" text-anchor="start" x="639.5" y="-1372.92" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ifname xe&#45;0/0/3</text>
+<polygon fill="none" stroke="#fab387" points="632.5,-1364.12 632.5,-1389.38 725.25,-1389.38 725.25,-1364.12 632.5,-1364.12"/>
 </g>
 <!-- ens5f1np1&#45;&gt;swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_3 -->
 <g id="edge21" class="edge">
 <title>ens5f1np1&#45;&gt;swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_3</title>
-<path fill="none" stroke="#f9e2af" stroke-width="2.5" d="M389.75,-904C392.98,-908.75 395.87,-913.68 398.25,-918.75 469.43,-1070.35 337.98,-1163.31 444.25,-1292.75 455.72,-1306.72 554.24,-1335.9 619.62,-1354.05"/>
-<polygon fill="#f9e2af" stroke="#f9e2af" stroke-width="2.5" points="618.41,-1357.35 628.98,-1356.64 620.27,-1350.6 618.41,-1357.35"/>
-<text xml:space="preserve" text-anchor="start" x="444.25" y="-1348.67" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">VLAN 200;201;202;211;212</text>
-<text xml:space="preserve" text-anchor="start" x="489.62" y="-1338.17" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">10GbE</text>
+<path fill="none" stroke="#f9e2af" stroke-width="2.5" d="M389.75,-904C392.98,-908.75 395.87,-913.68 398.25,-918.75 469.43,-1070.35 339.73,-1161.9 444.25,-1292.75 450.21,-1300.21 559.84,-1337.58 626.77,-1359.89"/>
+<polygon fill="#f9e2af" stroke="#f9e2af" stroke-width="2.5" points="625.37,-1363.11 635.96,-1362.94 627.57,-1356.47 625.37,-1363.11"/>
+<text xml:space="preserve" text-anchor="start" x="444.25" y="-1350.29" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">VLAN 200;201;202;211;212</text>
+<text xml:space="preserve" text-anchor="start" x="489.62" y="-1339.79" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">10GbE</text>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_38 -->
 <g id="node17" class="node">
 <title>swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_38</title>
-<polygon fill="#313244" stroke="none" points="631,-1074.12 631,-1099.38 726.75,-1099.38 726.75,-1074.12 631,-1074.12"/>
-<text xml:space="preserve" text-anchor="start" x="638" y="-1082.92" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ifname et&#45;0/0/38</text>
-<polygon fill="none" stroke="#fab387" points="631,-1074.12 631,-1099.38 726.75,-1099.38 726.75,-1074.12 631,-1074.12"/>
+<polygon fill="#313244" stroke="none" points="631,-1015.12 631,-1040.38 726.75,-1040.38 726.75,-1015.12 631,-1015.12"/>
+<text xml:space="preserve" text-anchor="start" x="638" y="-1023.92" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ifname et&#45;0/0/38</text>
+<polygon fill="none" stroke="#fab387" points="631,-1015.12 631,-1040.38 726.75,-1040.38 726.75,-1015.12 631,-1015.12"/>
 </g>
 <!-- ens3f0np0&#45;&gt;swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_38 -->
 <g id="edge18" class="edge">
 <title>ens3f0np0&#45;&gt;swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_38</title>
-<path fill="none" stroke="#94e2d5" stroke-width="3" d="M389.77,-1031.57C452.35,-1043.56 552.85,-1062.81 617.09,-1075.11"/>
-<polygon fill="#94e2d5" stroke="#94e2d5" stroke-width="3" points="616.07,-1078.48 626.55,-1076.92 617.39,-1071.6 616.07,-1078.48"/>
-<text xml:space="preserve" text-anchor="start" x="481.75" y="-1075.02" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">VLAN 501</text>
-<text xml:space="preserve" text-anchor="start" x="489.62" y="-1064.52" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">25GbE</text>
+<path fill="none" stroke="#94e2d5" stroke-width="3" d="M389.77,-1021.9C452.22,-1023.17 552.43,-1025.2 616.69,-1026.51"/>
+<polygon fill="#94e2d5" stroke="#94e2d5" stroke-width="3" points="616.41,-1030 626.47,-1026.71 616.55,-1023 616.41,-1030"/>
+<text xml:space="preserve" text-anchor="start" x="481.75" y="-1036.79" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">VLAN 501</text>
+<text xml:space="preserve" text-anchor="start" x="489.62" y="-1026.29" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">25GbE</text>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_38 -->
 <g id="node21" class="node">
 <title>swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_38</title>
-<polygon fill="#313244" stroke="none" points="631,-1425.12 631,-1450.38 726.75,-1450.38 726.75,-1425.12 631,-1425.12"/>
-<text xml:space="preserve" text-anchor="start" x="638" y="-1433.92" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ifname et&#45;0/0/38</text>
-<polygon fill="none" stroke="#fab387" points="631,-1425.12 631,-1450.38 726.75,-1450.38 726.75,-1425.12 631,-1425.12"/>
+<polygon fill="#313244" stroke="none" points="631,-1433.12 631,-1458.38 726.75,-1458.38 726.75,-1433.12 631,-1433.12"/>
+<text xml:space="preserve" text-anchor="start" x="638" y="-1441.92" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="11.00" fill="#cdd6f4">ifname et&#45;0/0/38</text>
+<polygon fill="none" stroke="#fab387" points="631,-1433.12 631,-1458.38 726.75,-1458.38 726.75,-1433.12 631,-1433.12"/>
 </g>
 <!-- ens8f0np0&#45;&gt;swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_38 -->
 <g id="edge24" class="edge">
 <title>ens8f0np0&#45;&gt;swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_38</title>
-<path fill="none" stroke="#94e2d5" stroke-width="3" d="M390.15,-1247.24C393.02,-1251.03 395.75,-1254.88 398.25,-1258.75 427.41,-1303.98 404.16,-1334.86 444.25,-1370.75 491.99,-1413.49 565.31,-1429.1 617.05,-1434.73"/>
-<polygon fill="#94e2d5" stroke="#94e2d5" stroke-width="3" points="616.56,-1438.2 626.85,-1435.66 617.23,-1431.23 616.56,-1438.2"/>
-<text xml:space="preserve" text-anchor="start" x="481.75" y="-1436.96" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">VLAN 501</text>
-<text xml:space="preserve" text-anchor="start" x="489.62" y="-1426.46" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">25GbE</text>
+<path fill="none" stroke="#94e2d5" stroke-width="3" d="M390.15,-1247.24C393.02,-1251.03 395.75,-1254.88 398.25,-1258.75 427.41,-1303.98 404.72,-1334.23 444.25,-1370.75 491.77,-1414.65 565.12,-1432.86 616.94,-1440.41"/>
+<polygon fill="#94e2d5" stroke="#94e2d5" stroke-width="3" points="616.4,-1443.87 626.78,-1441.71 617.32,-1436.93 616.4,-1443.87"/>
+<text xml:space="preserve" text-anchor="start" x="481.75" y="-1440.62" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">VLAN 501</text>
+<text xml:space="preserve" text-anchor="start" x="489.62" y="-1430.12" font-family="Helvetica,Arial,sans-serif" font-size="10.00" fill="#a6adc8">25GbE</text>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_39 -->
 <g id="node18" class="node">
@@ -511,68 +512,70 @@
 <!-- sw_switch_01_example_net -->
 <g id="node23" class="node">
 <title>sw_switch_01_example_net</title>
-<path fill="#313244" stroke="none" d="M859.75,-1074.5C859.75,-1074.5 1002.5,-1074.5 1002.5,-1074.5 1008.5,-1074.5 1014.5,-1080.5 1014.5,-1086.5 1014.5,-1086.5 1014.5,-1151 1014.5,-1151 1014.5,-1157 1008.5,-1163 1002.5,-1163 1002.5,-1163 859.75,-1163 859.75,-1163 853.75,-1163 847.75,-1157 847.75,-1151 847.75,-1151 847.75,-1086.5 847.75,-1086.5 847.75,-1080.5 853.75,-1074.5 859.75,-1074.5"/>
-<text xml:space="preserve" text-anchor="start" x="858.75" y="-1139.7" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="14.00" fill="#fab387">switch&#45;01.example.net</text>
-<text xml:space="preserve" text-anchor="start" x="882.75" y="-1112.45" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">Juniper qfx5120&#45;48y&#45;8c</text>
-<text xml:space="preserve" text-anchor="start" x="886.12" y="-1086.7" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">JUNOS 23.4R2&#45;S4.11</text>
-<path fill="none" stroke="#fab387" d="M859.75,-1074.5C859.75,-1074.5 1002.5,-1074.5 1002.5,-1074.5 1008.5,-1074.5 1014.5,-1080.5 1014.5,-1086.5 1014.5,-1086.5 1014.5,-1151 1014.5,-1151 1014.5,-1157 1008.5,-1163 1002.5,-1163 1002.5,-1163 859.75,-1163 859.75,-1163 853.75,-1163 847.75,-1157 847.75,-1151 847.75,-1151 847.75,-1086.5 847.75,-1086.5 847.75,-1080.5 853.75,-1074.5 859.75,-1074.5"/>
+<path fill="#313244" stroke="none" d="M859.75,-1045.62C859.75,-1045.62 1002.5,-1045.62 1002.5,-1045.62 1008.5,-1045.62 1014.5,-1051.62 1014.5,-1057.62 1014.5,-1057.62 1014.5,-1147.88 1014.5,-1147.88 1014.5,-1153.88 1008.5,-1159.88 1002.5,-1159.88 1002.5,-1159.88 859.75,-1159.88 859.75,-1159.88 853.75,-1159.88 847.75,-1153.88 847.75,-1147.88 847.75,-1147.88 847.75,-1057.62 847.75,-1057.62 847.75,-1051.62 853.75,-1045.62 859.75,-1045.62"/>
+<text xml:space="preserve" text-anchor="start" x="858.75" y="-1136.58" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="14.00" fill="#fab387">switch&#45;01.example.net</text>
+<text xml:space="preserve" text-anchor="start" x="882.75" y="-1109.33" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">Juniper qfx5120&#45;48y&#45;8c</text>
+<text xml:space="preserve" text-anchor="start" x="896.62" y="-1083.58" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">[SN&#45;SWITCH&#45;01]</text>
+<text xml:space="preserve" text-anchor="start" x="886.12" y="-1057.83" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">JUNOS 23.4R2&#45;S4.11</text>
+<path fill="none" stroke="#fab387" d="M859.75,-1045.62C859.75,-1045.62 1002.5,-1045.62 1002.5,-1045.62 1008.5,-1045.62 1014.5,-1051.62 1014.5,-1057.62 1014.5,-1057.62 1014.5,-1147.88 1014.5,-1147.88 1014.5,-1153.88 1008.5,-1159.88 1002.5,-1159.88 1002.5,-1159.88 859.75,-1159.88 859.75,-1159.88 853.75,-1159.88 847.75,-1153.88 847.75,-1147.88 847.75,-1147.88 847.75,-1057.62 847.75,-1057.62 847.75,-1051.62 853.75,-1045.62 859.75,-1045.62"/>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_2&#45;&gt;sw_switch_01_example_net -->
 <g id="edge27" class="edge">
 <title>swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_2&#45;&gt;sw_switch_01_example_net</title>
-<path fill="none" stroke="#585b70" d="M725.19,-1148.23C757.35,-1143.61 801.57,-1137.24 840.71,-1131.61"/>
-<polygon fill="#585b70" stroke="#585b70" points="840.81,-1133.72 846.45,-1130.79 840.22,-1129.56 840.81,-1133.72"/>
+<path fill="none" stroke="#585b70" d="M725.19,-1145.33C757.35,-1138.65 801.57,-1129.46 840.71,-1121.33"/>
+<polygon fill="#585b70" stroke="#585b70" points="841.02,-1123.41 846.47,-1120.13 840.17,-1119.3 841.02,-1123.41"/>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_3&#45;&gt;sw_switch_01_example_net -->
 <g id="edge28" class="edge">
 <title>swport_dev_collapsed_ipf01cly_lf01_ifname_xe_0_0_3&#45;&gt;sw_switch_01_example_net</title>
-<path fill="none" stroke="#585b70" d="M699.51,-972.23C732.52,-993.2 800.78,-1036.57 854.52,-1070.71"/>
-<polygon fill="#585b70" stroke="#585b70" points="853.19,-1072.36 859.38,-1073.8 855.44,-1068.81 853.19,-1072.36"/>
+<path fill="none" stroke="#585b70" d="M695.15,-913.08C726.03,-938.01 797.72,-995.87 853.85,-1041.18"/>
+<polygon fill="#585b70" stroke="#585b70" points="852.41,-1042.71 858.39,-1044.85 855.04,-1039.45 852.41,-1042.71"/>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_38&#45;&gt;sw_switch_01_example_net -->
 <g id="edge29" class="edge">
 <title>swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_38&#45;&gt;sw_switch_01_example_net</title>
-<path fill="none" stroke="#585b70" d="M726.65,-1092.73C758.68,-1096.83 802.17,-1102.39 840.72,-1107.32"/>
-<polygon fill="#585b70" stroke="#585b70" points="840.14,-1109.36 846.36,-1108.04 840.67,-1105.19 840.14,-1109.36"/>
+<path fill="none" stroke="#585b70" d="M721.76,-1040.3C754.18,-1050.02 800.25,-1063.83 840.83,-1075.99"/>
+<polygon fill="#585b70" stroke="#585b70" points="840.01,-1077.94 846.37,-1077.65 841.22,-1073.91 840.01,-1077.94"/>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_39&#45;&gt;sw_switch_01_example_net -->
 <g id="edge30" class="edge">
 <title>swport_dev_collapsed_ipf01cly_lf01_ifname_et_0_0_39&#45;&gt;sw_switch_01_example_net</title>
-<path fill="none" stroke="#585b70" d="M692.85,-1603.13C705.69,-1590.12 725.34,-1568.83 738.75,-1547.75 819.78,-1420.38 883.69,-1252.91 912.87,-1169.93"/>
-<polygon fill="#585b70" stroke="#585b70" points="914.83,-1170.67 914.83,-1164.32 910.87,-1169.29 914.83,-1170.67"/>
+<path fill="none" stroke="#585b70" d="M692.91,-1603.17C705.8,-1590.19 725.48,-1568.92 738.75,-1547.75 818.11,-1421.13 879.5,-1255.9 909.64,-1166.65"/>
+<polygon fill="#585b70" stroke="#585b70" points="911.61,-1167.36 911.53,-1161.01 907.63,-1166.03 911.61,-1167.36"/>
 </g>
 <!-- sw_switch_02_example_net -->
 <g id="node24" class="node">
 <title>sw_switch_02_example_net</title>
-<path fill="#313244" stroke="none" d="M859.75,-1430.5C859.75,-1430.5 1002.5,-1430.5 1002.5,-1430.5 1008.5,-1430.5 1014.5,-1436.5 1014.5,-1442.5 1014.5,-1442.5 1014.5,-1507 1014.5,-1507 1014.5,-1513 1008.5,-1519 1002.5,-1519 1002.5,-1519 859.75,-1519 859.75,-1519 853.75,-1519 847.75,-1513 847.75,-1507 847.75,-1507 847.75,-1442.5 847.75,-1442.5 847.75,-1436.5 853.75,-1430.5 859.75,-1430.5"/>
-<text xml:space="preserve" text-anchor="start" x="858.75" y="-1495.7" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="14.00" fill="#fab387">switch&#45;02.example.net</text>
-<text xml:space="preserve" text-anchor="start" x="882.75" y="-1468.45" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">Juniper qfx5120&#45;48y&#45;8c</text>
-<text xml:space="preserve" text-anchor="start" x="886.12" y="-1442.7" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">JUNOS 23.4R2&#45;S4.11</text>
-<path fill="none" stroke="#fab387" d="M859.75,-1430.5C859.75,-1430.5 1002.5,-1430.5 1002.5,-1430.5 1008.5,-1430.5 1014.5,-1436.5 1014.5,-1442.5 1014.5,-1442.5 1014.5,-1507 1014.5,-1507 1014.5,-1513 1008.5,-1519 1002.5,-1519 1002.5,-1519 859.75,-1519 859.75,-1519 853.75,-1519 847.75,-1513 847.75,-1507 847.75,-1507 847.75,-1442.5 847.75,-1442.5 847.75,-1436.5 853.75,-1430.5 859.75,-1430.5"/>
+<path fill="#313244" stroke="none" d="M859.75,-1422.62C859.75,-1422.62 1002.5,-1422.62 1002.5,-1422.62 1008.5,-1422.62 1014.5,-1428.62 1014.5,-1434.62 1014.5,-1434.62 1014.5,-1524.88 1014.5,-1524.88 1014.5,-1530.88 1008.5,-1536.88 1002.5,-1536.88 1002.5,-1536.88 859.75,-1536.88 859.75,-1536.88 853.75,-1536.88 847.75,-1530.88 847.75,-1524.88 847.75,-1524.88 847.75,-1434.62 847.75,-1434.62 847.75,-1428.62 853.75,-1422.62 859.75,-1422.62"/>
+<text xml:space="preserve" text-anchor="start" x="858.75" y="-1513.58" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="14.00" fill="#fab387">switch&#45;02.example.net</text>
+<text xml:space="preserve" text-anchor="start" x="882.75" y="-1486.33" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">Juniper qfx5120&#45;48y&#45;8c</text>
+<text xml:space="preserve" text-anchor="start" x="896.62" y="-1460.58" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">[SN&#45;SWITCH&#45;02]</text>
+<text xml:space="preserve" text-anchor="start" x="886.12" y="-1434.83" font-family="Helvetica,Arial,sans-serif" font-size="9.00" fill="#a6adc8">JUNOS 23.4R2&#45;S4.11</text>
+<path fill="none" stroke="#fab387" d="M859.75,-1422.62C859.75,-1422.62 1002.5,-1422.62 1002.5,-1422.62 1008.5,-1422.62 1014.5,-1428.62 1014.5,-1434.62 1014.5,-1434.62 1014.5,-1524.88 1014.5,-1524.88 1014.5,-1530.88 1008.5,-1536.88 1002.5,-1536.88 1002.5,-1536.88 859.75,-1536.88 859.75,-1536.88 853.75,-1536.88 847.75,-1530.88 847.75,-1524.88 847.75,-1524.88 847.75,-1434.62 847.75,-1434.62 847.75,-1428.62 853.75,-1422.62 859.75,-1422.62"/>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_2&#45;&gt;sw_switch_02_example_net -->
 <g id="edge31" class="edge">
 <title>swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_2&#45;&gt;sw_switch_02_example_net</title>
-<path fill="none" stroke="#585b70" d="M725.19,-1506.69C757.35,-1501.68 801.57,-1494.78 840.71,-1488.69"/>
-<polygon fill="#585b70" stroke="#585b70" points="840.85,-1490.79 846.46,-1487.79 840.2,-1486.64 840.85,-1490.79"/>
+<path fill="none" stroke="#585b70" d="M725.19,-1507.59C757.35,-1503.22 801.57,-1497.22 840.71,-1491.9"/>
+<polygon fill="#585b70" stroke="#585b70" points="840.79,-1494.01 846.45,-1491.12 840.22,-1489.85 840.79,-1494.01"/>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_3&#45;&gt;sw_switch_02_example_net -->
 <g id="edge32" class="edge">
 <title>swport_dev_collapsed_ipf01cly_lf02_ifname_xe_0_0_3&#45;&gt;sw_switch_02_example_net</title>
-<path fill="none" stroke="#585b70" d="M709.56,-1382.21C741.9,-1395.77 795.16,-1418.12 841.24,-1437.46"/>
-<polygon fill="#585b70" stroke="#585b70" points="840.24,-1439.31 846.59,-1439.7 841.87,-1435.44 840.24,-1439.31"/>
+<path fill="none" stroke="#585b70" d="M710.06,-1389.17C742.4,-1402.48 795.26,-1424.24 841.07,-1443.1"/>
+<polygon fill="#585b70" stroke="#585b70" points="840.03,-1444.94 846.38,-1445.28 841.63,-1441.06 840.03,-1444.94"/>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_38&#45;&gt;sw_switch_02_example_net -->
 <g id="edge33" class="edge">
 <title>swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_38&#45;&gt;sw_switch_02_example_net</title>
-<path fill="none" stroke="#585b70" d="M726.65,-1444.67C758.68,-1449.4 802.17,-1455.83 840.72,-1461.53"/>
-<polygon fill="#585b70" stroke="#585b70" points="840.12,-1463.57 846.36,-1462.37 840.73,-1459.41 840.12,-1463.57"/>
+<path fill="none" stroke="#585b70" d="M726.65,-1452.11C758.68,-1456.46 802.17,-1462.37 840.72,-1467.6"/>
+<polygon fill="#585b70" stroke="#585b70" points="840.13,-1469.64 846.36,-1468.37 840.7,-1465.48 840.13,-1469.64"/>
 </g>
 <!-- swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_39&#45;&gt;sw_switch_02_example_net -->
 <g id="edge34" class="edge">
 <title>swport_dev_collapsed_ipf01cly_lf02_ifname_et_0_0_39&#45;&gt;sw_switch_02_example_net</title>
-<path fill="none" stroke="#585b70" d="M690.95,-1744.27C724.58,-1706.37 826.82,-1591.16 886.18,-1524.28"/>
-<polygon fill="#585b70" stroke="#585b70" points="887.66,-1525.77 890.07,-1519.88 884.52,-1522.98 887.66,-1525.77"/>
+<path fill="none" stroke="#585b70" d="M691.28,-1744.13C722.95,-1709.08 813.58,-1608.75 873.65,-1542.26"/>
+<polygon fill="#585b70" stroke="#585b70" points="875.16,-1543.72 877.63,-1537.86 872.05,-1540.9 875.16,-1543.72"/>
 </g>
 </g>
 </svg>

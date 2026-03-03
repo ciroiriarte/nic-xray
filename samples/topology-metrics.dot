@@ -16,6 +16,7 @@ digraph nic_xray {
         <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="4" CELLPADDING="6" BGCOLOR="#313244" COLOR="#585b70">
         <TR><TD COLSPAN="2"><FONT POINT-SIZE="14" COLOR="#cba6f7"><B>server-01.example.net</B></FONT></TD></TR>
         <TR><TD COLSPAN="2"><FONT POINT-SIZE="9" COLOR="#a6adc8">Dell Inc. PowerEdge R740</FONT></TD></TR>
+        <TR><TD COLSPAN="2"><FONT POINT-SIZE="9" COLOR="#a6adc8">[SN-SERVER-01]</FONT></TD></TR>
         <TR><TD COLSPAN="2"><FONT POINT-SIZE="9" COLOR="#a6adc8">Debian GNU/Linux 12 (bookworm)</FONT></TD></TR>
         </TABLE>
     >];
@@ -34,8 +35,8 @@ digraph nic_xray {
             <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">XX:XX:XX:XX:XX:01</FONT></TD></TR>
             <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">MTU: 9100</FONT></TD></TR>
             <TR><TD><FONT POINT-SIZE="8" COLOR="#a6adc8">10GBASE-SR</FONT></TD></TR>
-            <TR><TD><FONT POINT-SIZE="8" COLOR="#a6e3a1">Tx:-2.34 dBm</FONT> <FONT POINT-SIZE="8" COLOR="#a6e3a1">Rx:-2.90 dBm</FONT></TD></TR>
-            <TR><TD><FONT POINT-SIZE="11" COLOR="#a6e3a1"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">4.4 KB/s</FONT> <FONT POINT-SIZE="11" COLOR="#89b4fa"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">6.5 KB/s</FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="8" COLOR="#a6e3a1">Tx:-2.32 dBm</FONT> <FONT POINT-SIZE="8" COLOR="#a6e3a1">Rx:-2.91 dBm</FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="11" COLOR="#a6e3a1"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">493 B/s</FONT> <FONT POINT-SIZE="11" COLOR="#89b4fa"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">2.3 KB/s</FONT></TD></TR>
             </TABLE>
         >];
         ens5f0np0 [shape=plain, label=<
@@ -44,8 +45,8 @@ digraph nic_xray {
             <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">XX:XX:XX:XX:XX:07</FONT></TD></TR>
             <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">MTU: 9100</FONT></TD></TR>
             <TR><TD><FONT POINT-SIZE="8" COLOR="#a6adc8">10GBASE-SR</FONT></TD></TR>
-            <TR><TD><FONT POINT-SIZE="8" COLOR="#a6e3a1">Tx:-2.64 dBm</FONT> <FONT POINT-SIZE="8" COLOR="#a6e3a1">Rx:-3.55 dBm</FONT></TD></TR>
-            <TR><TD><FONT POINT-SIZE="11" COLOR="#a6e3a1"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">16.4 KB/s</FONT> <FONT POINT-SIZE="11" COLOR="#89b4fa"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">27.5 KB/s</FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="8" COLOR="#a6e3a1">Tx:-2.63 dBm</FONT> <FONT POINT-SIZE="8" COLOR="#a6e3a1">Rx:-3.54 dBm</FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="11" COLOR="#a6e3a1"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">13.4 KB/s</FONT> <FONT POINT-SIZE="11" COLOR="#89b4fa"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">12.9 KB/s</FONT></TD></TR>
             </TABLE>
         >];
     }
@@ -64,8 +65,8 @@ digraph nic_xray {
             <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">XX:XX:XX:XX:XX:02</FONT></TD></TR>
             <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">MTU: 9100</FONT></TD></TR>
             <TR><TD><FONT POINT-SIZE="8" COLOR="#a6adc8">25GBASE-SR</FONT></TD></TR>
-            <TR><TD><FONT POINT-SIZE="8" COLOR="#a6e3a1">Tx:-0.97 dBm</FONT> <FONT POINT-SIZE="8" COLOR="#a6e3a1">Rx:-2.74 dBm</FONT></TD></TR>
-            <TR><TD><FONT POINT-SIZE="11" COLOR="#a6e3a1"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">646 B/s</FONT> <FONT POINT-SIZE="11" COLOR="#89b4fa"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">656 B/s</FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="8" COLOR="#a6e3a1">Tx:-0.99 dBm</FONT> <FONT POINT-SIZE="8" COLOR="#a6e3a1">Rx:-2.71 dBm</FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="11" COLOR="#a6e3a1"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">496 B/s</FONT> <FONT POINT-SIZE="11" COLOR="#89b4fa"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">479 B/s</FONT></TD></TR>
             </TABLE>
         >];
         ens5f1np1 [shape=plain, label=<
@@ -74,8 +75,8 @@ digraph nic_xray {
             <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">XX:XX:XX:XX:XX:08</FONT></TD></TR>
             <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">MTU: 9100</FONT></TD></TR>
             <TR><TD><FONT POINT-SIZE="8" COLOR="#a6adc8">25GBASE-SR</FONT></TD></TR>
-            <TR><TD><FONT POINT-SIZE="8" COLOR="#a6e3a1">Tx:-0.94 dBm</FONT> <FONT POINT-SIZE="8" COLOR="#a6e3a1">Rx:-3.07 dBm</FONT></TD></TR>
-            <TR><TD><FONT POINT-SIZE="11" COLOR="#a6e3a1"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">808 B/s</FONT> <FONT POINT-SIZE="11" COLOR="#89b4fa"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">1021 B/s</FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="8" COLOR="#a6e3a1">Tx:-0.95 dBm</FONT> <FONT POINT-SIZE="8" COLOR="#a6e3a1">Rx:-3.15 dBm</FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="11" COLOR="#a6e3a1"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">595 B/s</FONT> <FONT POINT-SIZE="11" COLOR="#89b4fa"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">801 B/s</FONT></TD></TR>
             </TABLE>
         >];
     }
@@ -94,8 +95,8 @@ digraph nic_xray {
             <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">XX:XX:XX:XX:XX:05</FONT></TD></TR>
             <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">MTU: 9100</FONT></TD></TR>
             <TR><TD><FONT POINT-SIZE="8" COLOR="#a6adc8">25GBASE-SR</FONT></TD></TR>
-            <TR><TD><FONT POINT-SIZE="8" COLOR="#a6e3a1">Tx:-1.99 dBm</FONT> <FONT POINT-SIZE="8" COLOR="#a6e3a1">Rx:-2.09 dBm</FONT></TD></TR>
-            <TR><TD><FONT POINT-SIZE="11" COLOR="#a6e3a1"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">96.8 KB/s</FONT> <FONT POINT-SIZE="11" COLOR="#89b4fa"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">68.0 KB/s</FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="8" COLOR="#a6e3a1">Tx:-1.99 dBm</FONT> <FONT POINT-SIZE="8" COLOR="#a6e3a1">Rx:-2.08 dBm</FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="11" COLOR="#a6e3a1"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">69.5 KB/s</FONT> <FONT POINT-SIZE="11" COLOR="#89b4fa"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">61.5 KB/s</FONT></TD></TR>
             </TABLE>
         >];
         ens8f0np0 [shape=plain, label=<
@@ -105,7 +106,7 @@ digraph nic_xray {
             <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">MTU: 9100</FONT></TD></TR>
             <TR><TD><FONT POINT-SIZE="8" COLOR="#a6adc8">25GBASE-SR</FONT></TD></TR>
             <TR><TD><FONT POINT-SIZE="8" COLOR="#a6e3a1">Tx:-1.02 dBm</FONT> <FONT POINT-SIZE="8" COLOR="#a6e3a1">Rx:-2.43 dBm</FONT></TD></TR>
-            <TR><TD><FONT POINT-SIZE="11" COLOR="#a6e3a1"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">922.5 KB/s</FONT> <FONT POINT-SIZE="11" COLOR="#89b4fa"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">168.4 KB/s</FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="11" COLOR="#a6e3a1"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">715.6 KB/s</FONT> <FONT POINT-SIZE="11" COLOR="#89b4fa"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">157.0 KB/s</FONT></TD></TR>
             </TABLE>
         >];
     }
@@ -124,8 +125,8 @@ digraph nic_xray {
             <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">XX:XX:XX:XX:XX:06</FONT></TD></TR>
             <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">MTU: 9100</FONT></TD></TR>
             <TR><TD><FONT POINT-SIZE="8" COLOR="#a6adc8">25GBASE-SR</FONT></TD></TR>
-            <TR><TD><FONT POINT-SIZE="8" COLOR="#a6e3a1">Tx:-2.79 dBm</FONT> <FONT POINT-SIZE="8" COLOR="#a6e3a1">Rx:-2.44 dBm</FONT></TD></TR>
-            <TR><TD><FONT POINT-SIZE="11" COLOR="#a6e3a1"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">3.0 MB/s</FONT> <FONT POINT-SIZE="11" COLOR="#89b4fa"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">955.5 KB/s</FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="8" COLOR="#a6e3a1">Tx:-2.79 dBm</FONT> <FONT POINT-SIZE="8" COLOR="#a6e3a1">Rx:-2.29 dBm</FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="11" COLOR="#a6e3a1"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">2.5 MB/s</FONT> <FONT POINT-SIZE="11" COLOR="#89b4fa"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">470.4 KB/s</FONT></TD></TR>
             </TABLE>
         >];
         ens8f1np1 [shape=plain, label=<
@@ -134,8 +135,8 @@ digraph nic_xray {
             <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">XX:XX:XX:XX:XX:0c</FONT></TD></TR>
             <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">MTU: 9100</FONT></TD></TR>
             <TR><TD><FONT POINT-SIZE="8" COLOR="#a6adc8">25GBASE-SR</FONT></TD></TR>
-            <TR><TD><FONT POINT-SIZE="8" COLOR="#a6e3a1">Tx:-0.64 dBm</FONT> <FONT POINT-SIZE="8" COLOR="#a6e3a1">Rx:-2.05 dBm</FONT></TD></TR>
-            <TR><TD><FONT POINT-SIZE="11" COLOR="#a6e3a1"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">2.9 MB/s</FONT> <FONT POINT-SIZE="11" COLOR="#89b4fa"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">1.2 MB/s</FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="8" COLOR="#a6e3a1">Tx:-0.64 dBm</FONT> <FONT POINT-SIZE="8" COLOR="#a6e3a1">Rx:-2.04 dBm</FONT></TD></TR>
+            <TR><TD><FONT POINT-SIZE="11" COLOR="#a6e3a1"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">4.2 MB/s</FONT> <FONT POINT-SIZE="11" COLOR="#89b4fa"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">1.2 MB/s</FONT></TD></TR>
             </TABLE>
         >];
     }
@@ -157,7 +158,7 @@ digraph nic_xray {
         <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">XX:XX:XX:XX:XX:04</FONT></TD></TR>
         <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">MTU: 1500</FONT></TD></TR>
         <TR><TD><FONT POINT-SIZE="8" COLOR="#a6adc8">25GBASE-SR</FONT></TD></TR>
-        <TR><TD><FONT POINT-SIZE="8" COLOR="#a6e3a1">Tx:-0.81 dBm</FONT> <FONT POINT-SIZE="8" COLOR="#f38ba8">Rx:-40.00 dBm</FONT></TD></TR>
+        <TR><TD><FONT POINT-SIZE="8" COLOR="#a6e3a1">Tx:-0.82 dBm</FONT> <FONT POINT-SIZE="8" COLOR="#f38ba8">Rx:-40.00 dBm</FONT></TD></TR>
         <TR><TD><FONT POINT-SIZE="11" COLOR="#a6e3a1"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">0 B/s</FONT> <FONT POINT-SIZE="11" COLOR="#89b4fa"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">0 B/s</FONT></TD></TR>
         </TABLE>
     >];
@@ -168,7 +169,7 @@ digraph nic_xray {
         <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">XX:XX:XX:XX:XX:09</FONT></TD></TR>
         <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">MTU: 1500</FONT></TD></TR>
         <TR><TD><FONT POINT-SIZE="8" COLOR="#a6adc8">10GBASE-SR</FONT></TD></TR>
-        <TR><TD><FONT POINT-SIZE="8" COLOR="#a6e3a1">Tx:-2.24 dBm</FONT> <FONT POINT-SIZE="8" COLOR="#f38ba8">Rx:-26.78 dBm</FONT></TD></TR>
+        <TR><TD><FONT POINT-SIZE="8" COLOR="#a6e3a1">Tx:-2.25 dBm</FONT> <FONT POINT-SIZE="8" COLOR="#f38ba8">Rx:-26.78 dBm</FONT></TD></TR>
         <TR><TD><FONT POINT-SIZE="11" COLOR="#a6e3a1"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">0 B/s</FONT> <FONT POINT-SIZE="11" COLOR="#89b4fa"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">0 B/s</FONT></TD></TR>
         </TABLE>
     >];
@@ -179,7 +180,7 @@ digraph nic_xray {
         <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">XX:XX:XX:XX:XX:0a</FONT></TD></TR>
         <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">MTU: 1500</FONT></TD></TR>
         <TR><TD><FONT POINT-SIZE="8" COLOR="#a6adc8">10GBASE-SR</FONT></TD></TR>
-        <TR><TD><FONT POINT-SIZE="8" COLOR="#a6e3a1">Tx:-2.46 dBm</FONT> <FONT POINT-SIZE="8" COLOR="#f38ba8">Rx:-26.78 dBm</FONT></TD></TR>
+        <TR><TD><FONT POINT-SIZE="8" COLOR="#a6e3a1">Tx:-2.47 dBm</FONT> <FONT POINT-SIZE="8" COLOR="#f38ba8">Rx:-26.78 dBm</FONT></TD></TR>
         <TR><TD><FONT POINT-SIZE="11" COLOR="#a6e3a1"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">0 B/s</FONT> <FONT POINT-SIZE="11" COLOR="#89b4fa"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">0 B/s</FONT></TD></TR>
         </TABLE>
     >];
@@ -189,7 +190,7 @@ digraph nic_xray {
         <TR><TD><FONT COLOR="#cdd6f4"><B>idrac</B></FONT></TD></TR>
         <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">XX:XX:XX:XX:XX:0d</FONT></TD></TR>
         <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">MTU: 1500</FONT></TD></TR>
-        <TR><TD><FONT POINT-SIZE="11" COLOR="#a6e3a1"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">52 B/s</FONT> <FONT POINT-SIZE="11" COLOR="#89b4fa"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">76 B/s</FONT></TD></TR>
+        <TR><TD><FONT POINT-SIZE="11" COLOR="#a6e3a1"><B>↓</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">43 B/s</FONT> <FONT POINT-SIZE="11" COLOR="#89b4fa"><B>↑</B></FONT><FONT POINT-SIZE="9" COLOR="#a6adc8">63 B/s</FONT></TD></TR>
         </TABLE>
     >];
 
@@ -245,6 +246,7 @@ digraph nic_xray {
         <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="4" CELLPADDING="6" BGCOLOR="#313244" COLOR="#fab387" STYLE="ROUNDED">
         <TR><TD><FONT POINT-SIZE="14" COLOR="#fab387"><B>switch-01.example.net</B></FONT></TD></TR>
         <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">Juniper qfx5120-48y-8c</FONT></TD></TR>
+        <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">[SN-SWITCH-01]</FONT></TD></TR>
         <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">JUNOS 23.4R2-S4.11</FONT></TD></TR>
         </TABLE>
     >];
@@ -253,6 +255,7 @@ digraph nic_xray {
         <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="4" CELLPADDING="6" BGCOLOR="#313244" COLOR="#fab387" STYLE="ROUNDED">
         <TR><TD><FONT POINT-SIZE="14" COLOR="#fab387"><B>switch-02.example.net</B></FONT></TD></TR>
         <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">Juniper qfx5120-48y-8c</FONT></TD></TR>
+        <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">[SN-SWITCH-02]</FONT></TD></TR>
         <TR><TD><FONT POINT-SIZE="9" COLOR="#a6adc8">JUNOS 23.4R2-S4.11</FONT></TD></TR>
         </TABLE>
     >];
