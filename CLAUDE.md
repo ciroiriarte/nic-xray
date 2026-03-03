@@ -31,3 +31,5 @@
 ## 6. Releases
 * Use semantic versioning (https://semver.org/)
 * Bump script version & repo release tags in tandem
+* Bump only on user request.
+

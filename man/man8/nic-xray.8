@@ -1,6 +1,6 @@
 .\" Man page for nic-xray.sh
 .\" Written in classic troff/groff format
-.TH NIC-XRAY 8 "2026-03-02" "nic-xray 2.7.0" "System Administration Commands"
+.TH NIC-XRAY 8 "2026-03-03" "nic-xray 2.8.0" "System Administration Commands"
 .SH NAME
 nic-xray \- detailed physical network interface diagnostics
 .SH SYNOPSIS
@@ -16,6 +16,7 @@ nic-xray \- detailed physical network interface diagnostics
 .RI [ \-s [ SEP ]| \-\-separator [= SEP ]]
 .RI [ \-\-group\-bond ]
 .RI [ \-m [ SEC ]| \-\-metrics [= SEC ]]
+.RI [ \-w [ SEC ]| \-\-watch [= SEC ]]
 .RI [ \-\-output
 .IR FORMAT ]
 .RI [ \-\-diagram\-out
@@ -167,6 +168,29 @@ For non-active-backup bonds with two or more members, a variance check is
 performed: if the minimum value among members is less than 70% of the maximum,
 the low member is highlighted in red. Active-backup bonds are excluded from
 this check since only one member carries traffic by design.
+.TP
+.BR \-w ", " \-\-watch
+Enable watch mode: continuously refresh the display, useful during recabling
+or live monitoring. The default refresh interval is 5 seconds. Only supported
+with table output format and requires a terminal (stdout must be a TTY).
+.IP
+Uses an alternate screen buffer for clean terminal management (like
+.BR top (1)
+or
+.BR htop (1)).
+Press Ctrl\-C to exit; the terminal is restored to its previous state.
+.TP
+.BR \-w \fISEC\fR ", " \-\-watch= \fISEC\fR
+Set the watch refresh interval to
+.I SEC
+seconds. Valid range is 1 to 3600.
+.IP
+When combined with
+.BR \-\-metrics ,
+the metrics sampling duration is set to the watch interval (no additional
+sleep between iterations). Without
+.BR \-\-metrics ,
+a countdown timer is displayed between refreshes.
 .TP
 .BI \-\-output " FORMAT"
 Set the output format.
@@ -694,6 +718,30 @@ Metrics included in topology diagram:
 .PP
 .RS
 .B sudo nic-xray.sh \-\-metrics \-\-output svg
+.RE
+.PP
+Watch mode with default 5-second refresh:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-watch
+.RE
+.PP
+Watch mode with custom 3-second refresh:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-watch=3
+.RE
+.PP
+Watch mode with live traffic metrics:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-watch \-\-metrics
+.RE
+.PP
+Watch mode with all optional columns:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-watch \-\-all
 .RE
 .PP
 Display version:

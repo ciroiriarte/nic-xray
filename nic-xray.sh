@@ -60,6 +60,9 @@
 #                         - Lane variance detection (>2dB flags outlier channel)
 #                         - Optics supported across all output formats
 #                           (table, CSV, JSON, DOT/SVG/PNG)
+#   - 2026-03-03: v2.8.0 - Added --watch mode for continuous refresh during
+#                         recabling (alternate screen buffer, clean Ctrl-C exit)
+#                       - Combines with --metrics: sampling duration = watch interval
 #   - 2026-03-02: v2.7.0 - Internal refactoring for maintainability:
 #                         - Extracted collect_data(), compute_layout(), render_output()
 #                           functions (enables future --watch mode)
@@ -70,9 +73,9 @@
 #                           colorize_nonzero() helpers
 #                         - Delta clamping via nameref loop
 #
-# Version: 2.7.0
+# Version: 2.8.0
 
-SCRIPT_VERSION="2.7.0"
+SCRIPT_VERSION="2.8.0"
 SCRIPT_YEAR="2026"
 
 # Interface name pattern to skip (virtual, bond masters, etc.)
@@ -94,10 +97,12 @@ DIAGRAM_OUTPUT_FILE=""
 SHOW_METRICS=false
 METRICS_DURATION=30
 SHOW_OPTICS=false
+WATCH_MODE=false
+WATCH_INTERVAL=5
 
 
 # Parse options using getopt
-if ! OPTIONS=$(getopt -o hvs::m::o --long help,version,lacp,vlan,bmac,optics,separator::,group-bond,output:,no-color,all,filter-link:,diagram-out:,metrics:: -n "$0" -- "$@"); then
+if ! OPTIONS=$(getopt -o hvs::m::ow:: --long help,version,lacp,vlan,bmac,optics,separator::,group-bond,output:,no-color,all,filter-link:,diagram-out:,metrics::,watch:: -n "$0" -- "$@"); then
 	echo "Failed to parse options." >&2
 	exit 1
 fi
@@ -169,6 +174,18 @@ while true; do
 			fi
 			shift 2
 			;;
+		-w|--watch)
+			WATCH_MODE=true
+			if [[ -n "$2" ]]; then
+				if [[ "$2" =~ ^[0-9]+$ ]] && (( $2 >= 1 && $2 <= 3600 )); then
+					WATCH_INTERVAL="$2"
+				else
+					echo "Invalid watch interval: $2. Must be an integer between 1 and 3600." >&2
+					exit 1
+				fi
+			fi
+			shift 2
+			;;
 		--group-bond)
 			SORT_BY_BOND=true
 			shift
@@ -196,7 +213,7 @@ while true; do
 		-h|--help)
 			echo -e "Usage: $0 [--lacp] [--vlan] [--bmac] [-o|--optics] [--all]"
 			echo -e "       [--no-color] [--filter-link up|down] [-s[SEP]|--separator[=SEP]]"
-			echo -e "       [--group-bond] [-m[SEC]|--metrics[=SEC]]"
+			echo -e "       [--group-bond] [-m[SEC]|--metrics[=SEC]] [-w[SEC]|--watch[=SEC]]"
 			echo -e "       [--output FORMAT] [--diagram-out FILE] [--help]"
 			echo -e ""
 			echo -e "Version: $SCRIPT_VERSION"
@@ -220,6 +237,10 @@ while true; do
 			echo -e " -sSEP, --separator=SEP"
 			echo -e "                     Use SEP as column separator in table and CSV output"
 			echo -e " --group-bond        Sort rows by bond group, then by interface name"
+			echo -e " -w, --watch         Watch mode: refresh display continuously (default: 5s)"
+			echo -e " -wSEC, --watch=SEC  Set refresh interval in seconds (1-3600)"
+			echo -e "                     Combines with --metrics: sampling duration = watch interval"
+			echo -e "                     Table output only; requires a terminal"
 			echo -e " -m, --metrics       Sample interface traffic metrics (default: 30s)"
 			echo -e " -mSEC, --metrics=SEC"
 			echo -e "                     Set sampling duration in seconds (1-3600)"
@@ -246,6 +267,23 @@ done
 
 # --- Auto-disable colors for non-terminal output ---
 [[ ! -t 1 ]] && USE_COLOR=false
+
+# --- Watch mode validation ---
+if $WATCH_MODE; then
+    if [[ "$OUTPUT_FORMAT" != "table" ]]; then
+        echo "Watch mode is only supported with table output format." >&2
+        exit 1
+    fi
+    if [[ ! -t 1 ]]; then
+        echo "Watch mode requires a terminal (stdout must be a TTY)." >&2
+        exit 1
+    fi
+fi
+
+# When watch + metrics combined, use watch interval as metrics duration
+if $WATCH_MODE && $SHOW_METRICS; then
+    METRICS_DURATION="$WATCH_INTERVAL"
+fi
 
 # --- Diagram format setup ---
 if [[ "$OUTPUT_FORMAT" =~ ^(dot|svg|png)$ ]]; then
@@ -396,6 +434,16 @@ read_iface_stats() {
             eval "${PREFIX}_${COUNTER}[\"${IFACE}\"]=${VAL}"
         done
     done
+}
+
+# Countdown sleep for watch mode (non-metrics only)
+watch_sleep() {
+    local _SECS="$1"
+    for (( _s = _SECS; _s > 0; _s-- )); do
+        printf '\r\u23f3 Refreshing in %ds...  ' "$_s" >&2
+        sleep 1
+    done
+    printf '\r%*s\r' 30 '' >&2
 }
 
 # Convert bytes/s to human-readable bandwidth (pure bash)
@@ -892,6 +940,19 @@ ROW_COUNT=0
 # --- Data collection: metrics snapshots, interface enumeration, LACP validation ---
 collect_data() {
     ROW_COUNT=0
+    # Reset arrays for watch mode (prevent stale data accumulation)
+    DATA_DEVICE=(); DATA_DRIVER=(); DATA_FIRMWARE=(); DATA_IFACE=(); DATA_MAC=(); DATA_MTU=()
+    DATA_LINK_PLAIN=(); DATA_LINK_COLOR=(); DATA_SPEED_PLAIN=(); DATA_SPEED_COLOR=()
+    DATA_BOND_PLAIN=(); DATA_BOND_COLOR=(); DATA_BMAC=()
+    DATA_LACP_PLAIN=(); DATA_LACP_COLOR=(); DATA_LACP_PEER=(); DATA_LLDP_AGGID=()
+    DATA_VLAN=(); DATA_SWITCH=(); DATA_PORT=()
+    DATA_OPTICS_TYPE=(); DATA_OPTICS_TX_PLAIN=(); DATA_OPTICS_TX_COLOR=()
+    DATA_OPTICS_RX_PLAIN=(); DATA_OPTICS_RX_COLOR=()
+    DATA_OPTICS_TX_DBM=(); DATA_OPTICS_RX_DBM=()
+    DATA_OPTICS_TX_STATUS=(); DATA_OPTICS_RX_STATUS=()
+    DATA_OPTICS_VENDOR=(); DATA_OPTICS_WAVELENGTH=()
+    DATA_OPTICS_TX_LANES=(); DATA_OPTICS_RX_LANES=(); DATA_OPTICS_LANE_COUNT=()
+    BOND_MODE_MAP=()
 
     # --- Metrics: Snapshot 1 (before data collection) ---
 if $SHOW_METRICS; then
@@ -2206,6 +2267,24 @@ fi
 }
 
 # --- Main Flow ---
-collect_data
-compute_layout
-render_output
+if $WATCH_MODE; then
+    # Use alternate screen buffer for clean refresh
+    tput smcup 2>/dev/null
+    trap 'tput rmcup 2>/dev/null; exit 0' INT TERM
+
+    while true; do
+        collect_data
+        compute_layout
+        tput cup 0 0 2>/dev/null
+        render_output
+        # Clear any leftover lines from previous iteration
+        tput ed 2>/dev/null
+        if ! $SHOW_METRICS; then
+            watch_sleep "$WATCH_INTERVAL"
+        fi
+    done
+else
+    collect_data
+    compute_layout
+    render_output
+fi
