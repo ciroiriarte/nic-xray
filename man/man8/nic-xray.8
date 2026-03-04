@@ -645,6 +645,21 @@ service is running to retrieve LLDP information:
 .RS
 .B sudo systemctl enable \-\-now lldpd
 .RE
+.PP
+A bash completion script is provided under
+.IR completions/nic\-xray.bash .
+To enable tab-completion in the current session:
+.PP
+.RS
+.B source completions/nic\-xray.bash
+.RE
+.PP
+To install system-wide (into
+.IR /etc/bash_completion.d ):
+.PP
+.RS
+.B sudo make install\-completion
+.RE
 .SH EXIT STATUS
 .TP
 .B 0

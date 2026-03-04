@@ -130,6 +130,28 @@ After installation, use `man nic-xray` to view the man page.
 sudo make uninstall-man
 ```
 
+### Bash completion
+
+A bash completion script is provided for tab-completion of all options.
+
+**Source in current session:**
+
+```bash
+source completions/nic-xray.bash
+```
+
+**Install system-wide:**
+
+```bash
+sudo make install-completion
+```
+
+**Uninstall:**
+
+```bash
+sudo make uninstall-completion
+```
+
 ### lldpd service
 
 Ensure lldpd is running to retrieve LLDP information:

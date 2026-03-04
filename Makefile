@@ -1,7 +1,8 @@
-PREFIX  ?= /usr/local
-MANDIR  ?= $(PREFIX)/share/man
+PREFIX      ?= /usr/local
+MANDIR      ?= $(PREFIX)/share/man
+COMPDIR     ?= /etc/bash_completion.d
 
-.PHONY: install-man uninstall-man
+.PHONY: install-man uninstall-man install-completion uninstall-completion
 
 install-man:
 	install -d $(DESTDIR)$(MANDIR)/man8
@@ -9,3 +10,10 @@ install-man:
 
 uninstall-man:
 	rm -f $(DESTDIR)$(MANDIR)/man8/nic-xray.8
+
+install-completion:
+	install -d $(DESTDIR)$(COMPDIR)
+	install -m 644 completions/nic-xray.bash $(DESTDIR)$(COMPDIR)/nic-xray
+
+uninstall-completion:
+	rm -f $(DESTDIR)$(COMPDIR)/nic-xray
