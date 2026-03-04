@@ -916,7 +916,7 @@ declare -a DATA_BOND_PLAIN DATA_BOND_COLOR
 declare -a DATA_BMAC
 declare -a DATA_LACP_PLAIN DATA_LACP_COLOR DATA_LACP_PEER
 declare -a DATA_LLDP_AGGID
-declare -a DATA_VLAN DATA_SWITCH DATA_PORT
+declare -a DATA_VLAN DATA_SWITCH DATA_PORT DATA_PORT_DESCR
 declare -a DATA_OPTICS_TYPE
 declare -a DATA_OPTICS_TX_PLAIN DATA_OPTICS_TX_COLOR
 declare -a DATA_OPTICS_RX_PLAIN DATA_OPTICS_RX_COLOR
@@ -949,7 +949,7 @@ collect_data() {
     DATA_LINK_PLAIN=(); DATA_LINK_COLOR=(); DATA_SPEED_PLAIN=(); DATA_SPEED_COLOR=()
     DATA_BOND_PLAIN=(); DATA_BOND_COLOR=(); DATA_BMAC=()
     DATA_LACP_PLAIN=(); DATA_LACP_COLOR=(); DATA_LACP_PEER=(); DATA_LLDP_AGGID=()
-    DATA_VLAN=(); DATA_SWITCH=(); DATA_PORT=()
+    DATA_VLAN=(); DATA_SWITCH=(); DATA_PORT=(); DATA_PORT_DESCR=()
     DATA_OPTICS_TYPE=(); DATA_OPTICS_TX_PLAIN=(); DATA_OPTICS_TX_COLOR=()
     DATA_OPTICS_RX_PLAIN=(); DATA_OPTICS_RX_COLOR=()
     DATA_OPTICS_TX_DBM=(); DATA_OPTICS_RX_DBM=()
@@ -1104,13 +1104,40 @@ for _IFACE_PATH in /sys/class/net/*; do
     SWITCH_NAME=$(echo "$LLDP_OUTPUT" | awk -F'SysName: ' '/SysName:/ {print $2}' | xargs)
     PORT_NAME=$(echo "$LLDP_OUTPUT" | awk -F'PortID: ' '/PortID:/ {print $2}' | xargs)
 
+    # LLDP PortDescr
+    PORT_DESCR=$(echo "$LLDP_OUTPUT" | awk -F'PortDescr: ' '/PortDescr:/ {print $2}' | xargs)
+    # ACI topology paths: extract policy name from pathep-[POLICY_NAME]
+    if [[ "$PORT_DESCR" =~ pathep-\[([^]]+)\] ]]; then
+        PORT_DESCR="VPC: ${BASH_REMATCH[1]}"
+    fi
+    [[ -z "$PORT_DESCR" ]] && PORT_DESCR="N/A"
+
     # LLDP PortAggregID (link aggregation group on the switch side)
     LLDP_AGGID=$(echo "$LLDP_OUTPUT" | awk '/PortAggregID:/ {print $NF}')
     [[ -z "$LLDP_AGGID" ]] && LLDP_AGGID="N/A"
 
     # Switch SysDescr & serial (for diagram — deduplicated by switch name)
     if [[ -n "$SWITCH_NAME" && -z "${DATA_SWITCH_DESCR[$SWITCH_NAME]+x}" ]]; then
-        DATA_SWITCH_DESCR["$SWITCH_NAME"]=$(echo "$LLDP_OUTPUT" | awk -F'SysDescr:' '/SysDescr:/ {sub(/^[ \t]+/, "", $2); print $2; exit}')
+        local _RAW_DESCR
+        _RAW_DESCR=$(echo "$LLDP_OUTPUT" | awk -F'SysDescr:' '/SysDescr:/ {sub(/^[ \t]+/, "", $2); print $2; exit}')
+
+        # Cisco ACI: SysDescr is "topology/pod-N/node-NNN" — useless for
+        # brand/model/software.  Extract from vendor TLVs instead and build
+        # a synthetic SysDescr the parser can handle.
+        if [[ "$_RAW_DESCR" == topology/pod-* ]]; then
+            local _ACI_MODEL _ACI_FW
+            _ACI_MODEL=$(_extract_lldp_tlv "$LLDP_OUTPUT" "00,01,42" "214")
+            _ACI_FW=$(_extract_lldp_tlv "$LLDP_OUTPUT" "00,01,42" "210")
+            if [[ -n "$_ACI_MODEL" && -n "$_ACI_FW" ]]; then
+                _RAW_DESCR="Cisco ACI ${_ACI_MODEL}, ${_ACI_FW}"
+            elif [[ -n "$_ACI_MODEL" ]]; then
+                _RAW_DESCR="Cisco ACI ${_ACI_MODEL}"
+            else
+                _RAW_DESCR="Cisco ACI"
+            fi
+        fi
+
+        DATA_SWITCH_DESCR["$SWITCH_NAME"]="$_RAW_DESCR"
         DATA_SWITCH_SERIAL["$SWITCH_NAME"]=$(parse_lldp_serial "$LLDP_OUTPUT")
     fi
 
@@ -1121,7 +1148,7 @@ for _IFACE_PATH in /sys/class/net/*; do
             VLAN_ID=$(echo "$LINE" | awk -F'VLAN: ' '{print $2}' | awk -F', ' '{print $1}'|awk '{ print $1 }')
             PVID=$(echo "$LINE" | awk -F'pvid: ' '{print $2}' | awk '{print $1}')
             [[ $PVID == "yes" ]] && VLAN_INFO+="${VLAN_ID}[P];" || VLAN_INFO+="${VLAN_ID};"
-        done <<< "$(echo "$LLDP_OUTPUT" | grep 'VLAN:')"
+        done <<< "$(echo "$LLDP_OUTPUT" | grep -E 'VLAN:\s+[0-9]')"
         VLAN_INFO=${VLAN_INFO%, }
 	VLAN_INFO="${VLAN_INFO%;}"
 	if [[ -z "$VLAN_INFO" ]]; then
@@ -1172,6 +1199,7 @@ for _IFACE_PATH in /sys/class/net/*; do
     DATA_VLAN[ROW_COUNT]="$VLAN_INFO"
     DATA_SWITCH[ROW_COUNT]="$SWITCH_NAME"
     DATA_PORT[ROW_COUNT]="$PORT_NAME"
+    DATA_PORT_DESCR[ROW_COUNT]="$PORT_DESCR"
     if $SHOW_OPTICS; then
         DATA_OPTICS_TYPE[ROW_COUNT]="$OPTICS_TYPE"
         DATA_OPTICS_VENDOR[ROW_COUNT]="$OPTICS_VENDOR"
@@ -1481,6 +1509,7 @@ COL_W_LACP=$(max_width "LACP Status" "${DATA_LACP_PLAIN[@]}")
 COL_W_VLAN=$(max_width "VLAN" "${DATA_VLAN[@]}")
 COL_W_SWITCH=$(max_width "Switch Name" "${DATA_SWITCH[@]}")
 COL_W_PORT=$(max_width "Port Name" "${DATA_PORT[@]}")
+COL_W_PORT_DESCR=$(max_width "Port Descr" "${DATA_PORT_DESCR[@]}")
 
 if $SHOW_OPTICS; then
     COL_W_OPT_TYPE=$(max_width "SFP Type" "${DATA_OPTICS_TYPE[@]}")
@@ -1581,33 +1610,41 @@ _decode_hex_ascii() {
     printf '%s' "$_OUT"
 }
 
+# Extract a value from LLDP vendor-specific TLVs by OUI and SubType.
+# Usage: _extract_lldp_tlv "LLDP_OUTPUT" "OUI" "SUBTYPE"
+# Example: _extract_lldp_tlv "$LLDP_OUTPUT" "00,01,42" "214"
+# Returns the decoded ASCII string, or empty if not found.
+_extract_lldp_tlv() {
+    local _LLDP="$1" _OUI="$2" _SUBTYPE="$3" _LINE _HEX
+    _LINE=$(echo "$_LLDP" | grep "OUI: ${_OUI}, SubType: ${_SUBTYPE}," | head -1)
+    [[ -z "$_LINE" ]] && return
+    _HEX="${_LINE##*Len: }"
+    _HEX="${_HEX#* }"
+    _decode_hex_ascii "$_HEX"
+}
+
 # Extract switch serial number from LLDP vendor-specific TLVs.
 # Supports multiple vendors via OUI matching; extensible by adding new
 # OUI/SubType patterns below. Returns empty string if no match.
 #
 # Vendor support:
-#   Juniper  — OUI 00,90,69  SubType 1  (ASCII-encoded serial)
-#   Cisco    — OUI 00,01,42  SubType 11 (ASCII-encoded serial)
+#   Cisco ACI — OUI 00,01,42  SubType 212 (ASCII-encoded serial)
+#   Juniper   — OUI 00,90,69  SubType 1   (ASCII-encoded serial)
+#   Cisco     — OUI 00,01,42  SubType 11  (ASCII-encoded serial)
 parse_lldp_serial() {
-    local _LLDP="$1" _LINE _HEX
+    local _LLDP="$1" _RESULT
+
+    # Cisco ACI: OUI 00,01,42, SubType: 212 (more specific, checked first)
+    _RESULT=$(_extract_lldp_tlv "$_LLDP" "00,01,42" "212")
+    [[ -n "$_RESULT" ]] && { printf '%s' "$_RESULT"; return; }
 
     # Juniper: OUI 00,90,69, SubType: 1
-    _LINE=$(echo "$_LLDP" | grep 'OUI: 00,90,69, SubType: 1,' | head -1)
-    if [[ -n "$_LINE" ]]; then
-        _HEX="${_LINE##*Len: }"
-        _HEX="${_HEX#* }"
-        _decode_hex_ascii "$_HEX"
-        return
-    fi
+    _RESULT=$(_extract_lldp_tlv "$_LLDP" "00,90,69" "1")
+    [[ -n "$_RESULT" ]] && { printf '%s' "$_RESULT"; return; }
 
     # Cisco: OUI 00,01,42, SubType: 11
-    _LINE=$(echo "$_LLDP" | grep 'OUI: 00,01,42, SubType: 11,' | head -1)
-    if [[ -n "$_LINE" ]]; then
-        _HEX="${_LINE##*Len: }"
-        _HEX="${_HEX#* }"
-        _decode_hex_ascii "$_HEX"
-        return
-    fi
+    _RESULT=$(_extract_lldp_tlv "$_LLDP" "00,01,42" "11")
+    [[ -n "$_RESULT" ]] && { printf '%s' "$_RESULT"; return; }
 }
 
 # Parse switch SysDescr into brand, model, and software components.
@@ -1619,6 +1656,18 @@ parse_switch_descr() {
     _BRAND="" _MODEL="" _SOFTWARE=""
 
     [[ -z "$_DESCR" ]] && return
+
+    # Cisco ACI: synthetic "Cisco ACI N9K-C93180YC-FX, n9000-16.0(8f)"
+    if [[ "$_DESCR" == "Cisco ACI"* ]]; then
+        _BRAND="Cisco ACI"
+        if [[ "$_DESCR" =~ Cisco\ ACI\ ([^,]+),\ (.+) ]]; then
+            _MODEL="${BASH_REMATCH[1]}"
+            _SOFTWARE="${BASH_REMATCH[2]}"
+        elif [[ "$_DESCR" =~ Cisco\ ACI\ ([^,]+) ]]; then
+            _MODEL="${BASH_REMATCH[1]}"
+        fi
+        return
+    fi
 
     # Juniper: "Juniper Networks, Inc. qfx5120-48y-8c Ethernet Switch, kernel JUNOS 23.4R2-S4.11, ..."
     if [[ "$_DESCR" == "Juniper Networks"* ]]; then
@@ -2032,6 +2081,11 @@ DOTHEADER
         printf 'BGCOLOR="%s" COLOR="%s">\n' "$SURFACE_COLOR" "$PEACH_COLOR"
         printf '        <TR><TD><FONT COLOR="%s"><B>%s</B></FONT></TD></TR>\n' \
             "$TEXT_COLOR" "$(dot_escape "$PORT_NAME")"
+        local PORT_DESCR_VAL="${DATA_PORT_DESCR[$j]}"
+        if [[ -n "$PORT_DESCR_VAL" && "$PORT_DESCR_VAL" != "N/A" ]]; then
+            printf '        <TR><TD><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
+                "$SUBTEXT_COLOR" "$(dot_escape "$PORT_DESCR_VAL")"
+        fi
         printf '        </TABLE>\n'
         printf '    >];\n\n'
     done
@@ -2234,7 +2288,7 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
         printf "${COL_GAP}%-${COL_W_MET_ERR}s" "Errors"
         printf "${COL_GAP}%-${COL_W_MET_FIFO}s" "FIFO Errors"
     fi
-    printf "${COL_GAP}%-${COL_W_SWITCH}s${COL_GAP}%s\n" "Switch Name" "Port Name"
+    printf "${COL_GAP}%-${COL_W_SWITCH}s${COL_GAP}%-${COL_W_PORT}s${COL_GAP}%s\n" "Switch Name" "Port Name" "Port Descr"
     # Separator line
     SEP_WIDTH=$((COL_W_DEVICE + COL_GAP_WIDTH + COL_W_DRIVER + COL_GAP_WIDTH + COL_W_FIRMWARE + COL_GAP_WIDTH + COL_W_IFACE + COL_GAP_WIDTH + COL_W_MAC + COL_GAP_WIDTH + COL_W_MTU + COL_GAP_WIDTH + COL_W_LINK + COL_GAP_WIDTH + COL_W_SPEED + COL_GAP_WIDTH + COL_W_BOND))
     ${SHOW_BMAC} && SEP_WIDTH=$((SEP_WIDTH + COL_GAP_WIDTH + COL_W_BMAC))
@@ -2246,7 +2300,7 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
     if ${SHOW_METRICS}; then
         SEP_WIDTH=$((SEP_WIDTH + COL_GAP_WIDTH + COL_W_MET_BW + COL_GAP_WIDTH + COL_W_MET_PPS + COL_GAP_WIDTH + COL_W_MET_DROP + COL_GAP_WIDTH + COL_W_MET_ERR + COL_GAP_WIDTH + COL_W_MET_FIFO))
     fi
-    SEP_WIDTH=$((SEP_WIDTH + COL_GAP_WIDTH + COL_W_SWITCH + COL_GAP_WIDTH + COL_W_PORT))
+    SEP_WIDTH=$((SEP_WIDTH + COL_GAP_WIDTH + COL_W_SWITCH + COL_GAP_WIDTH + COL_W_PORT + COL_GAP_WIDTH + COL_W_PORT_DESCR))
     printf '%*s\n' "$SEP_WIDTH" '' | tr ' ' '-'
     # Data rows
     for i in "${RENDER_ORDER[@]}"; do
@@ -2284,7 +2338,7 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
             printf '%s' "${COL_GAP}"
             pad_color "${DATA_MET_FIFO_COLOR[$i]}" "$COL_W_MET_FIFO"
         fi
-        printf "${COL_GAP}%-${COL_W_SWITCH}s${COL_GAP}%s\n" "${DATA_SWITCH[$i]}" "${DATA_PORT[$i]}"
+        printf "${COL_GAP}%-${COL_W_SWITCH}s${COL_GAP}%-${COL_W_PORT}s${COL_GAP}%s\n" "${DATA_SWITCH[$i]}" "${DATA_PORT[$i]}" "${DATA_PORT_DESCR[$i]}"
     done
     if ${SHOW_METRICS}; then
         printf '\n📊 Metrics sampled over %ds\n' "$METRICS_ELAPSED"
@@ -2307,7 +2361,7 @@ elif [[ "${OUTPUT_FORMAT}" == "csv" ]]; then
             "Rx Drops" "Tx Drops" "Rx Errors" "Tx Errors" \
             "Rx FIFO Errors" "Tx FIFO Errors" "Sample Duration"
     fi
-    printf "${FS}%s${FS}%s\n" "Switch Name" "Port Name"
+    printf "${FS}%s${FS}%s${FS}%s\n" "Switch Name" "Port Name" "Port Descr"
     # CSV Data rows
     for i in "${RENDER_ORDER[@]}"; do
         printf "%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
@@ -2332,7 +2386,7 @@ elif [[ "${OUTPUT_FORMAT}" == "csv" ]]; then
                 "${DATA_MET_RX_FIFO[$i]}" "${DATA_MET_TX_FIFO[$i]}" \
                 "${METRICS_ELAPSED}"
         fi
-        printf "${FS}%s${FS}%s\n" "${DATA_SWITCH[$i]}" "${DATA_PORT[$i]}"
+        printf "${FS}%s${FS}%s${FS}%s\n" "${DATA_SWITCH[$i]}" "${DATA_PORT[$i]}" "${DATA_PORT_DESCR[$i]}"
     done
 elif [[ "${OUTPUT_FORMAT}" == "json" ]]; then
     printf '[\n'
@@ -2426,6 +2480,7 @@ elif [[ "${OUTPUT_FORMAT}" == "json" ]]; then
         fi
         printf ',\n    "switch_name": "%s"' "$(json_escape "${DATA_SWITCH[$i]}")"
         printf ',\n    "port_name": "%s"' "$(json_escape "${DATA_PORT[$i]}")"
+        printf ',\n    "port_descr": "%s"' "$(json_escape "${DATA_PORT_DESCR[$i]}")"
         printf '\n  }'
         if [[ "$i" != "$LAST_IDX" ]]; then
             printf ','

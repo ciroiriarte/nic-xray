@@ -18,16 +18,16 @@
       "wavelength": "850nm",
       "tx_power_dbm": -2.32,
       "tx_status": "OK",
-      "rx_power_dbm": -2.92,
+      "rx_power_dbm": -2.91,
       "rx_status": "OK",
       "lanes": 1
     },
     "metrics": {
       "sample_duration_seconds": 6,
-      "rx_bytes_per_sec": 3740,
-      "tx_bytes_per_sec": 5958,
-      "rx_packets_per_sec": 4,
-      "tx_packets_per_sec": 11,
+      "rx_bytes_per_sec": 671,
+      "tx_bytes_per_sec": 7141,
+      "rx_packets_per_sec": 3,
+      "tx_packets_per_sec": 7,
       "rx_drops": 0,
       "tx_drops": 0,
       "rx_errors": 0,
@@ -36,7 +36,8 @@
       "tx_fifo_errors": 0
     },
     "switch_name": "switch-01.example.net",
-    "port_name": "ifname xe-0/0/2"
+    "port_name": "ifname xe-0/0/2",
+    "port_descr": "xe-0/0/2"
   },
   {
     "device": "0000:19:00.1",
@@ -55,18 +56,18 @@
       "sfp_type": "25GBASE-SR",
       "vendor": "DELL EMC",
       "wavelength": "850nm",
-      "tx_power_dbm": -0.94,
+      "tx_power_dbm": -0.97,
       "tx_status": "OK",
-      "rx_power_dbm": -2.76,
+      "rx_power_dbm": -2.78,
       "rx_status": "OK",
       "lanes": 1
     },
     "metrics": {
       "sample_duration_seconds": 6,
-      "rx_bytes_per_sec": 1645,
-      "tx_bytes_per_sec": 611,
-      "rx_packets_per_sec": 10,
-      "tx_packets_per_sec": 8,
+      "rx_bytes_per_sec": 521,
+      "tx_bytes_per_sec": 535,
+      "rx_packets_per_sec": 7,
+      "tx_packets_per_sec": 7,
       "rx_drops": 0,
       "tx_drops": 0,
       "rx_errors": 0,
@@ -75,7 +76,8 @@
       "tx_fifo_errors": 0
     },
     "switch_name": "switch-01.example.net",
-    "port_name": "ifname xe-0/0/3"
+    "port_name": "ifname xe-0/0/3",
+    "port_descr": "xe-0/0/3"
   },
   {
     "device": "0000:19:00.2",
@@ -114,7 +116,8 @@
       "tx_fifo_errors": 0
     },
     "switch_name": "",
-    "port_name": ""
+    "port_name": "",
+    "port_descr": "N/A"
   },
   {
     "device": "0000:19:00.3",
@@ -135,7 +138,7 @@
       "wavelength": "850nm",
       "tx_power_dbm": -0.82,
       "tx_status": "OK",
-      "rx_power_dbm": -35.23,
+      "rx_power_dbm": -40.00,
       "rx_status": "ALARM",
       "lanes": 1
     },
@@ -153,7 +156,8 @@
       "tx_fifo_errors": 0
     },
     "switch_name": "",
-    "port_name": ""
+    "port_name": "",
+    "port_descr": "N/A"
   },
   {
     "device": "0000:5e:00.0",
@@ -172,18 +176,18 @@
       "sfp_type": "25GBASE-SR",
       "vendor": "PRECISION",
       "wavelength": "850nm",
-      "tx_power_dbm": -2.47,
+      "tx_power_dbm": -1.99,
       "tx_status": "OK",
-      "rx_power_dbm": -2.08,
+      "rx_power_dbm": -2.27,
       "rx_status": "OK",
       "lanes": 1
     },
     "metrics": {
       "sample_duration_seconds": 6,
-      "rx_bytes_per_sec": 77740,
-      "tx_bytes_per_sec": 72848,
-      "rx_packets_per_sec": 81,
-      "tx_packets_per_sec": 76,
+      "rx_bytes_per_sec": 56924,
+      "tx_bytes_per_sec": 49141,
+      "rx_packets_per_sec": 49,
+      "tx_packets_per_sec": 47,
       "rx_drops": 0,
       "tx_drops": 0,
       "rx_errors": 0,
@@ -192,7 +196,8 @@
       "tx_fifo_errors": 0
     },
     "switch_name": "switch-01.example.net",
-    "port_name": "ifname et-0/0/38"
+    "port_name": "ifname et-0/0/38",
+    "port_descr": "et-0/0/38"
   },
   {
     "device": "0000:5e:00.1",
@@ -213,16 +218,16 @@
       "wavelength": "850nm",
       "tx_power_dbm": -2.79,
       "tx_status": "OK",
-      "rx_power_dbm": -2.42,
+      "rx_power_dbm": -2.43,
       "rx_status": "OK",
       "lanes": 1
     },
     "metrics": {
       "sample_duration_seconds": 6,
-      "rx_bytes_per_sec": 1398142,
-      "tx_bytes_per_sec": 1178473,
-      "rx_packets_per_sec": 894,
-      "tx_packets_per_sec": 888,
+      "rx_bytes_per_sec": 4102247,
+      "tx_bytes_per_sec": 920404,
+      "rx_packets_per_sec": 1385,
+      "tx_packets_per_sec": 1198,
       "rx_drops": 0,
       "tx_drops": 0,
       "rx_errors": 0,
@@ -231,7 +236,8 @@
       "tx_fifo_errors": 0
     },
     "switch_name": "switch-01.example.net",
-    "port_name": "ifname et-0/0/39"
+    "port_name": "ifname et-0/0/39",
+    "port_descr": "et-0/0/39"
   },
   {
     "device": "0000:86:00.0",
@@ -250,18 +256,18 @@
       "sfp_type": "10GBASE-SR",
       "vendor": "DELL",
       "wavelength": "850nm",
-      "tx_power_dbm": -2.62,
+      "tx_power_dbm": -2.65,
       "tx_status": "OK",
-      "rx_power_dbm": -3.55,
+      "rx_power_dbm": -3.62,
       "rx_status": "OK",
       "lanes": 1
     },
     "metrics": {
       "sample_duration_seconds": 6,
-      "rx_bytes_per_sec": 25879,
-      "tx_bytes_per_sec": 25817,
-      "rx_packets_per_sec": 95,
-      "tx_packets_per_sec": 97,
+      "rx_bytes_per_sec": 18430,
+      "tx_bytes_per_sec": 27229,
+      "rx_packets_per_sec": 82,
+      "tx_packets_per_sec": 88,
       "rx_drops": 0,
       "tx_drops": 0,
       "rx_errors": 0,
@@ -270,7 +276,8 @@
       "tx_fifo_errors": 0
     },
     "switch_name": "switch-02.example.net",
-    "port_name": "ifname xe-0/0/2"
+    "port_name": "ifname xe-0/0/2",
+    "port_descr": "xe-0/0/2"
   },
   {
     "device": "0000:86:00.1",
@@ -289,18 +296,18 @@
       "sfp_type": "25GBASE-SR",
       "vendor": "DELL EMC",
       "wavelength": "850nm",
-      "tx_power_dbm": -0.97,
+      "tx_power_dbm": -0.95,
       "tx_status": "OK",
-      "rx_power_dbm": -3.11,
+      "rx_power_dbm": -3.18,
       "rx_status": "OK",
       "lanes": 1
     },
     "metrics": {
       "sample_duration_seconds": 6,
-      "rx_bytes_per_sec": 687,
-      "tx_bytes_per_sec": 2004,
-      "rx_packets_per_sec": 10,
-      "tx_packets_per_sec": 13,
+      "rx_bytes_per_sec": 654,
+      "tx_bytes_per_sec": 803,
+      "rx_packets_per_sec": 9,
+      "tx_packets_per_sec": 10,
       "rx_drops": 0,
       "tx_drops": 0,
       "rx_errors": 0,
@@ -309,7 +316,8 @@
       "tx_fifo_errors": 0
     },
     "switch_name": "switch-02.example.net",
-    "port_name": "ifname xe-0/0/3"
+    "port_name": "ifname xe-0/0/3",
+    "port_descr": "xe-0/0/3"
   },
   {
     "device": "0000:86:00.2",
@@ -348,7 +356,8 @@
       "tx_fifo_errors": 0
     },
     "switch_name": "",
-    "port_name": ""
+    "port_name": "",
+    "port_descr": "N/A"
   },
   {
     "device": "0000:86:00.3",
@@ -387,7 +396,8 @@
       "tx_fifo_errors": 0
     },
     "switch_name": "",
-    "port_name": ""
+    "port_name": "",
+    "port_descr": "N/A"
   },
   {
     "device": "0000:d8:00.0",
@@ -406,18 +416,18 @@
       "sfp_type": "25GBASE-SR",
       "vendor": "DELL EMC",
       "wavelength": "850nm",
-      "tx_power_dbm": -1.02,
+      "tx_power_dbm": -1.05,
       "tx_status": "OK",
-      "rx_power_dbm": -2.45,
+      "rx_power_dbm": -2.47,
       "rx_status": "OK",
       "lanes": 1
     },
     "metrics": {
       "sample_duration_seconds": 6,
-      "rx_bytes_per_sec": 2456950,
-      "tx_bytes_per_sec": 220375,
-      "rx_packets_per_sec": 557,
-      "tx_packets_per_sec": 424,
+      "rx_bytes_per_sec": 1221516,
+      "tx_bytes_per_sec": 177442,
+      "rx_packets_per_sec": 327,
+      "tx_packets_per_sec": 277,
       "rx_drops": 0,
       "tx_drops": 0,
       "rx_errors": 0,
@@ -426,7 +436,8 @@
       "tx_fifo_errors": 0
     },
     "switch_name": "switch-02.example.net",
-    "port_name": "ifname et-0/0/38"
+    "port_name": "ifname et-0/0/38",
+    "port_descr": "et-0/0/38"
   },
   {
     "device": "0000:d8:00.1",
@@ -445,7 +456,7 @@
       "sfp_type": "25GBASE-SR",
       "vendor": "DELL EMC",
       "wavelength": "850nm",
-      "tx_power_dbm": -0.64,
+      "tx_power_dbm": -0.68,
       "tx_status": "OK",
       "rx_power_dbm": -2.03,
       "rx_status": "OK",
@@ -453,10 +464,10 @@
     },
     "metrics": {
       "sample_duration_seconds": 6,
-      "rx_bytes_per_sec": 3067017,
-      "tx_bytes_per_sec": 4649792,
-      "rx_packets_per_sec": 2431,
-      "tx_packets_per_sec": 2511,
+      "rx_bytes_per_sec": 4715658,
+      "tx_bytes_per_sec": 2283985,
+      "rx_packets_per_sec": 2241,
+      "tx_packets_per_sec": 2091,
       "rx_drops": 0,
       "tx_drops": 0,
       "rx_errors": 0,
@@ -465,7 +476,8 @@
       "tx_fifo_errors": 0
     },
     "switch_name": "switch-02.example.net",
-    "port_name": "ifname et-0/0/39"
+    "port_name": "ifname et-0/0/39",
+    "port_descr": "et-0/0/39"
   },
   {
     "device": "1-14.3:1.0",
@@ -492,9 +504,9 @@
     },
     "metrics": {
       "sample_duration_seconds": 6,
-      "rx_bytes_per_sec": 52,
-      "tx_bytes_per_sec": 74,
-      "rx_packets_per_sec": 0,
+      "rx_bytes_per_sec": 69,
+      "tx_bytes_per_sec": 105,
+      "rx_packets_per_sec": 1,
       "tx_packets_per_sec": 1,
       "rx_drops": 0,
       "tx_drops": 0,
@@ -504,6 +516,7 @@
       "tx_fifo_errors": 0
     },
     "switch_name": "",
-    "port_name": ""
+    "port_name": "",
+    "port_descr": "N/A"
   }
 ]

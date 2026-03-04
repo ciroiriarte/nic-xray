@@ -1,9 +1,9 @@
-Usage: bash [--lacp] [--vlan] [--bmac] [-o|--optics] [--all]
+Usage: nic-xray.sh [--lacp] [--vlan] [--bmac] [-o|--optics] [--all]
        [--no-color] [--filter-link up|down] [-s[SEP]|--separator[=SEP]]
-       [--group-bond] [-m[SEC]|--metrics[=SEC]]
+       [--group-bond] [-m[SEC]|--metrics[=SEC]] [-w[SEC]|--watch[=SEC]]
        [--output FORMAT] [--diagram-out FILE] [--help]
 
-Version: 2.6.0
+Version: 2.9.0
 
 Description:
  Lists physical network interfaces with detailed information including:
@@ -24,6 +24,10 @@ Options:
  -sSEP, --separator=SEP
                      Use SEP as column separator in table and CSV output
  --group-bond        Sort rows by bond group, then by interface name
+ -w, --watch         Watch mode: refresh display continuously (default: 5s)
+ -wSEC, --watch=SEC  Set refresh interval in seconds (1-3600)
+                     Combines with --metrics: sampling duration = watch interval
+                     Table output only; requires a terminal
  -m, --metrics       Sample interface traffic metrics (default: 30s)
  -mSEC, --metrics=SEC
                      Set sampling duration in seconds (1-3600)

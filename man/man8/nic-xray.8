@@ -28,7 +28,8 @@ nic-xray \- detailed physical network interface diagnostics
 provides a detailed overview of all physical network interfaces on a Linux
 system. It collects and displays PCI slot, driver name, firmware version,
 interface name, MAC address, MTU, link status, negotiated speed and duplex,
-bond membership, and LLDP peer information (switch name and port).
+bond membership, and LLDP peer information (switch name, port, and port
+description).
 Optionally: LACP status, VLAN tagging, bond MAC address, and SFP/QSFP
 optical transceiver diagnostics.
 With
@@ -292,6 +293,16 @@ LLDP-reported remote switch system name.
 .TP
 .B Port Name
 LLDP-reported remote port identifier.
+.TP
+.B Port Descr
+LLDP-reported remote port description. For Cisco ACI fabrics, the raw topology
+path (e.g.,
+.IR pathep\-[POLICY] )
+is automatically formatted as
+.BI "VPC: " POLICY_NAME
+for readability. Shows
+.B N/A
+when no port description is available.
 .PP
 The following columns are shown only when their respective flags are used:
 .TP
@@ -379,7 +390,9 @@ No color codes are emitted. The default comma delimiter can be changed with
 A JSON array where each element is an object representing one interface.
 All fields use plain strings without color codes. Optional fields
 .RB ( bond_mac ", " lacp_status ", " vlan )
-are included only when their respective flags are active.
+are included only when their respective flags are active. The
+.B port_descr
+field is always included.
 .SS DOT / SVG / PNG (Diagram)
 Generates a left-to-right network topology diagram showing server-to-switch
 connectivity. All optional data columns (LACP, VLAN, bond MAC) are
@@ -423,9 +436,12 @@ green for UP links, red for DOWN links
 with orange border on the right, showing hardware brand, model, serial number
 in brackets (from vendor-specific LLDP TLVs), and firmware version parsed from
 the LLDP SysDescr field. Supports Juniper and Cisco vendor-specific TLVs for
-serial extraction, and Juniper, Cisco (NX-OS and IOS), and Arista patterns for
-SysDescr parsing. Falls back to raw SysDescr text (truncated) or a plain
-\(lqSwitch\(rq label when no LLDP data is available
+serial extraction. Cisco ACI fabric switches are also supported: when SysDescr
+is a topology path, model and firmware are extracted from vendor TLVs (SubTypes
+214 and 210). Juniper, Cisco (NX-OS, IOS, and ACI), and Arista patterns are
+supported for SysDescr parsing. Falls back to raw SysDescr text (truncated) or
+a plain \(lqSwitch\(rq label when no LLDP data is available.
+Switch port nodes include the port description as a subtitle when available
 .IP \(bu
 .B Disconnected interfaces
 shown with dashed gray lines to a \(lqNo LLDP peer\(rq label

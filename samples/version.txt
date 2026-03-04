@@ -1,1 +1,1 @@
-bash 2.6.0
+nic-xray.sh 2.9.0

@@ -1,14 +1,14 @@
-Device,Driver,Firmware,Interface,MAC Address,MTU,Link,Speed/Duplex,Parent Bond,SFP Type,SFP Vendor,Wavelength,Tx Power (dBm),Tx Status,Rx Power (dBm),Rx Status,Lane Count,Switch Name,Port Name
-0000:19:00.0,i40e,9.50 0x8000f25e 23.0.8,eno1np0,XX:XX:XX:XX:XX:01,9100,up,10000Mb/s (Full),bond0,10GBASE-SR,DELL EMC,850nm,-2.31,OK,-2.92,OK,1,switch-01.example.net,ifname xe-0/0/2
-0000:19:00.1,i40e,9.50 0x8000f25e 23.0.8,eno2np1,XX:XX:XX:XX:XX:02,9100,up,10000Mb/s (Full),bond1,25GBASE-SR,DELL EMC,850nm,-0.98,OK,-2.79,OK,1,switch-01.example.net,ifname xe-0/0/3
-0000:19:00.2,i40e,9.50 0x8000f25e 23.0.8,eno3np2,XX:XX:XX:XX:XX:03,1500,down,N/A (N/A),None,10GBASE-SR,DELL EMC,850nm,-2.42,OK,-26.78,ALARM,1,,
-0000:19:00.3,i40e,9.50 0x8000f25e 23.0.8,eno4np3,XX:XX:XX:XX:XX:04,1500,down,N/A (N/A),None,25GBASE-SR,DELL EMC,850nm,-0.82,OK,-40.00,ALARM,1,,
-0000:5e:00.0,i40e,9.50 0x8000f251 23.0.8,ens3f0np0,XX:XX:XX:XX:XX:05,9100,up,25000Mb/s (Full),bond2,25GBASE-SR,PRECISION,850nm,-1.99,OK,-2.07,OK,1,switch-01.example.net,ifname et-0/0/38
-0000:5e:00.1,i40e,9.50 0x8000f251 23.0.8,ens3f1np1,XX:XX:XX:XX:XX:06,9100,up,25000Mb/s (Full),bond3,25GBASE-SR,PRECISION,850nm,-2.79,OK,-2.44,OK,1,switch-01.example.net,ifname et-0/0/39
-0000:86:00.0,i40e,9.50 0x8000f25d 23.0.8,ens5f0np0,XX:XX:XX:XX:XX:07,9100,up,10000Mb/s (Full),bond0,10GBASE-SR,DELL,850nm,-2.65,OK,-3.55,OK,1,switch-02.example.net,ifname xe-0/0/2
-0000:86:00.1,i40e,9.50 0x8000f25d 23.0.8,ens5f1np1,XX:XX:XX:XX:XX:08,9100,up,10000Mb/s (Full),bond1,25GBASE-SR,DELL EMC,850nm,-0.96,OK,-3.18,OK,1,switch-02.example.net,ifname xe-0/0/3
-0000:86:00.2,i40e,9.50 0x8000f25d 23.0.8,ens5f2np2,XX:XX:XX:XX:XX:09,1500,down,N/A (N/A),None,10GBASE-SR,DELL EMC,850nm,-2.25,OK,-26.78,ALARM,1,,
-0000:86:00.3,i40e,9.50 0x8000f25d 23.0.8,ens5f3np3,XX:XX:XX:XX:XX:0a,1500,down,N/A (N/A),None,10GBASE-SR,DELL EMC,850nm,-2.48,OK,-26.78,ALARM,1,,
-0000:d8:00.0,i40e,9.50 0x8000f251 23.0.8,ens8f0np0,XX:XX:XX:XX:XX:0b,9100,up,25000Mb/s (Full),bond2,25GBASE-SR,DELL EMC,850nm,-1.02,OK,-2.45,OK,1,switch-02.example.net,ifname et-0/0/38
-0000:d8:00.1,i40e,9.50 0x8000f251 23.0.8,ens8f1np1,XX:XX:XX:XX:XX:0c,9100,up,25000Mb/s (Full),bond3,25GBASE-SR,DELL EMC,850nm,-0.64,OK,-2.03,OK,1,switch-02.example.net,ifname et-0/0/39
-1-14.3:1.0,cdc_ether,CDC Ethernet Device,idrac,XX:XX:XX:XX:XX:0d,1500,up,425Mb/s (Half),None,N/A,,,N/A,N/A,N/A,N/A,0,,
+Device,Driver,Firmware,Interface,MAC Address,MTU,Link,Speed/Duplex,Parent Bond,SFP Type,SFP Vendor,Wavelength,Tx Power (dBm),Tx Status,Rx Power (dBm),Rx Status,Lane Count,Switch Name,Port Name,Port Descr
+0000:19:00.0,i40e,9.50 0x8000f25e 23.0.8,eno1np0,XX:XX:XX:XX:XX:01,9100,up,10000Mb/s (Full),bond0,10GBASE-SR,DELL EMC,850nm,-2.31,OK,-2.92,OK,1,switch-01.example.net,ifname xe-0/0/2,xe-0/0/2
+0000:19:00.1,i40e,9.50 0x8000f25e 23.0.8,eno2np1,XX:XX:XX:XX:XX:02,9100,up,10000Mb/s (Full),bond1,25GBASE-SR,DELL EMC,850nm,-0.97,OK,-2.85,OK,1,switch-01.example.net,ifname xe-0/0/3,xe-0/0/3
+0000:19:00.2,i40e,9.50 0x8000f25e 23.0.8,eno3np2,XX:XX:XX:XX:XX:03,1500,down,N/A (N/A),None,10GBASE-SR,DELL EMC,850nm,-2.42,OK,-26.78,ALARM,1,,,N/A
+0000:19:00.3,i40e,9.50 0x8000f25e 23.0.8,eno4np3,XX:XX:XX:XX:XX:04,1500,down,N/A (N/A),None,25GBASE-SR,DELL EMC,850nm,-0.82,OK,-40.00,ALARM,1,,,N/A
+0000:5e:00.0,i40e,9.50 0x8000f251 23.0.8,ens3f0np0,XX:XX:XX:XX:XX:05,9100,up,25000Mb/s (Full),bond2,25GBASE-SR,PRECISION,850nm,-1.99,OK,-2.11,OK,1,switch-01.example.net,ifname et-0/0/38,et-0/0/38
+0000:5e:00.1,i40e,9.50 0x8000f251 23.0.8,ens3f1np1,XX:XX:XX:XX:XX:06,9100,up,25000Mb/s (Full),bond3,25GBASE-SR,PRECISION,850nm,-2.79,OK,-2.45,OK,1,switch-01.example.net,ifname et-0/0/39,et-0/0/39
+0000:86:00.0,i40e,9.50 0x8000f25d 23.0.8,ens5f0np0,XX:XX:XX:XX:XX:07,9100,up,10000Mb/s (Full),bond0,10GBASE-SR,DELL,850nm,-2.64,OK,-3.62,OK,1,switch-02.example.net,ifname xe-0/0/2,xe-0/0/2
+0000:86:00.1,i40e,9.50 0x8000f25d 23.0.8,ens5f1np1,XX:XX:XX:XX:XX:08,9100,up,10000Mb/s (Full),bond1,25GBASE-SR,DELL EMC,850nm,-0.95,OK,-3.18,OK,1,switch-02.example.net,ifname xe-0/0/3,xe-0/0/3
+0000:86:00.2,i40e,9.50 0x8000f25d 23.0.8,ens5f2np2,XX:XX:XX:XX:XX:09,1500,down,N/A (N/A),None,10GBASE-SR,DELL EMC,850nm,-2.23,OK,-26.78,ALARM,1,,,N/A
+0000:86:00.3,i40e,9.50 0x8000f25d 23.0.8,ens5f3np3,XX:XX:XX:XX:XX:0a,1500,down,N/A (N/A),None,10GBASE-SR,DELL EMC,850nm,-2.69,OK,-26.78,ALARM,1,,,N/A
+0000:d8:00.0,i40e,9.50 0x8000f251 23.0.8,ens8f0np0,XX:XX:XX:XX:XX:0b,9100,up,25000Mb/s (Full),bond2,25GBASE-SR,DELL EMC,850nm,-1.05,OK,-2.47,OK,1,switch-02.example.net,ifname et-0/0/38,et-0/0/38
+0000:d8:00.1,i40e,9.50 0x8000f251 23.0.8,ens8f1np1,XX:XX:XX:XX:XX:0c,9100,up,25000Mb/s (Full),bond3,25GBASE-SR,DELL EMC,850nm,-0.67,OK,-2.03,OK,1,switch-02.example.net,ifname et-0/0/39,et-0/0/39
+1-14.3:1.0,cdc_ether,CDC Ethernet Device,idrac,XX:XX:XX:XX:XX:0d,1500,up,425Mb/s (Half),None,N/A,,,N/A,N/A,N/A,N/A,0,,,N/A
