@@ -9,6 +9,7 @@ nic-xray \- detailed physical network interface diagnostics
 .RI [ \-\-vlan ]
 .RI [ \-\-bmac ]
 .RI [ \-o | \-\-optics ]
+.RI [ \-p | \-\-physical ]
 .RI [ \-\-all ]
 .RI [ \-\-no\-color ]
 .RI [ \-\-filter\-link
@@ -30,8 +31,9 @@ system. It collects and displays PCI slot, driver name, firmware version,
 interface name, MAC address, MTU, link status, negotiated speed and duplex,
 bond membership, and LLDP peer information (switch name, port, and port
 description).
-Optionally: LACP status, VLAN tagging, bond MAC address, and SFP/QSFP
-optical transceiver diagnostics.
+Optionally: LACP status, VLAN tagging, bond MAC address, SFP/QSFP
+optical transceiver diagnostics, and physical topology (NUMA node, PCI slot,
+NIC vendor/model).
 With
 .BR \-\-metrics ,
 it can also sample real-time traffic metrics: bandwidth, packets/s, drops,
@@ -114,13 +116,33 @@ is flagged (e.g.,
 .BR "Ch3\(da2dB" ).
 Per-lane detail is available in CSV and JSON output.
 .TP
+.BR \-p ", " \-\-physical
+Show physical topology information: NUMA node, PCI slot designation, and NIC
+vendor/model. Uses
+.BR dmidecode (8)
+to resolve physical slot names (e.g., \(lqPCIe Slot 3\(rq) from SMBIOS data;
+falls back to raw PCI bus addresses for on-board NICs or when dmidecode is
+unavailable. Uses
+.BR lspci (8)
+for human-readable NIC identification; falls back to raw PCI
+vendor/device hex IDs from sysfs if
+.B lspci
+is not installed.
+.IP
+When used with diagram output formats
+.RB ( dot / svg / png ),
+adds NUMA nodes and PCI slot clusters to the topology, showing the hardware
+path: Server \(-> NUMA \(-> NIC Card \(-> Ports \(-> Switch Ports \(-> Switches.
+Useful for NUMA affinity analysis and PCIe placement.
+.TP
 .B \-\-all
 Enable all optional columns. Equivalent to specifying
 .BR \-\-lacp ,
 .BR \-\-vlan ,
 .BR \-\-bmac ,
+.BR \-\-optics ,
 and
-.B \-\-optics
+.B \-\-physical
 together.
 .TP
 .B \-\-no\-color
@@ -325,6 +347,40 @@ are appended when misconfigurations are detected.
 VLAN IDs from LLDP, with
 .B [P]
 indicating the port VLAN ID.
+.PP
+The following columns are shown when
+.B \-\-physical
+is used:
+.TP
+.B NUMA
+(shown with
+.BR \-\-physical )
+NUMA node ID for the PCI device (e.g.,
+.IR 0 ", " 1 ).
+Shows
+.B N/A
+when NUMA information is unavailable (e.g., single-socket systems or VMs).
+.TP
+.B PCI Slot
+(shown with
+.BR \-\-physical )
+Physical slot designation from SMBIOS (e.g.,
+.IR "PCIe Slot 3" ),
+or PCI bus address without function number (e.g.,
+.IR 0000:19:00 )
+for on-board NICs.
+Interfaces sharing the same PCI slot belong to the same physical NIC card.
+.TP
+.B NIC Model
+(shown with
+.BR \-\-physical )
+NIC model name from
+.BR lspci (8)
+(e.g.,
+.IR "Ethernet Controller X710 for 10GbE SFP+" ).
+Falls back to raw PCI device ID when
+.B lspci
+is not available.
 .PP
 The following columns are shown when
 .B \-\-optics
@@ -536,6 +592,20 @@ package must be installed. The
 output format has no external dependency beyond the base requirements.
 .PP
 The
+.B \-\-physical
+flag uses
+.BR dmidecode (8)
+to resolve physical slot designations from SMBIOS data, and
+.BR lspci (8)
+from the
+.B pciutils
+package to resolve PCI vendor and device names. Both are optional: without
+.BR dmidecode ,
+the raw PCI bus address is shown; without
+.BR lspci ,
+raw hex PCI IDs from sysfs are shown.
+.PP
+The
 .B \-\-optics
 flag uses
 .B ethtool \-m
@@ -617,6 +687,12 @@ Show SFP/QSFP optical transceiver diagnostics:
 .PP
 .RS
 .B sudo nic-xray.sh \-\-optics
+.RE
+.PP
+Show physical topology (NUMA node, PCI slot, NIC model):
+.PP
+.RS
+.B sudo nic-xray.sh \-\-physical
 .RE
 .PP
 Show all optional columns at once:
@@ -785,6 +861,8 @@ Ciro Iriarte <ciro.iriarte+software@gmail.com>
 .SH SEE ALSO
 .BR ethtool (8),
 .BR lldpctl (8),
+.BR lspci (8),
+.BR dmidecode (8),
 .BR ip (8),
 .BR dot (1),
 .BR bonding (7)

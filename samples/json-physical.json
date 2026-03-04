@@ -13,19 +13,6 @@
     "link": "up",
     "speed_duplex": "10000Mb/s (Full)",
     "parent_bond": "bond0",
-    "bond_mac": "XX:XX:XX:XX:XX:01",
-    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:01",
-    "vlan": "100;101;102;110;111",
-    "optics": {
-      "sfp_type": "10GBASE-SR",
-      "vendor": "DELL EMC",
-      "wavelength": "850nm",
-      "tx_power_dbm": -2.32,
-      "tx_status": "OK",
-      "rx_power_dbm": -2.90,
-      "rx_status": "OK",
-      "lanes": 1
-    },
     "switch_name": "switch-01.example.net",
     "port_name": "ifname xe-0/0/2",
     "port_descr": "xe-0/0/2"
@@ -44,19 +31,6 @@
     "link": "up",
     "speed_duplex": "10000Mb/s (Full)",
     "parent_bond": "bond1",
-    "bond_mac": "XX:XX:XX:XX:XX:02",
-    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:02",
-    "vlan": "200;201;202;211;212",
-    "optics": {
-      "sfp_type": "25GBASE-SR",
-      "vendor": "DELL EMC",
-      "wavelength": "850nm",
-      "tx_power_dbm": -0.97,
-      "tx_status": "OK",
-      "rx_power_dbm": -2.76,
-      "rx_status": "OK",
-      "lanes": 1
-    },
     "switch_name": "switch-01.example.net",
     "port_name": "ifname xe-0/0/3",
     "port_descr": "xe-0/0/3"
@@ -75,19 +49,6 @@
     "link": "down",
     "speed_duplex": "N/A (N/A)",
     "parent_bond": "None",
-    "bond_mac": "N/A",
-    "lacp_status": "N/A",
-    "vlan": "N/A",
-    "optics": {
-      "sfp_type": "10GBASE-SR",
-      "vendor": "DELL EMC",
-      "wavelength": "850nm",
-      "tx_power_dbm": -2.42,
-      "tx_status": "OK",
-      "rx_power_dbm": -26.78,
-      "rx_status": "ALARM",
-      "lanes": 1
-    },
     "switch_name": "",
     "port_name": "",
     "port_descr": "N/A"
@@ -106,19 +67,6 @@
     "link": "down",
     "speed_duplex": "N/A (N/A)",
     "parent_bond": "None",
-    "bond_mac": "N/A",
-    "lacp_status": "N/A",
-    "vlan": "N/A",
-    "optics": {
-      "sfp_type": "25GBASE-SR",
-      "vendor": "DELL EMC",
-      "wavelength": "850nm",
-      "tx_power_dbm": -0.81,
-      "tx_status": "OK",
-      "rx_power_dbm": -40.00,
-      "rx_status": "ALARM",
-      "lanes": 1
-    },
     "switch_name": "",
     "port_name": "",
     "port_descr": "N/A"
@@ -137,19 +85,6 @@
     "link": "up",
     "speed_duplex": "25000Mb/s (Full)",
     "parent_bond": "bond2",
-    "bond_mac": "XX:XX:XX:XX:XX:05",
-    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:03",
-    "vlan": "501",
-    "optics": {
-      "sfp_type": "25GBASE-SR",
-      "vendor": "PRECISION",
-      "wavelength": "850nm",
-      "tx_power_dbm": -2.47,
-      "tx_status": "OK",
-      "rx_power_dbm": -2.10,
-      "rx_status": "OK",
-      "lanes": 1
-    },
     "switch_name": "switch-01.example.net",
     "port_name": "ifname et-0/0/38",
     "port_descr": "et-0/0/38"
@@ -168,19 +103,6 @@
     "link": "up",
     "speed_duplex": "25000Mb/s (Full)",
     "parent_bond": "bond3",
-    "bond_mac": "XX:XX:XX:XX:XX:06",
-    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:04",
-    "vlan": "502",
-    "optics": {
-      "sfp_type": "25GBASE-SR",
-      "vendor": "PRECISION",
-      "wavelength": "850nm",
-      "tx_power_dbm": -2.79,
-      "tx_status": "OK",
-      "rx_power_dbm": -2.41,
-      "rx_status": "OK",
-      "lanes": 1
-    },
     "switch_name": "switch-01.example.net",
     "port_name": "ifname et-0/0/39",
     "port_descr": "et-0/0/39"
@@ -199,19 +121,6 @@
     "link": "up",
     "speed_duplex": "10000Mb/s (Full)",
     "parent_bond": "bond0",
-    "bond_mac": "XX:XX:XX:XX:XX:01",
-    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:01",
-    "vlan": "100;101;102;110;111",
-    "optics": {
-      "sfp_type": "10GBASE-SR",
-      "vendor": "DELL",
-      "wavelength": "850nm",
-      "tx_power_dbm": -2.66,
-      "tx_status": "OK",
-      "rx_power_dbm": -3.55,
-      "rx_status": "OK",
-      "lanes": 1
-    },
     "switch_name": "switch-02.example.net",
     "port_name": "ifname xe-0/0/2",
     "port_descr": "xe-0/0/2"
@@ -230,19 +139,6 @@
     "link": "up",
     "speed_duplex": "10000Mb/s (Full)",
     "parent_bond": "bond1",
-    "bond_mac": "XX:XX:XX:XX:XX:02",
-    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:02",
-    "vlan": "200;201;202;211;212",
-    "optics": {
-      "sfp_type": "25GBASE-SR",
-      "vendor": "DELL EMC",
-      "wavelength": "850nm",
-      "tx_power_dbm": -0.97,
-      "tx_status": "OK",
-      "rx_power_dbm": -3.08,
-      "rx_status": "OK",
-      "lanes": 1
-    },
     "switch_name": "switch-02.example.net",
     "port_name": "ifname xe-0/0/3",
     "port_descr": "xe-0/0/3"
@@ -261,19 +157,6 @@
     "link": "down",
     "speed_duplex": "N/A (N/A)",
     "parent_bond": "None",
-    "bond_mac": "N/A",
-    "lacp_status": "N/A",
-    "vlan": "N/A",
-    "optics": {
-      "sfp_type": "10GBASE-SR",
-      "vendor": "DELL EMC",
-      "wavelength": "850nm",
-      "tx_power_dbm": -2.26,
-      "tx_status": "OK",
-      "rx_power_dbm": -26.78,
-      "rx_status": "ALARM",
-      "lanes": 1
-    },
     "switch_name": "",
     "port_name": "",
     "port_descr": "N/A"
@@ -292,19 +175,6 @@
     "link": "down",
     "speed_duplex": "N/A (N/A)",
     "parent_bond": "None",
-    "bond_mac": "N/A",
-    "lacp_status": "N/A",
-    "vlan": "N/A",
-    "optics": {
-      "sfp_type": "10GBASE-SR",
-      "vendor": "DELL EMC",
-      "wavelength": "850nm",
-      "tx_power_dbm": -2.49,
-      "tx_status": "OK",
-      "rx_power_dbm": -26.78,
-      "rx_status": "ALARM",
-      "lanes": 1
-    },
     "switch_name": "",
     "port_name": "",
     "port_descr": "N/A"
@@ -323,19 +193,6 @@
     "link": "up",
     "speed_duplex": "25000Mb/s (Full)",
     "parent_bond": "bond2",
-    "bond_mac": "XX:XX:XX:XX:XX:05",
-    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:03",
-    "vlan": "501",
-    "optics": {
-      "sfp_type": "25GBASE-SR",
-      "vendor": "DELL EMC",
-      "wavelength": "850nm",
-      "tx_power_dbm": -1.06,
-      "tx_status": "OK",
-      "rx_power_dbm": -2.44,
-      "rx_status": "OK",
-      "lanes": 1
-    },
     "switch_name": "switch-02.example.net",
     "port_name": "ifname et-0/0/38",
     "port_descr": "et-0/0/38"
@@ -354,19 +211,6 @@
     "link": "up",
     "speed_duplex": "25000Mb/s (Full)",
     "parent_bond": "bond3",
-    "bond_mac": "XX:XX:XX:XX:XX:06",
-    "lacp_status": "AggID:1 Peer:AA:BB:CC:DD:EE:04",
-    "vlan": "502",
-    "optics": {
-      "sfp_type": "25GBASE-SR",
-      "vendor": "DELL EMC",
-      "wavelength": "850nm",
-      "tx_power_dbm": -0.68,
-      "tx_status": "OK",
-      "rx_power_dbm": -2.04,
-      "rx_status": "OK",
-      "lanes": 1
-    },
     "switch_name": "switch-02.example.net",
     "port_name": "ifname et-0/0/39",
     "port_descr": "et-0/0/39"
@@ -385,19 +229,6 @@
     "link": "up",
     "speed_duplex": "425Mb/s (Half)",
     "parent_bond": "None",
-    "bond_mac": "N/A",
-    "lacp_status": "N/A",
-    "vlan": "N/A",
-    "optics": {
-      "sfp_type": "N/A",
-      "vendor": "",
-      "wavelength": "",
-      "tx_power_dbm": null,
-      "tx_status": "N/A",
-      "rx_power_dbm": null,
-      "rx_status": "N/A",
-      "lanes": 0
-    },
     "switch_name": "",
     "port_name": "",
     "port_descr": "N/A"

@@ -14,6 +14,7 @@
 # Requirements:
 #   - Must be run as root
 #   - Requires: ethtool, lldpctl, awk, grep, cat, readlink
+#   - Optional: dmidecode (for --physical slot names), lspci (for NIC vendor/model)
 #
 # Change Log:
 #   - 2025-06-05: Initial version
@@ -99,12 +100,13 @@ DIAGRAM_OUTPUT_FILE=""
 SHOW_METRICS=false
 METRICS_DURATION=30
 SHOW_OPTICS=false
+SHOW_PHYSICAL=false
 WATCH_MODE=false
 WATCH_INTERVAL=5
 
 
 # Parse options using getopt
-if ! OPTIONS=$(getopt -o hvs::m::ow:: --long help,version,lacp,vlan,bmac,optics,separator::,group-bond,output:,no-color,all,filter-link:,diagram-out:,metrics::,watch:: -n "$0" -- "$@"); then
+if ! OPTIONS=$(getopt -o hvs::m::ow::p --long help,version,lacp,vlan,bmac,optics,physical,separator::,group-bond,output:,no-color,all,filter-link:,diagram-out:,metrics::,watch:: -n "$0" -- "$@"); then
 	echo "Failed to parse options." >&2
 	exit 1
 fi
@@ -132,6 +134,10 @@ while true; do
 			SHOW_OPTICS=true
 			shift
 			;;
+		-p|--physical)
+			SHOW_PHYSICAL=true
+			shift
+			;;
 		-s|--separator)
 			if [[ -n "$2" ]]; then
 				FIELD_SEP="$2"
@@ -150,6 +156,7 @@ while true; do
 			SHOW_VLAN=true
 			SHOW_BMAC=true
 			SHOW_OPTICS=true
+			SHOW_PHYSICAL=true
 			shift
 			;;
 		--filter-link)
@@ -213,7 +220,7 @@ while true; do
 			exit 0
 			;;
 		-h|--help)
-			echo -e "Usage: $0 [--lacp] [--vlan] [--bmac] [-o|--optics] [--all]"
+			echo -e "Usage: $0 [--lacp] [--vlan] [--bmac] [-o|--optics] [-p|--physical] [--all]"
 			echo -e "       [--no-color] [--filter-link up|down] [-s[SEP]|--separator[=SEP]]"
 			echo -e "       [--group-bond] [-m[SEC]|--metrics[=SEC]] [-w[SEC]|--watch[=SEC]]"
 			echo -e "       [--output FORMAT] [--diagram-out FILE] [--help]"
@@ -221,9 +228,10 @@ while true; do
 			echo -e "Version: $SCRIPT_VERSION"
 			echo -e ""
 			echo -e "Description:"
-			echo -e " Lists physical network interfaces with detailed information including:"
+		echo -e " Lists physical network interfaces with detailed information including:"
 			echo -e " PCI slot, driver, firmware, MAC, MTU, link, speed/duplex, bond membership,"
-			echo -e " LLDP peer info, and optionally LACP status, VLAN tagging, and SFP optics."
+			echo -e " LLDP peer info, and optionally LACP status, VLAN tagging, SFP optics,"
+			echo -e " and physical topology (NUMA node, PCI slot, NIC vendor/model)."
 			echo -e ""
 			echo -e "Options:"
 			echo -e " --lacp              Show LACP Aggregator ID and Partner MAC per interface"
@@ -232,7 +240,9 @@ while true; do
 			echo -e " -o, --optics        Show SFP/QSFP transceiver diagnostics (Tx/Rx power, health)"
 			echo -e "                     Health status: OK (green), WARN (yellow), ALARM (red),"
 			echo -e "                     N/DOM (no DOM data), N/A (no SFP or copper)"
-			echo -e " --all               Enable all optional columns (--lacp --vlan --bmac --optics)"
+		echo -e " -p, --physical      Show physical topology: NUMA node, PCI slot, NIC vendor/model"
+			echo -e "                     Useful for NUMA affinity analysis and PCIe placement"
+			echo -e " --all               Enable all optional columns (--lacp --vlan --bmac --optics --physical)"
 			echo -e " --no-color          Disable color output (auto-disabled for non-terminal)"
 			echo -e " --filter-link TYPE  Show only interfaces with link up or down"
 			echo -e " -s, --separator     Show │ column separators in table output; applies to CSV too"
@@ -294,6 +304,7 @@ if [[ "$OUTPUT_FORMAT" =~ ^(dot|svg|png)$ ]]; then
     SHOW_VLAN=true
     SHOW_BMAC=true
     SHOW_OPTICS=true
+    SHOW_PHYSICAL=true
 
     # Check graphviz availability for rendered formats
     if [[ "$OUTPUT_FORMAT" != "dot" ]] && ! command -v dot &>/dev/null; then
@@ -935,6 +946,7 @@ declare -a DATA_MET_RX_PPS DATA_MET_TX_PPS
 declare -a DATA_MET_RX_DROP DATA_MET_TX_DROP
 declare -a DATA_MET_RX_ERR DATA_MET_TX_ERR
 declare -a DATA_MET_RX_FIFO DATA_MET_TX_FIFO
+declare -a DATA_NUMA DATA_PCI_SLOT DATA_NIC_VENDOR DATA_NIC_MODEL
 declare -A BOND_MODE_MAP
 declare -A DATA_SWITCH_DESCR
 declare -A DATA_SWITCH_SERIAL
@@ -956,6 +968,7 @@ collect_data() {
     DATA_OPTICS_TX_STATUS=(); DATA_OPTICS_RX_STATUS=()
     DATA_OPTICS_VENDOR=(); DATA_OPTICS_WAVELENGTH=()
     DATA_OPTICS_TX_LANES=(); DATA_OPTICS_RX_LANES=(); DATA_OPTICS_LANE_COUNT=()
+    DATA_NUMA=(); DATA_PCI_SLOT=(); DATA_NIC_VENDOR=(); DATA_NIC_MODEL=()
     BOND_MODE_MAP=()
     DATA_SWITCH_DESCR=()
     DATA_SWITCH_SERIAL=()
@@ -973,6 +986,29 @@ collect_data() {
         SERVER_SERIAL=$(< /sys/devices/virtual/dmi/id/product_serial)
     if [[ -r /etc/os-release ]]; then
         SERVER_OS=$(. /etc/os-release 2>/dev/null && printf '%s' "$PRETTY_NAME")
+    fi
+
+    # --- Physical topology: caches (keyed by PCI bus address without function) ---
+    declare -A _LSPCI_VENDOR_CACHE _LSPCI_MODEL_CACHE
+    declare -A _DMI_SLOT_CACHE  # bus_addr_no_func -> friendly slot name
+    local _HAS_LSPCI=false
+    if $SHOW_PHYSICAL; then
+        command -v lspci &>/dev/null && _HAS_LSPCI=true
+        # Build dmidecode slot designation mapping: bus address -> friendly name
+        if command -v dmidecode &>/dev/null; then
+            local _DMI_DESIG="" _DMI_BUS=""
+            while IFS= read -r _DMI_LINE; do
+                if [[ "$_DMI_LINE" =~ Designation:\ (.*) ]]; then
+                    _DMI_DESIG="${BASH_REMATCH[1]}"
+                elif [[ "$_DMI_LINE" =~ Bus\ Address:\ ([0-9a-fA-F:]+)\.[0-9]+ ]]; then
+                    _DMI_BUS="${BASH_REMATCH[1]}"
+                    [[ -n "$_DMI_DESIG" && -n "$_DMI_BUS" ]] && \
+                        _DMI_SLOT_CACHE["$_DMI_BUS"]="$_DMI_DESIG"
+                    _DMI_DESIG=""
+                    _DMI_BUS=""
+                fi
+            done < <(dmidecode -t slot 2>/dev/null)
+        fi
     fi
 
     # --- Metrics: Snapshot 1 (before data collection) ---
@@ -1002,6 +1038,48 @@ for _IFACE_PATH in /sys/class/net/*; do
     [[ ! -e "$DEVICE_PATH" ]] && continue
 
     DEVICE=$(basename "$(readlink -f "$DEVICE_PATH")")
+
+    # Physical topology: NUMA node, PCI slot, NIC vendor/model
+    if $SHOW_PHYSICAL; then
+        local _NUMA_RAW=""
+        [[ -r "$DEVICE_PATH/numa_node" ]] && _NUMA_RAW=$(< "$DEVICE_PATH/numa_node")
+        if [[ "$_NUMA_RAW" =~ ^-?[0-9]+$ && "$_NUMA_RAW" -ge 0 ]]; then
+            PHYS_NUMA="$_NUMA_RAW"
+        else
+            PHYS_NUMA="N/A"
+        fi
+        local _PCI_BUS_ADDR="${DEVICE%.*}"
+        # Resolve friendly slot name from dmidecode, fallback to raw bus address
+        if [[ -n "${_DMI_SLOT_CACHE[$_PCI_BUS_ADDR]+x}" ]]; then
+            PHYS_PCI_SLOT="${_DMI_SLOT_CACHE[$_PCI_BUS_ADDR]}"
+        else
+            PHYS_PCI_SLOT="$_PCI_BUS_ADDR"
+        fi
+        # NIC vendor/model: use lspci cache (keyed by bus addr), fallback to sysfs PCI IDs
+        if [[ -n "${_LSPCI_VENDOR_CACHE[$_PCI_BUS_ADDR]+x}" ]]; then
+            PHYS_NIC_VENDOR="${_LSPCI_VENDOR_CACHE[$_PCI_BUS_ADDR]}"
+            PHYS_NIC_MODEL="${_LSPCI_MODEL_CACHE[$_PCI_BUS_ADDR]}"
+        elif $_HAS_LSPCI; then
+            local _LSPCI_OUT
+            _LSPCI_OUT=$(lspci -s "$DEVICE" -mm 2>/dev/null)
+            PHYS_NIC_VENDOR=$(echo "$_LSPCI_OUT" | awk -F'"' '/^[^#]/ {print $4; exit}')
+            PHYS_NIC_MODEL=$(echo "$_LSPCI_OUT" | awk -F'"' '/^[^#]/ {print $6; exit}')
+            [[ -z "$PHYS_NIC_VENDOR" ]] && PHYS_NIC_VENDOR="Unknown"
+            [[ -z "$PHYS_NIC_MODEL" ]] && PHYS_NIC_MODEL="Unknown"
+            _LSPCI_VENDOR_CACHE["$_PCI_BUS_ADDR"]="$PHYS_NIC_VENDOR"
+            _LSPCI_MODEL_CACHE["$_PCI_BUS_ADDR"]="$PHYS_NIC_MODEL"
+        else
+            # Fallback: raw PCI IDs from sysfs
+            local _PCI_VID="" _PCI_DID=""
+            [[ -r "$DEVICE_PATH/vendor" ]] && _PCI_VID=$(< "$DEVICE_PATH/vendor")
+            [[ -r "$DEVICE_PATH/device" ]] && _PCI_DID=$(< "$DEVICE_PATH/device")
+            PHYS_NIC_VENDOR="${_PCI_VID:-Unknown}"
+            PHYS_NIC_MODEL="${_PCI_DID:-Unknown}"
+            _LSPCI_VENDOR_CACHE["$_PCI_BUS_ADDR"]="$PHYS_NIC_VENDOR"
+            _LSPCI_MODEL_CACHE["$_PCI_BUS_ADDR"]="$PHYS_NIC_MODEL"
+        fi
+    fi
+
     ETHTOOL_I=$(ethtool -i "$IFACE" 2>/dev/null)
     FIRMWARE=$(echo "$ETHTOOL_I" | awk -F': ' '/firmware-version/ {print $2}')
     DRIVER=$(echo "$ETHTOOL_I" | awk -F': ' '/^driver:/ {print $2}')
@@ -1215,6 +1293,12 @@ for _IFACE_PATH in /sys/class/net/*; do
         DATA_OPTICS_TX_LANES[ROW_COUNT]="$OPTICS_TX_LANES"
         DATA_OPTICS_RX_LANES[ROW_COUNT]="$OPTICS_RX_LANES"
         DATA_OPTICS_LANE_COUNT[ROW_COUNT]="$OPTICS_LANE_COUNT"
+    fi
+    if $SHOW_PHYSICAL; then
+        DATA_NUMA[ROW_COUNT]="$PHYS_NUMA"
+        DATA_PCI_SLOT[ROW_COUNT]="$PHYS_PCI_SLOT"
+        DATA_NIC_VENDOR[ROW_COUNT]="$PHYS_NIC_VENDOR"
+        DATA_NIC_MODEL[ROW_COUNT]="$PHYS_NIC_MODEL"
     fi
     ((ROW_COUNT++))
 done
@@ -1511,6 +1595,12 @@ COL_W_SWITCH=$(max_width "Switch Name" "${DATA_SWITCH[@]}")
 COL_W_PORT=$(max_width "Port Name" "${DATA_PORT[@]}")
 COL_W_PORT_DESCR=$(max_width "Port Descr" "${DATA_PORT_DESCR[@]}")
 
+if $SHOW_PHYSICAL; then
+    COL_W_NUMA=$(max_width "NUMA" "${DATA_NUMA[@]}")
+    COL_W_PCI_SLOT=$(max_width "PCI Slot" "${DATA_PCI_SLOT[@]}")
+    COL_W_NIC_MODEL=$(max_width "NIC Model" "${DATA_NIC_MODEL[@]}")
+fi
+
 if $SHOW_OPTICS; then
     COL_W_OPT_TYPE=$(max_width "SFP Type" "${DATA_OPTICS_TYPE[@]}")
     COL_W_OPT_TX=$(max_width "Optics Tx" "${DATA_OPTICS_TX_PLAIN[@]}")
@@ -1793,6 +1883,8 @@ generate_dot() {
     local SUBTEXT_COLOR="#a6adc8"
     local RX_ARROW_COLOR="#a6e3a1"   # Green — receive
     local TX_ARROW_COLOR="#89b4fa"   # Blue — transmit
+    local NUMA_COLOR="#cba6f7"       # Mauve — NUMA nodes
+    local NIC_CARD_COLOR="#94e2d5"   # Teal — NIC card nodes
 
     # Per-bond color palette (Catppuccin Mocha accents)
     local -a DOT_BOND_COLORS=(
@@ -2064,6 +2156,82 @@ DOTHEADER
         printf '\n'
     done
 
+    # --- Physical topology: NUMA clusters with PCI slot clusters and NIC card nodes ---
+    if $SHOW_PHYSICAL; then
+        # Collect PCI slot -> row indices and PCI slot -> NUMA mappings
+        declare -A _SLOT_INDICES   # pci_slot -> space-separated row indices
+        declare -A _SLOT_NUMA      # pci_slot -> numa_id
+        declare -A _NUMA_SET       # numa_id -> 1 (unique NUMA tracker)
+
+        for ((i = 0; i < ROW_COUNT; i++)); do
+            local _N="${DATA_NUMA[$i]}"
+            local _S="${DATA_PCI_SLOT[$i]}"
+            _SLOT_INDICES["$_S"]+="$i "
+            _SLOT_NUMA["$_S"]="$_N"
+            _NUMA_SET["$_N"]=1
+        done
+
+        # Pre-sort all PCI slots (space-safe via mapfile)
+        local -a _ALL_SORTED_SLOTS
+        mapfile -t _ALL_SORTED_SLOTS < <(printf '%s\n' "${!_SLOT_INDICES[@]}" | sort)
+
+        # Emit NUMA clusters containing PCI slot clusters with NIC card nodes
+        local _PCI_CLUSTER_IDX=0
+        local -a _SORTED_NUMAS
+        mapfile -t _SORTED_NUMAS < <(printf '%s\n' "${!_NUMA_SET[@]}" | sort)
+        for _NUMA_ID in "${_SORTED_NUMAS[@]}"; do
+            printf '    subgraph cluster_numa_%s {\n' "$(dot_id "$_NUMA_ID")"
+            printf '        style=dashed;\n'
+            printf '        color="%s";\n' "$NUMA_COLOR"
+            printf '        bgcolor="%s";\n' "${BG_COLOR}88"
+            printf '        fontcolor="%s";\n' "$NUMA_COLOR"
+            printf '        label=<<FONT POINT-SIZE="11"><B>NUMA %s</B></FONT>>;\n' \
+                "$(dot_escape "$_NUMA_ID")"
+            printf '        penwidth=1.5;\n\n'
+
+            # Iterate all sorted slots, emit only those belonging to this NUMA
+            for _PCI_SLOT in "${_ALL_SORTED_SLOTS[@]}"; do
+                [[ "${_SLOT_NUMA[$_PCI_SLOT]}" != "$_NUMA_ID" ]] && continue
+                local -a _SLOT_ROWS
+                read -ra _SLOT_ROWS <<< "${_SLOT_INDICES[$_PCI_SLOT]}"
+                local _FIRST_IDX="${_SLOT_ROWS[0]}"
+                local _NIC_VENDOR="${DATA_NIC_VENDOR[$_FIRST_IDX]}"
+                local _NIC_MODEL="${DATA_NIC_MODEL[$_FIRST_IDX]}"
+                local _NIC_FW="${DATA_FIRMWARE[$_FIRST_IDX]}"
+                local _NIC_CARD_ID
+                _NIC_CARD_ID=$(dot_id "nic_${_PCI_SLOT}")
+
+                printf '        subgraph cluster_pci_%d {\n' "$_PCI_CLUSTER_IDX"
+                printf '            style=dashed;\n'
+                printf '            color="%s";\n' "$NIC_CARD_COLOR"
+                printf '            bgcolor="%s";\n' "${BG_COLOR}cc"
+                printf '            fontcolor="%s";\n' "$NIC_CARD_COLOR"
+                printf '            label=<<FONT POINT-SIZE="10">%s</FONT>>;\n' \
+                    "$(dot_escape "$_PCI_SLOT")"
+                printf '            penwidth=1.0;\n\n'
+
+                # NIC card node inside cluster
+                printf '            %s [shape=plain, label=<\n' "$_NIC_CARD_ID"
+                printf '                <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="2" CELLPADDING="4" '
+                printf 'BGCOLOR="%s" COLOR="%s">\n' "$SURFACE_COLOR" "$NIC_CARD_COLOR"
+                printf '                <TR><TD><FONT COLOR="%s"><B>%s</B></FONT></TD></TR>\n' \
+                    "$TEXT_COLOR" "$(dot_escape "$_NIC_MODEL")"
+                printf '                <TR><TD><FONT POINT-SIZE="9" COLOR="%s">%s</FONT></TD></TR>\n' \
+                    "$SUBTEXT_COLOR" "$(dot_escape "$_NIC_VENDOR")"
+                if [[ -n "$_NIC_FW" ]]; then
+                    printf '                <TR><TD><FONT POINT-SIZE="9" COLOR="%s">FW: %s</FONT></TD></TR>\n' \
+                        "$SUBTEXT_COLOR" "$(dot_escape "$_NIC_FW")"
+                fi
+                printf '                </TABLE>\n'
+                printf '            >];\n'
+                printf '        }\n\n'
+                ((_PCI_CLUSTER_IDX++))
+            done
+
+            printf '    }\n\n'
+        done
+    fi
+
     # --- Switch port nodes ---
     declare -A EMITTED_PORTS
     for ((j = 0; j < ROW_COUNT; j++)); do
@@ -2152,15 +2320,44 @@ DOTHEADER
         printf '    >];\n\n'
     fi
 
-    # --- Edges: server -> interfaces ---
-    for ((i = 0; i < ROW_COUNT; i++)); do
-        local IFACE="${DATA_IFACE[$i]}"
-        local NODE_ID
-        NODE_ID=$(dot_id "$IFACE")
-        printf '    server -> %s [color="%s", penwidth=1.0, arrowsize=0.6];\n' \
-            "$NODE_ID" "$BORDER_COLOR"
-    done
-    printf '\n'
+    # --- Edges: server -> interfaces (or server -> NIC -> interfaces when --physical) ---
+    if $SHOW_PHYSICAL; then
+        # Server -> NIC card nodes (deduplicated per PCI slot)
+        declare -A _EMITTED_SERVER_NIC_EDGES
+        for ((i = 0; i < ROW_COUNT; i++)); do
+            local _S="${DATA_PCI_SLOT[$i]}"
+            if [[ -z "${_EMITTED_SERVER_NIC_EDGES[$_S]+x}" ]]; then
+                _EMITTED_SERVER_NIC_EDGES["$_S"]=1
+                local _NIC_CARD_ID
+                _NIC_CARD_ID=$(dot_id "nic_${_S}")
+                printf '    server -> %s [color="%s", penwidth=1.0, arrowsize=0.6];\n' \
+                    "$_NIC_CARD_ID" "$BORDER_COLOR"
+            fi
+        done
+        printf '\n'
+
+        # NIC card -> interface port nodes
+        for ((i = 0; i < ROW_COUNT; i++)); do
+            local _S="${DATA_PCI_SLOT[$i]}"
+            local _NIC_CARD_ID
+            _NIC_CARD_ID=$(dot_id "nic_${_S}")
+            local IFACE="${DATA_IFACE[$i]}"
+            local NODE_ID
+            NODE_ID=$(dot_id "$IFACE")
+            printf '    %s -> %s [color="%s", penwidth=1.0, arrowsize=0.6];\n' \
+                "$_NIC_CARD_ID" "$NODE_ID" "$BORDER_COLOR"
+        done
+        printf '\n'
+    else
+        for ((i = 0; i < ROW_COUNT; i++)); do
+            local IFACE="${DATA_IFACE[$i]}"
+            local NODE_ID
+            NODE_ID=$(dot_id "$IFACE")
+            printf '    server -> %s [color="%s", penwidth=1.0, arrowsize=0.6];\n' \
+                "$NODE_ID" "$BORDER_COLOR"
+        done
+        printf '\n'
+    fi
 
     # --- Edges: interfaces -> switch ports / stubs ---
     for ((i = 0; i < ROW_COUNT; i++)); do
@@ -2271,6 +2468,10 @@ render_output() {
 
 if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
     # Header
+    if ${SHOW_PHYSICAL}; then
+        printf "%-${COL_W_NUMA}s${COL_GAP}%-${COL_W_PCI_SLOT}s${COL_GAP}%-${COL_W_NIC_MODEL}s${COL_GAP}" \
+            "NUMA" "PCI Slot" "NIC Model"
+    fi
     printf "%-${COL_W_DEVICE}s${COL_GAP}%-${COL_W_DRIVER}s${COL_GAP}%-${COL_W_FIRMWARE}s${COL_GAP}%-${COL_W_IFACE}s${COL_GAP}%-${COL_W_MAC}s${COL_GAP}%-${COL_W_MTU}s${COL_GAP}%-${COL_W_LINK}s${COL_GAP}%-${COL_W_SPEED}s${COL_GAP}%-${COL_W_BOND}s" \
         "Device" "Driver" "Firmware" "Interface" "MAC Address" "MTU" "Link" "Speed/Duplex" "Parent Bond"
     ${SHOW_BMAC} && printf "${COL_GAP}%-${COL_W_BMAC}s" "Bond MAC"
@@ -2290,7 +2491,11 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
     fi
     printf "${COL_GAP}%-${COL_W_SWITCH}s${COL_GAP}%-${COL_W_PORT}s${COL_GAP}%s\n" "Switch Name" "Port Name" "Port Descr"
     # Separator line
-    SEP_WIDTH=$((COL_W_DEVICE + COL_GAP_WIDTH + COL_W_DRIVER + COL_GAP_WIDTH + COL_W_FIRMWARE + COL_GAP_WIDTH + COL_W_IFACE + COL_GAP_WIDTH + COL_W_MAC + COL_GAP_WIDTH + COL_W_MTU + COL_GAP_WIDTH + COL_W_LINK + COL_GAP_WIDTH + COL_W_SPEED + COL_GAP_WIDTH + COL_W_BOND))
+    SEP_WIDTH=0
+    if ${SHOW_PHYSICAL}; then
+        SEP_WIDTH=$((COL_W_NUMA + COL_GAP_WIDTH + COL_W_PCI_SLOT + COL_GAP_WIDTH + COL_W_NIC_MODEL + COL_GAP_WIDTH))
+    fi
+    SEP_WIDTH=$((SEP_WIDTH + COL_W_DEVICE + COL_GAP_WIDTH + COL_W_DRIVER + COL_GAP_WIDTH + COL_W_FIRMWARE + COL_GAP_WIDTH + COL_W_IFACE + COL_GAP_WIDTH + COL_W_MAC + COL_GAP_WIDTH + COL_W_MTU + COL_GAP_WIDTH + COL_W_LINK + COL_GAP_WIDTH + COL_W_SPEED + COL_GAP_WIDTH + COL_W_BOND))
     ${SHOW_BMAC} && SEP_WIDTH=$((SEP_WIDTH + COL_GAP_WIDTH + COL_W_BMAC))
     ${SHOW_LACP} && SEP_WIDTH=$((SEP_WIDTH + COL_GAP_WIDTH + COL_W_LACP))
     ${SHOW_VLAN} && SEP_WIDTH=$((SEP_WIDTH + COL_GAP_WIDTH + COL_W_VLAN))
@@ -2304,6 +2509,10 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
     printf '%*s\n' "$SEP_WIDTH" '' | tr ' ' '-'
     # Data rows
     for i in "${RENDER_ORDER[@]}"; do
+        if ${SHOW_PHYSICAL}; then
+            printf "%-${COL_W_NUMA}s${COL_GAP}%-${COL_W_PCI_SLOT}s${COL_GAP}%-${COL_W_NIC_MODEL}s${COL_GAP}" \
+                "${DATA_NUMA[$i]}" "${DATA_PCI_SLOT[$i]}" "${DATA_NIC_MODEL[$i]}"
+        fi
         printf "%-${COL_W_DEVICE}s${COL_GAP}%-${COL_W_DRIVER}s${COL_GAP}%-${COL_W_FIRMWARE}s${COL_GAP}%-${COL_W_IFACE}s${COL_GAP}%-${COL_W_MAC}s${COL_GAP}%-${COL_W_MTU}s${COL_GAP}" \
             "${DATA_DEVICE[$i]}" "${DATA_DRIVER[$i]}" "${DATA_FIRMWARE[$i]}" "${DATA_IFACE[$i]}" "${DATA_MAC[$i]}" "${DATA_MTU[$i]}"
         pad_color "${DATA_LINK_COLOR[$i]}" "$COL_W_LINK"
@@ -2346,6 +2555,9 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
 elif [[ "${OUTPUT_FORMAT}" == "csv" ]]; then
     FS="${FIELD_SEP:-,}"
     # CSV Header
+    if ${SHOW_PHYSICAL}; then
+        printf "%s${FS}%s${FS}%s${FS}" "NUMA" "PCI Slot" "NIC Model"
+    fi
     printf "%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" "Device" "Driver" "Firmware" "Interface" "MAC Address" "MTU" "Link" "Speed/Duplex" "Parent Bond"
     ${SHOW_BMAC} && printf "${FS}%s" "Bond MAC"
     ${SHOW_LACP} && printf "${FS}%s" "LACP Status"
@@ -2364,6 +2576,10 @@ elif [[ "${OUTPUT_FORMAT}" == "csv" ]]; then
     printf "${FS}%s${FS}%s${FS}%s\n" "Switch Name" "Port Name" "Port Descr"
     # CSV Data rows
     for i in "${RENDER_ORDER[@]}"; do
+        if ${SHOW_PHYSICAL}; then
+            printf "%s${FS}%s${FS}%s${FS}" \
+                "${DATA_NUMA[$i]}" "${DATA_PCI_SLOT[$i]}" "${DATA_NIC_MODEL[$i]}"
+        fi
         printf "%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
             "${DATA_DEVICE[$i]}" "${DATA_DRIVER[$i]}" "${DATA_FIRMWARE[$i]}" "${DATA_IFACE[$i]}" "${DATA_MAC[$i]}" \
             "${DATA_MTU[$i]}" "${DATA_LINK_PLAIN[$i]}" "${DATA_SPEED_PLAIN[$i]}" "${DATA_BOND_PLAIN[$i]}"
@@ -2393,6 +2609,12 @@ elif [[ "${OUTPUT_FORMAT}" == "json" ]]; then
     LAST_IDX="${RENDER_ORDER[-1]}"
     for i in "${RENDER_ORDER[@]}"; do
         printf '  {\n'
+        if ${SHOW_PHYSICAL}; then
+            printf '    "numa_node": "%s",\n' "$(json_escape "${DATA_NUMA[$i]}")"
+            printf '    "pci_slot": "%s",\n' "$(json_escape "${DATA_PCI_SLOT[$i]}")"
+            printf '    "nic_vendor": "%s",\n' "$(json_escape "${DATA_NIC_VENDOR[$i]}")"
+            printf '    "nic_model": "%s",\n' "$(json_escape "${DATA_NIC_MODEL[$i]}")"
+        fi
         printf '    "device": "%s",\n' "$(json_escape "${DATA_DEVICE[$i]}")"
         printf '    "driver": "%s",\n' "$(json_escape "${DATA_DRIVER[$i]}")"
         printf '    "firmware": "%s",\n' "$(json_escape "${DATA_FIRMWARE[$i]}")"

@@ -1,4 +1,4 @@
-Usage: nic-xray.sh [--lacp] [--vlan] [--bmac] [-o|--optics] [--all]
+Usage: nic-xray.sh [--lacp] [--vlan] [--bmac] [-o|--optics] [-p|--physical] [--all]
        [--no-color] [--filter-link up|down] [-s[SEP]|--separator[=SEP]]
        [--group-bond] [-m[SEC]|--metrics[=SEC]] [-w[SEC]|--watch[=SEC]]
        [--output FORMAT] [--diagram-out FILE] [--help]
@@ -8,7 +8,8 @@ Version: 2.9.0
 Description:
  Lists physical network interfaces with detailed information including:
  PCI slot, driver, firmware, MAC, MTU, link, speed/duplex, bond membership,
- LLDP peer info, and optionally LACP status, VLAN tagging, and SFP optics.
+ LLDP peer info, and optionally LACP status, VLAN tagging, SFP optics,
+ and physical topology (NUMA node, PCI slot, NIC vendor/model).
 
 Options:
  --lacp              Show LACP Aggregator ID and Partner MAC per interface
@@ -17,7 +18,9 @@ Options:
  -o, --optics        Show SFP/QSFP transceiver diagnostics (Tx/Rx power, health)
                      Health status: OK (green), WARN (yellow), ALARM (red),
                      N/DOM (no DOM data), N/A (no SFP or copper)
- --all               Enable all optional columns (--lacp --vlan --bmac --optics)
+ -p, --physical      Show physical topology: NUMA node, PCI slot, NIC vendor/model
+                     Useful for NUMA affinity analysis and PCIe placement
+ --all               Enable all optional columns (--lacp --vlan --bmac --optics --physical)
  --no-color          Disable color output (auto-disabled for non-terminal)
  --filter-link TYPE  Show only interfaces with link up or down
  -s, --separator     Show │ column separators in table output; applies to CSV too
