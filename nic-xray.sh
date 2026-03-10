@@ -1721,6 +1721,7 @@ _extract_lldp_tlv() {
 #   Cisco ACI — OUI 00,01,42  SubType 212 (ASCII-encoded serial)
 #   Juniper   — OUI 00,90,69  SubType 1   (ASCII-encoded serial)
 #   Cisco     — OUI 00,01,42  SubType 11  (ASCII-encoded serial)
+#   HPE       — OUI 00,12,0F  SubType 5   (binary; serial SubType unknown)
 parse_lldp_serial() {
     local _LLDP="$1" _RESULT
 
@@ -1735,6 +1736,9 @@ parse_lldp_serial() {
     # Cisco: OUI 00,01,42, SubType: 11
     _RESULT=$(_extract_lldp_tlv "$_LLDP" "00,01,42" "11")
     [[ -n "$_RESULT" ]] && { printf '%s' "$_RESULT"; return; }
+
+    # HPE: OUI 00,12,0F — known SubType 5 carries binary data (not serial).
+    # Serial SubType is currently undocumented; add extraction here when known.
 }
 
 # Parse switch SysDescr into brand, model, and software components.
@@ -1804,6 +1808,19 @@ parse_switch_descr() {
         fi
         if [[ "$_DESCR" =~ EOS\ version\ ([^ ]+) ]]; then
             _SOFTWARE="EOS ${BASH_REMATCH[1]}"
+        fi
+        return
+    fi
+
+    # HPE: "HPE Networking Instant On Switch 24p Gigabit 4p SFP+ 1930 JL682A, InstantOn_1930_3.0.0.0 (12)"
+    if [[ "$_DESCR" == "HPE "* ]]; then
+        _BRAND="HPE"
+        if [[ "$_DESCR" =~ ,\ (.+) ]]; then
+            _SOFTWARE="${BASH_REMATCH[1]}"
+        fi
+        # Extract HPE product number (e.g., JL682A, JG932A)
+        if [[ "$_DESCR" =~ ([A-Z][A-Z][0-9]+[A-Z]),? ]]; then
+            _MODEL="${BASH_REMATCH[1]}"
         fi
         return
     fi

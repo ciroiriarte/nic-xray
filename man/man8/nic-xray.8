@@ -494,7 +494,7 @@ in brackets (from vendor-specific LLDP TLVs), and firmware version parsed from
 the LLDP SysDescr field. Supports Juniper and Cisco vendor-specific TLVs for
 serial extraction. Cisco ACI fabric switches are also supported: when SysDescr
 is a topology path, model and firmware are extracted from vendor TLVs (SubTypes
-214 and 210). Juniper, Cisco (NX-OS, IOS, and ACI), and Arista patterns are
+214 and 210). Juniper, Cisco (NX-OS, IOS, and ACI), Arista, and HPE patterns are
 supported for SysDescr parsing. Falls back to raw SysDescr text (truncated) or
 a plain \(lqSwitch\(rq label when no LLDP data is available.
 Switch port nodes include the port description as a subtitle when available
