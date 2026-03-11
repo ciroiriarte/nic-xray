@@ -1,7 +1,7 @@
 [
   {
     "numa_node": "0",
-    "pci_slot": "0000:19:00",
+    "pci_slot": "Embedded",
     "nic_vendor": "Intel Corporation",
     "nic_model": "Ethernet Controller X710 for 10GbE SFP+",
     "device": "0000:19:00.0",
@@ -19,7 +19,7 @@
   },
   {
     "numa_node": "0",
-    "pci_slot": "0000:19:00",
+    "pci_slot": "Embedded",
     "nic_vendor": "Intel Corporation",
     "nic_model": "Ethernet Controller X710 for 10GbE SFP+",
     "device": "0000:19:00.1",
@@ -37,7 +37,7 @@
   },
   {
     "numa_node": "0",
-    "pci_slot": "0000:19:00",
+    "pci_slot": "Embedded",
     "nic_vendor": "Intel Corporation",
     "nic_model": "Ethernet Controller X710 for 10GbE SFP+",
     "device": "0000:19:00.2",
@@ -55,7 +55,7 @@
   },
   {
     "numa_node": "0",
-    "pci_slot": "0000:19:00",
+    "pci_slot": "Embedded",
     "nic_vendor": "Intel Corporation",
     "nic_model": "Ethernet Controller X710 for 10GbE SFP+",
     "device": "0000:19:00.3",

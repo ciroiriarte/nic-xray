@@ -1,7 +1,7 @@
 Usage: nic-xray.sh [--lacp] [--vlan] [--bmac] [-o|--optics] [-p|--physical] [--all]
        [--no-color] [--filter-link up|down] [-s[SEP]|--separator[=SEP]]
-       [--group-bond] [-m[SEC]|--metrics[=SEC]] [-w[SEC]|--watch[=SEC]]
-       [--output FORMAT] [--diagram-out FILE] [--help]
+       [--group-bond] [--cluster bond|nic] [-m[SEC]|--metrics[=SEC]]
+       [-w[SEC]|--watch[=SEC]] [--output FORMAT] [--diagram-out FILE] [--help]
 
 Version: 2.10.0
 
@@ -27,6 +27,9 @@ Options:
  -sSEP, --separator=SEP
                      Use SEP as column separator in table and CSV output
  --group-bond        Sort rows by bond group, then by interface name
+ --cluster MODE      Diagram clustering mode: bond (default) or nic
+                     bond: group interfaces by bond membership
+                     nic: group by NUMA node and PCI slot (auto-enables -p)
  -w, --watch         Watch mode: refresh display continuously (default: 5s)
  -wSEC, --watch=SEC  Set refresh interval in seconds (1-3600)
                      Combines with --metrics: sampling duration = watch interval
