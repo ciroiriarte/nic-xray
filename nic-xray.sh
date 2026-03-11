@@ -2566,11 +2566,30 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
     fi
     SEP_WIDTH=$((SEP_WIDTH + COL_GAP_WIDTH + COL_W_SWITCH + COL_GAP_WIDTH + COL_W_PORT + COL_GAP_WIDTH + COL_W_PORT_DESCR))
     printf '%*s\n' "$SEP_WIDTH" '' | tr ' ' '-'
-    # Data rows
+    # Data rows (suppress repeated physical columns for visual grouping)
+    local _PREV_NUMA="" _PREV_SLOT="" _PREV_VENDOR="" _PREV_MODEL=""
     for i in "${RENDER_ORDER[@]}"; do
         if ${SHOW_PHYSICAL}; then
+            local _CUR_NUMA="${DATA_NUMA[$i]}" _CUR_SLOT="${DATA_PCI_SLOT[$i]}"
+            local _CUR_VENDOR="${DATA_NIC_VENDOR[$i]}" _CUR_MODEL="${DATA_NIC_MODEL[$i]}"
+            local _SHOW_NUMA="$_CUR_NUMA" _SHOW_SLOT="$_CUR_SLOT"
+            local _SHOW_VENDOR="$_CUR_VENDOR" _SHOW_MODEL="$_CUR_MODEL"
+            if [[ "$_CUR_NUMA" != "$_PREV_NUMA" ]]; then
+                # New NUMA boundary: show all values
+                _PREV_NUMA="$_CUR_NUMA"; _PREV_SLOT="$_CUR_SLOT"
+                _PREV_VENDOR="$_CUR_VENDOR"; _PREV_MODEL="$_CUR_MODEL"
+            elif [[ "$_CUR_SLOT" != "$_PREV_SLOT" ]]; then
+                # New slot boundary: suppress NUMA, show slot/vendor/model
+                _SHOW_NUMA=""
+                _PREV_SLOT="$_CUR_SLOT"
+                _PREV_VENDOR="$_CUR_VENDOR"; _PREV_MODEL="$_CUR_MODEL"
+            else
+                # Same slot: suppress NUMA/slot/vendor/model
+                _SHOW_NUMA=""; _SHOW_SLOT=""
+                _SHOW_VENDOR=""; _SHOW_MODEL=""
+            fi
             printf "%-${COL_W_NUMA}s${COL_GAP}%-${COL_W_PCI_SLOT}s${COL_GAP}%-${COL_W_NIC_VENDOR}s${COL_GAP}%-${COL_W_NIC_MODEL}s${COL_GAP}" \
-                "${DATA_NUMA[$i]}" "${DATA_PCI_SLOT[$i]}" "${DATA_NIC_VENDOR[$i]}" "${DATA_NIC_MODEL[$i]}"
+                "$_SHOW_NUMA" "$_SHOW_SLOT" "$_SHOW_VENDOR" "$_SHOW_MODEL"
         fi
         printf "%-${COL_W_DEVICE}s${COL_GAP}%-${COL_W_DRIVER}s${COL_GAP}%-${COL_W_FIRMWARE}s${COL_GAP}%-${COL_W_IFACE}s${COL_GAP}%-${COL_W_MAC}s${COL_GAP}%-${COL_W_MTU}s${COL_GAP}" \
             "${DATA_DEVICE[$i]}" "${DATA_DRIVER[$i]}" "${DATA_FIRMWARE[$i]}" "${DATA_IFACE[$i]}" "${DATA_MAC[$i]}" "${DATA_MTU[$i]}"
