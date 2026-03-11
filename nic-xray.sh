@@ -101,12 +101,13 @@ SHOW_METRICS=false
 METRICS_DURATION=30
 SHOW_OPTICS=false
 SHOW_PHYSICAL=false
+CLUSTER_MODE="bond"
 WATCH_MODE=false
 WATCH_INTERVAL=5
 
 
 # Parse options using getopt
-if ! OPTIONS=$(getopt -o hvs::m::ow::p --long help,version,lacp,vlan,bmac,optics,physical,separator::,group-bond,output:,no-color,all,filter-link:,diagram-out:,metrics::,watch:: -n "$0" -- "$@"); then
+if ! OPTIONS=$(getopt -o hvs::m::ow::p --long help,version,lacp,vlan,bmac,optics,physical,separator::,group-bond,output:,no-color,all,filter-link:,diagram-out:,metrics::,watch::,cluster: -n "$0" -- "$@"); then
 	echo "Failed to parse options." >&2
 	exit 1
 fi
@@ -199,6 +200,18 @@ while true; do
 			SORT_BY_BOND=true
 			shift
 			;;
+		--cluster)
+			case "$2" in
+				bond|nic)
+					CLUSTER_MODE="$2"
+					;;
+				*)
+					echo "Invalid cluster mode: $2. Choose 'bond' or 'nic'." >&2
+					exit 1
+					;;
+			esac
+			shift 2
+			;;
 		--diagram-out)
 			DIAGRAM_OUTPUT_FILE="$2"
 			shift 2
@@ -222,13 +235,13 @@ while true; do
 		-h|--help)
 			echo -e "Usage: $0 [--lacp] [--vlan] [--bmac] [-o|--optics] [-p|--physical] [--all]"
 			echo -e "       [--no-color] [--filter-link up|down] [-s[SEP]|--separator[=SEP]]"
-			echo -e "       [--group-bond] [-m[SEC]|--metrics[=SEC]] [-w[SEC]|--watch[=SEC]]"
-			echo -e "       [--output FORMAT] [--diagram-out FILE] [--help]"
+			echo -e "       [--group-bond] [--cluster bond|nic] [-m[SEC]|--metrics[=SEC]]"
+			echo -e "       [-w[SEC]|--watch[=SEC]] [--output FORMAT] [--diagram-out FILE] [--help]"
 			echo -e ""
 			echo -e "Version: $SCRIPT_VERSION"
 			echo -e ""
 			echo -e "Description:"
-		echo -e " Lists physical network interfaces with detailed information including:"
+			echo -e " Lists physical network interfaces with detailed information including:"
 			echo -e " PCI slot, driver, firmware, MAC, MTU, link, speed/duplex, bond membership,"
 			echo -e " LLDP peer info, and optionally LACP status, VLAN tagging, SFP optics,"
 			echo -e " and physical topology (NUMA node, PCI slot, NIC vendor/model)."
@@ -240,7 +253,7 @@ while true; do
 			echo -e " -o, --optics        Show SFP/QSFP transceiver diagnostics (Tx/Rx power, health)"
 			echo -e "                     Health status: OK (green), WARN (yellow), ALARM (red),"
 			echo -e "                     N/DOM (no DOM data), N/A (no SFP or copper)"
-		echo -e " -p, --physical      Show physical topology: NUMA node, PCI slot, NIC vendor/model"
+			echo -e " -p, --physical      Show physical topology: NUMA node, PCI slot, NIC vendor/model"
 			echo -e "                     Useful for NUMA affinity analysis and PCIe placement"
 			echo -e " --all               Enable all optional columns (--lacp --vlan --bmac --optics --physical)"
 			echo -e " --no-color          Disable color output (auto-disabled for non-terminal)"
@@ -249,6 +262,9 @@ while true; do
 			echo -e " -sSEP, --separator=SEP"
 			echo -e "                     Use SEP as column separator in table and CSV output"
 			echo -e " --group-bond        Sort rows by bond group, then by interface name"
+			echo -e " --cluster MODE      Diagram clustering mode: bond (default) or nic"
+			echo -e "                     bond: group interfaces by bond membership"
+			echo -e "                     nic: group by NUMA node and PCI slot (auto-enables -p)"
 			echo -e " -w, --watch         Watch mode: refresh display continuously (default: 5s)"
 			echo -e " -wSEC, --watch=SEC  Set refresh interval in seconds (1-3600)"
 			echo -e "                     Combines with --metrics: sampling duration = watch interval"
@@ -295,6 +311,11 @@ fi
 # When watch + metrics combined, use watch interval as metrics duration
 if $WATCH_MODE && $SHOW_METRICS; then
     METRICS_DURATION="$WATCH_INTERVAL"
+fi
+
+# --cluster nic auto-enables --physical data collection
+if [[ "$CLUSTER_MODE" == "nic" ]]; then
+    SHOW_PHYSICAL=true
 fi
 
 # --- Diagram format setup ---
@@ -2146,6 +2167,14 @@ DOTHEADER
             "$_INDENT2" "$SUBTEXT_COLOR" "$(dot_escape "$_MAC")"
         printf '%s<TR><TD><FONT POINT-SIZE="9" COLOR="%s">MTU: %s</FONT></TD></TR>\n' \
             "$_INDENT2" "$SUBTEXT_COLOR" "$(dot_escape "$_MTU")"
+        if $SHOW_PHYSICAL && [[ "$CLUSTER_MODE" == "bond" ]]; then
+            local _NIC_M="${DATA_NIC_MODEL[$_IDX]}"
+            local _NIC_S="${DATA_PCI_SLOT[$_IDX]}"
+            [[ -n "$_NIC_M" ]] && printf '%s<TR><TD><FONT POINT-SIZE="8" COLOR="%s">%s</FONT></TD></TR>\n' \
+                "$_INDENT2" "$SUBTEXT_COLOR" "$(dot_escape "$_NIC_M")"
+            [[ -n "$_NIC_S" ]] && printf '%s<TR><TD><FONT POINT-SIZE="8" COLOR="%s">%s</FONT></TD></TR>\n' \
+                "$_INDENT2" "$SUBTEXT_COLOR" "$(dot_escape "$_NIC_S")"
+        fi
         if $SHOW_OPTICS; then
             _dot_optics_rows "$_IDX" "$_INDENT2"
         fi
@@ -2168,55 +2197,56 @@ DOTHEADER
         fi
     }
 
-    # --- Bond clusters with member interface nodes ---
-    local CLUSTER_IDX=0
-    for BOND_NAME in $(printf '%s\n' "${!BOND_MEMBERS[@]}" | sort); do
-        local -a MEMBERS_ARR
-        read -ra MEMBERS_ARR <<< "${BOND_MEMBERS[$BOND_NAME]}"
-        local BOND_CLR="${BOND_COLOR_MAP[$BOND_NAME]}"
+    if [[ "$CLUSTER_MODE" == "bond" ]]; then
+        # --- Bond clusters with member interface nodes ---
+        local CLUSTER_IDX=0
+        for BOND_NAME in $(printf '%s\n' "${!BOND_MEMBERS[@]}" | sort); do
+            local -a MEMBERS_ARR
+            read -ra MEMBERS_ARR <<< "${BOND_MEMBERS[$BOND_NAME]}"
+            local BOND_CLR="${BOND_COLOR_MAP[$BOND_NAME]}"
 
-        # Determine LACP status label for the bond
-        local LACP_LABEL=""
-        for IDX in "${MEMBERS_ARR[@]}"; do
-            local LACP="${DATA_LACP_PLAIN[$IDX]}"
-            if [[ "$LACP" == *"Mismatch"* ]]; then
-                LACP_LABEL="LACP Mismatch"
-                break
-            elif [[ "$LACP" == AggID* && "$LACP" != *"Partial"* ]]; then
-                LACP_LABEL="LACP Active"
-            elif [[ "$LACP" == *"Partial"* && "$LACP_LABEL" != "LACP Active" ]]; then
-                LACP_LABEL="LACP Partial"
-            elif [[ "$LACP" == "Pending" && -z "$LACP_LABEL" ]]; then
-                LACP_LABEL="LACP Pending"
-            fi
+            # Determine LACP status label for the bond
+            local LACP_LABEL=""
+            for IDX in "${MEMBERS_ARR[@]}"; do
+                local LACP="${DATA_LACP_PLAIN[$IDX]}"
+                if [[ "$LACP" == *"Mismatch"* ]]; then
+                    LACP_LABEL="LACP Mismatch"
+                    break
+                elif [[ "$LACP" == AggID* && "$LACP" != *"Partial"* ]]; then
+                    LACP_LABEL="LACP Active"
+                elif [[ "$LACP" == *"Partial"* && "$LACP_LABEL" != "LACP Active" ]]; then
+                    LACP_LABEL="LACP Partial"
+                elif [[ "$LACP" == "Pending" && -z "$LACP_LABEL" ]]; then
+                    LACP_LABEL="LACP Pending"
+                fi
+            done
+            [[ -z "$LACP_LABEL" ]] && LACP_LABEL="Bonded"
+
+            printf '    subgraph cluster_bond_%d {\n' "$CLUSTER_IDX"
+            printf '        style=dashed;\n'
+            printf '        color="%s";\n' "$BOND_CLR"
+            printf '        bgcolor="%s";\n' "${BG_COLOR}cc"
+            printf '        fontcolor="%s";\n' "$BOND_CLR"
+            printf '        label=<<FONT POINT-SIZE="12"><B>%s</B> (%s)</FONT>>;\n' \
+                "$(dot_escape "$BOND_NAME")" "$(dot_escape "$LACP_LABEL")"
+            printf '        penwidth=1.5;\n\n'
+
+            for IDX in "${MEMBERS_ARR[@]}"; do
+                _dot_nic_node "$IDX" "        "
+            done
+
+            printf '    }\n\n'
+            ((CLUSTER_IDX++))
         done
-        [[ -z "$LACP_LABEL" ]] && LACP_LABEL="Bonded"
 
-        printf '    subgraph cluster_bond_%d {\n' "$CLUSTER_IDX"
-        printf '        style=dashed;\n'
-        printf '        color="%s";\n' "$BOND_CLR"
-        printf '        bgcolor="%s";\n' "${BG_COLOR}cc"
-        printf '        fontcolor="%s";\n' "$BOND_CLR"
-        printf '        label=<<FONT POINT-SIZE="12"><B>%s</B> (%s)</FONT>>;\n' \
-            "$(dot_escape "$BOND_NAME")" "$(dot_escape "$LACP_LABEL")"
-        printf '        penwidth=1.5;\n\n'
-
-        for IDX in "${MEMBERS_ARR[@]}"; do
-            _dot_nic_node "$IDX" "        "
+        # --- Standalone interface nodes ---
+        for IDX in "${STANDALONE_INDICES[@]}"; do
+            _dot_nic_node "$IDX" "    "
+            printf '\n'
         done
 
-        printf '    }\n\n'
-        ((CLUSTER_IDX++))
-    done
-
-    # --- Standalone interface nodes ---
-    for IDX in "${STANDALONE_INDICES[@]}"; do
-        _dot_nic_node "$IDX" "    "
-        printf '\n'
-    done
-
-    # --- Physical topology: NUMA clusters with PCI slot clusters and NIC card nodes ---
-    if $SHOW_PHYSICAL; then
+    else
+        # --- NIC clustering: NUMA -> PCI Slot -> NIC card -> interface port nodes ---
         # Collect PCI slot -> row indices and PCI slot -> NUMA mappings
         declare -A _SLOT_INDICES   # pci_slot -> space-separated row indices
         declare -A _SLOT_NUMA      # pci_slot -> numa_id
@@ -2282,7 +2312,13 @@ DOTHEADER
                         "$SUBTEXT_COLOR" "$(dot_escape "$_NIC_FW")"
                 fi
                 printf '                </TABLE>\n'
-                printf '            >];\n'
+                printf '            >];\n\n'
+
+                # Interface port nodes inside NIC cluster
+                for IDX in "${_SLOT_ROWS[@]}"; do
+                    _dot_nic_node "$IDX" "            "
+                done
+
                 printf '        }\n\n'
                 ((_PCI_CLUSTER_IDX++))
             done
@@ -2379,8 +2415,8 @@ DOTHEADER
         printf '    >];\n\n'
     fi
 
-    # --- Edges: server -> interfaces (or server -> NIC -> interfaces when --physical) ---
-    if $SHOW_PHYSICAL; then
+    # --- Edges: server -> interfaces (or server -> NIC -> interfaces when --cluster nic) ---
+    if [[ "$CLUSTER_MODE" == "nic" ]]; then
         # Server -> NIC card nodes (deduplicated per PCI slot)
         declare -A _EMITTED_SERVER_NIC_EDGES
         for ((i = 0; i < ROW_COUNT; i++)); do
