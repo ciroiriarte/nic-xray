@@ -14,6 +14,10 @@ _nic_xray() {
 			COMPREPLY=($(compgen -W "up down" -- "$cur"))
 			return
 			;;
+		--cluster)
+			COMPREPLY=($(compgen -W "bond nic" -- "$cur"))
+			return
+			;;
 		--diagram-out)
 			_filedir
 			return
@@ -43,6 +47,7 @@ _nic_xray() {
 			--all
 			--no-color
 			--group-bond
+			--cluster
 			--output
 			--filter-link
 			--diagram-out
