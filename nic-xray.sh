@@ -1602,6 +1602,7 @@ COL_W_PORT_DESCR=$(max_width "Port Descr" "${DATA_PORT_DESCR[@]}")
 if $SHOW_PHYSICAL; then
     COL_W_NUMA=$(max_width "NUMA" "${DATA_NUMA[@]}")
     COL_W_PCI_SLOT=$(max_width "PCI Slot" "${DATA_PCI_SLOT[@]}")
+    COL_W_NIC_VENDOR=$(max_width "NIC Vendor" "${DATA_NIC_VENDOR[@]}")
     COL_W_NIC_MODEL=$(max_width "NIC Model" "${DATA_NIC_MODEL[@]}")
 fi
 
@@ -2490,8 +2491,8 @@ render_output() {
 if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
     # Header
     if ${SHOW_PHYSICAL}; then
-        printf "%-${COL_W_NUMA}s${COL_GAP}%-${COL_W_PCI_SLOT}s${COL_GAP}%-${COL_W_NIC_MODEL}s${COL_GAP}" \
-            "NUMA" "PCI Slot" "NIC Model"
+        printf "%-${COL_W_NUMA}s${COL_GAP}%-${COL_W_PCI_SLOT}s${COL_GAP}%-${COL_W_NIC_VENDOR}s${COL_GAP}%-${COL_W_NIC_MODEL}s${COL_GAP}" \
+            "NUMA" "PCI Slot" "NIC Vendor" "NIC Model"
     fi
     printf "%-${COL_W_DEVICE}s${COL_GAP}%-${COL_W_DRIVER}s${COL_GAP}%-${COL_W_FIRMWARE}s${COL_GAP}%-${COL_W_IFACE}s${COL_GAP}%-${COL_W_MAC}s${COL_GAP}%-${COL_W_MTU}s${COL_GAP}%-${COL_W_LINK}s${COL_GAP}%-${COL_W_SPEED}s${COL_GAP}%-${COL_W_BOND}s" \
         "Device" "Driver" "Firmware" "Interface" "MAC Address" "MTU" "Link" "Speed/Duplex" "Parent Bond"
@@ -2514,7 +2515,7 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
     # Separator line
     SEP_WIDTH=0
     if ${SHOW_PHYSICAL}; then
-        SEP_WIDTH=$((COL_W_NUMA + COL_GAP_WIDTH + COL_W_PCI_SLOT + COL_GAP_WIDTH + COL_W_NIC_MODEL + COL_GAP_WIDTH))
+        SEP_WIDTH=$((COL_W_NUMA + COL_GAP_WIDTH + COL_W_PCI_SLOT + COL_GAP_WIDTH + COL_W_NIC_VENDOR + COL_GAP_WIDTH + COL_W_NIC_MODEL + COL_GAP_WIDTH))
     fi
     SEP_WIDTH=$((SEP_WIDTH + COL_W_DEVICE + COL_GAP_WIDTH + COL_W_DRIVER + COL_GAP_WIDTH + COL_W_FIRMWARE + COL_GAP_WIDTH + COL_W_IFACE + COL_GAP_WIDTH + COL_W_MAC + COL_GAP_WIDTH + COL_W_MTU + COL_GAP_WIDTH + COL_W_LINK + COL_GAP_WIDTH + COL_W_SPEED + COL_GAP_WIDTH + COL_W_BOND))
     ${SHOW_BMAC} && SEP_WIDTH=$((SEP_WIDTH + COL_GAP_WIDTH + COL_W_BMAC))
@@ -2531,8 +2532,8 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
     # Data rows
     for i in "${RENDER_ORDER[@]}"; do
         if ${SHOW_PHYSICAL}; then
-            printf "%-${COL_W_NUMA}s${COL_GAP}%-${COL_W_PCI_SLOT}s${COL_GAP}%-${COL_W_NIC_MODEL}s${COL_GAP}" \
-                "${DATA_NUMA[$i]}" "${DATA_PCI_SLOT[$i]}" "${DATA_NIC_MODEL[$i]}"
+            printf "%-${COL_W_NUMA}s${COL_GAP}%-${COL_W_PCI_SLOT}s${COL_GAP}%-${COL_W_NIC_VENDOR}s${COL_GAP}%-${COL_W_NIC_MODEL}s${COL_GAP}" \
+                "${DATA_NUMA[$i]}" "${DATA_PCI_SLOT[$i]}" "${DATA_NIC_VENDOR[$i]}" "${DATA_NIC_MODEL[$i]}"
         fi
         printf "%-${COL_W_DEVICE}s${COL_GAP}%-${COL_W_DRIVER}s${COL_GAP}%-${COL_W_FIRMWARE}s${COL_GAP}%-${COL_W_IFACE}s${COL_GAP}%-${COL_W_MAC}s${COL_GAP}%-${COL_W_MTU}s${COL_GAP}" \
             "${DATA_DEVICE[$i]}" "${DATA_DRIVER[$i]}" "${DATA_FIRMWARE[$i]}" "${DATA_IFACE[$i]}" "${DATA_MAC[$i]}" "${DATA_MTU[$i]}"
@@ -2577,7 +2578,7 @@ elif [[ "${OUTPUT_FORMAT}" == "csv" ]]; then
     FS="${FIELD_SEP:-,}"
     # CSV Header
     if ${SHOW_PHYSICAL}; then
-        printf "%s${FS}%s${FS}%s${FS}" "NUMA" "PCI Slot" "NIC Model"
+        printf "%s${FS}%s${FS}%s${FS}%s${FS}" "NUMA" "PCI Slot" "NIC Vendor" "NIC Model"
     fi
     printf "%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" "Device" "Driver" "Firmware" "Interface" "MAC Address" "MTU" "Link" "Speed/Duplex" "Parent Bond"
     ${SHOW_BMAC} && printf "${FS}%s" "Bond MAC"
@@ -2598,8 +2599,8 @@ elif [[ "${OUTPUT_FORMAT}" == "csv" ]]; then
     # CSV Data rows
     for i in "${RENDER_ORDER[@]}"; do
         if ${SHOW_PHYSICAL}; then
-            printf "%s${FS}%s${FS}%s${FS}" \
-                "${DATA_NUMA[$i]}" "${DATA_PCI_SLOT[$i]}" "${DATA_NIC_MODEL[$i]}"
+            printf "%s${FS}%s${FS}%s${FS}%s${FS}" \
+                "${DATA_NUMA[$i]}" "${DATA_PCI_SLOT[$i]}" "${DATA_NIC_VENDOR[$i]}" "${DATA_NIC_MODEL[$i]}"
         fi
         printf "%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
             "${DATA_DEVICE[$i]}" "${DATA_DRIVER[$i]}" "${DATA_FIRMWARE[$i]}" "${DATA_IFACE[$i]}" "${DATA_MAC[$i]}" \
