@@ -74,6 +74,8 @@ Originally developed for OpenStack node deployments, it is suitable for any Linu
 | | DOT / SVG / PNG | Network topology diagrams (Catppuccin Mocha theme) |
 | **Filtering** | Link filter | Show only up or down interfaces |
 | | Bond grouping | Sort and group rows by bond membership |
+| | Physical sorting | Sort by NUMA → PCI slot → interface (with `--physical`) |
+| | Diagram clustering | `--cluster bond` (default) or `--cluster nic` for DOT |
 | | Color control | Auto-detect TTY, `--no-color` override |
 
 ## ⚙️ Requirements
@@ -215,6 +217,7 @@ sudo nic-xray.sh --all --output json               # All columns as JSON
 sudo nic-xray.sh --output dot > topology.dot                   # DOT source
 sudo nic-xray.sh --output svg                                  # SVG diagram
 sudo nic-xray.sh --output png --diagram-out /tmp/network.png   # PNG with custom path
+sudo nic-xray.sh --cluster nic --output svg                    # Physical layout (NUMA/slot clusters)
 ```
 
 ### Formatting
@@ -254,11 +257,11 @@ Device         Driver      Firmware                 Interface   MAC Address     
 
 ```
 $ sudo nic-xray.sh --all -s
-NUMA │ PCI Slot    │ NIC Model                                  │ Device       │ Driver    │ Firmware               │ Interface │ MAC Address       │ MTU  │ Link │ Speed/Duplex     │ Parent Bond │ Bond MAC          │ LACP Status                    │ VLAN                │ SFP Type   │ Optics Tx │ Optics Rx    │ Switch Name                 │ Port Name        │ Port Descr
------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-0    │ 0000:19:00  │ Ethernet Controller X710 for 10GbE SFP+    │ 0000:19:00.0 │ i40e      │ 9.50 0x8000f25e 23.0.8 │ eno1np0   │ XX:XX:XX:XX:XX:01 │ 9100 │ up   │ 10000Mb/s (Full) │ bond0       │ XX:XX:XX:XX:XX:01 │ AggID:1 Peer:AA:BB:CC:DD:EE:01 │ 100;101;102;110;111 │ 10GBASE-SR │ -2.36 OK  │ -2.90 OK     │ switch-01.example.net │ ifname xe-0/0/2  │ xe-0/0/2
-0    │ 0000:19:00  │ Ethernet Controller X710 for 10GbE SFP+    │ 0000:19:00.1 │ i40e      │ 9.50 0x8000f25e 23.0.8 │ eno2np1   │ XX:XX:XX:XX:XX:02 │ 9100 │ up   │ 10000Mb/s (Full) │ bond1       │ XX:XX:XX:XX:XX:02 │ AggID:1 Peer:AA:BB:CC:DD:EE:02 │ 200;201;202;211;212 │ 25GBASE-SR │ -0.97 OK  │ -2.79 OK     │ switch-01.example.net │ ifname xe-0/0/3  │ xe-0/0/3
-0    │ 0000:19:00  │ Ethernet Controller X710 for 10GbE SFP+    │ 0000:19:00.2 │ i40e      │ 9.50 0x8000f25e 23.0.8 │ eno3np2   │ XX:XX:XX:XX:XX:03 │ 1500 │ down │ N/A (N/A)        │ None        │ N/A               │ N/A                            │ N/A                 │ 10GBASE-SR │ -2.43 OK  │ -26.78 ALARM │                             │                  │ N/A
+NUMA │ PCI Slot    │ NIC Vendor          │ NIC Model                                  │ Device       │ Driver    │ Firmware               │ Interface │ MAC Address       │ MTU  │ Link │ Speed/Duplex     │ Parent Bond │ Bond MAC          │ LACP Status                    │ VLAN                │ SFP Type   │ Optics Tx │ Optics Rx    │ Switch Name                 │ Port Name        │ Port Descr
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+0    │ Embedded    │ Intel Corporation   │ Ethernet Controller X710 for 10GbE SFP+    │ 0000:19:00.0 │ i40e      │ 9.50 0x8000f25e 23.0.8 │ eno1np0   │ XX:XX:XX:XX:XX:01 │ 9100 │ up   │ 10000Mb/s (Full) │ bond0       │ XX:XX:XX:XX:XX:01 │ AggID:1 Peer:AA:BB:CC:DD:EE:01 │ 100;101;102;110;111 │ 10GBASE-SR │ -2.36 OK  │ -2.90 OK     │ switch-01.example.net │ ifname xe-0/0/2  │ xe-0/0/2
+     │             │                     │                                            │ 0000:19:00.1 │ i40e      │ 9.50 0x8000f25e 23.0.8 │ eno2np1   │ XX:XX:XX:XX:XX:02 │ 9100 │ up   │ 10000Mb/s (Full) │ bond1       │ XX:XX:XX:XX:XX:02 │ AggID:1 Peer:AA:BB:CC:DD:EE:02 │ 200;201;202;211;212 │ 25GBASE-SR │ -0.97 OK  │ -2.79 OK     │ switch-01.example.net │ ifname xe-0/0/3  │ xe-0/0/3
+     │             │                     │                                            │ 0000:19:00.2 │ i40e      │ 9.50 0x8000f25e 23.0.8 │ eno3np2   │ XX:XX:XX:XX:XX:03 │ 1500 │ down │ N/A (N/A)        │ None        │ N/A               │ N/A                            │ N/A                 │ 10GBASE-SR │ -2.43 OK  │ -26.78 ALARM │                             │                  │ N/A
 ...
 ```
 
@@ -278,20 +281,19 @@ Device         Driver   Firmware                 Interface   MAC Address        
 
 ```
 $ sudo nic-xray.sh --physical
-NUMA   PCI Slot      NIC Model                                    Device         Driver      Firmware                 Interface   MAC Address         MTU    Link   Speed/Duplex       Parent Bond   Switch Name                   Port Name          Port Descr
-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-0      0000:19:00    Ethernet Controller X710 for 10GbE SFP+      0000:19:00.0   i40e        9.50 0x8000f25e 23.0.8   eno1np0     XX:XX:XX:XX:XX:01   9100   up     10000Mb/s (Full)   bond0         switch-01.example.net   ifname xe-0/0/2    xe-0/0/2
-0      0000:19:00    Ethernet Controller X710 for 10GbE SFP+      0000:19:00.1   i40e        9.50 0x8000f25e 23.0.8   eno2np1     XX:XX:XX:XX:XX:02   9100   up     10000Mb/s (Full)   bond1         switch-01.example.net   ifname xe-0/0/3    xe-0/0/3
-0      0000:19:00    Ethernet Controller X710 for 10GbE SFP+      0000:19:00.2   i40e        9.50 0x8000f25e 23.0.8   eno3np2     XX:XX:XX:XX:XX:03   1500   down   N/A (N/A)          None                                                           N/A
-0      0000:19:00    Ethernet Controller X710 for 10GbE SFP+      0000:19:00.3   i40e        9.50 0x8000f25e 23.0.8   eno4np3     XX:XX:XX:XX:XX:04   1500   down   N/A (N/A)          None                                                           N/A
-0      PCIe Slot 3   Ethernet Controller XXV710 for 25GbE SFP28   0000:5e:00.0   i40e        9.50 0x8000f251 23.0.8   ens3f0np0   XX:XX:XX:XX:XX:05   9100   up     25000Mb/s (Full)   bond2         switch-01.example.net   ifname et-0/0/38   et-0/0/38
-0      PCIe Slot 3   Ethernet Controller XXV710 for 25GbE SFP28   0000:5e:00.1   i40e        9.50 0x8000f251 23.0.8   ens3f1np1   XX:XX:XX:XX:XX:06   9100   up     25000Mb/s (Full)   bond3         switch-01.example.net   ifname et-0/0/39   et-0/0/39
-1      PCIe Slot 5   Ethernet Controller X710 for 10GbE SFP+      0000:86:00.0   i40e        9.50 0x8000f25d 23.0.8   ens5f0np0   XX:XX:XX:XX:XX:07   9100   up     10000Mb/s (Full)   bond0         switch-02.example.net   ifname xe-0/0/2    xe-0/0/2
+NUMA   PCI Slot      NIC Vendor          NIC Model                                    Device         Driver      Firmware                 Interface   MAC Address         MTU    Link   Speed/Duplex       Parent Bond   Switch Name                   Port Name          Port Descr
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+0      Embedded      Intel Corporation   Ethernet Controller X710 for 10GbE SFP+      0000:19:00.0   i40e        9.50 0x8000f25e 23.0.8   eno1np0     XX:XX:XX:XX:XX:01   9100   up     10000Mb/s (Full)   bond0         switch-01.example.net   ifname xe-0/0/2    xe-0/0/2
+                                                                                      0000:19:00.1   i40e        9.50 0x8000f25e 23.0.8   eno2np1     XX:XX:XX:XX:XX:02   9100   up     10000Mb/s (Full)   bond1         switch-01.example.net   ifname xe-0/0/3    xe-0/0/3
+                                                                                      0000:19:00.2   i40e        9.50 0x8000f25e 23.0.8   eno3np2     XX:XX:XX:XX:XX:03   1500   down   N/A (N/A)          None                                                           N/A
+                                                                                      0000:19:00.3   i40e        9.50 0x8000f25e 23.0.8   eno4np3     XX:XX:XX:XX:XX:04   1500   down   N/A (N/A)          None                                                           N/A
+       PCIe Slot 3   Intel Corporation   Ethernet Controller XXV710 for 25GbE SFP28   0000:5e:00.0   i40e        9.50 0x8000f251 23.0.8   ens3f0np0   XX:XX:XX:XX:XX:05   9100   up     25000Mb/s (Full)   bond2         switch-01.example.net   ifname et-0/0/38   et-0/0/38
+                                                                                      0000:5e:00.1   i40e        9.50 0x8000f251 23.0.8   ens3f1np1   XX:XX:XX:XX:XX:06   9100   up     25000Mb/s (Full)   bond3         switch-01.example.net   ifname et-0/0/39   et-0/0/39
+1      PCIe Slot 5   Intel Corporation   Ethernet Controller X710 for 10GbE SFP+      0000:86:00.0   i40e        9.50 0x8000f25d 23.0.8   ens5f0np0   XX:XX:XX:XX:XX:07   9100   up     10000Mb/s (Full)   bond0         switch-02.example.net   ifname xe-0/0/2    xe-0/0/2
 ...
-N/A    1-14.3:1      Unknown                                      1-14.3:1.0     cdc_ether   CDC Ethernet Device      idrac       XX:XX:XX:XX:XX:0d   1500   up     425Mb/s (Half)     None                                                           N/A
 ```
 
-Shows NUMA node, PCI slot designation (from `dmidecode` when available, raw bus address otherwise), and NIC vendor/model. Interfaces sharing a PCI slot belong to the same physical NIC card.
+Shows NUMA node, PCI slot designation (`Embedded` for onboard NICs, `dmidecode` slot name for add-in cards, raw bus address as fallback), NIC vendor, and NIC model. Interfaces sharing a PCI slot belong to the same physical NIC card. Rows are sorted by NUMA → slot → interface, with repeated values suppressed for visual grouping.
 
 ### Optics diagnostics
 
@@ -313,10 +315,10 @@ Health status: **OK** (within normal range), **WARN** (approaching threshold), *
 
 ```
 $ sudo nic-xray.sh --all --metrics=6
-NUMA   PCI Slot      NIC Model                                    Device         Driver      Firmware                 Interface   MAC Address         MTU    Link   Speed/Duplex       Parent Bond   Bond MAC            LACP Status                      VLAN                  SFP Type     Optics Tx   Optics Rx      Throughput                   Packets/s         Drops       Errors      FIFO Errors   Switch Name                   Port Name          Port Descr
------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-0      0000:19:00    Ethernet Controller X710 for 10GbE SFP+      0000:19:00.0   i40e        9.50 0x8000f25e 23.0.8   eno1np0     XX:XX:XX:XX:XX:01   9100   up     10000Mb/s (Full)   bond0         XX:XX:XX:XX:XX:01   AggID:1 Peer:AA:BB:CC:DD:EE:01   100;101;102;110;111   10GBASE-SR   -2.32 OK    -2.90 OK       Rx:4.5 Kbps Tx:6.0 Kbps       Rx:3 Tx:4         Rx:0 Tx:0   Rx:0 Tx:0   Rx:0 Tx:0     switch-01.example.net   ifname xe-0/0/2    xe-0/0/2
-0      PCIe Slot 3   Ethernet Controller XXV710 for 25GbE SFP28   0000:5e:00.1   i40e        9.50 0x8000f251 23.0.8   ens3f1np1   XX:XX:XX:XX:XX:06   9100   up     25000Mb/s (Full)   bond3         XX:XX:XX:XX:XX:06   AggID:1 Peer:AA:BB:CC:DD:EE:04   502                   25GBASE-SR   -2.79 OK    -2.63 OK       Rx:32.7 Mbps Tx:15.9 Mbps     Rx:2180 Tx:2098   Rx:0 Tx:0   Rx:0 Tx:0   Rx:0 Tx:0     switch-01.example.net   ifname et-0/0/39   et-0/0/39
+NUMA   PCI Slot      NIC Vendor          NIC Model                                    Device         Driver      Firmware                 Interface   MAC Address         MTU    Link   Speed/Duplex       Parent Bond   Bond MAC            LACP Status                      VLAN                  SFP Type     Optics Tx   Optics Rx      Throughput                    Packets/s         Drops       Errors      FIFO Errors   Switch Name                   Port Name          Port Descr
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+0      Embedded      Intel Corporation   Ethernet Controller X710 for 10GbE SFP+      0000:19:00.0   i40e        9.50 0x8000f25e 23.0.8   eno1np0     XX:XX:XX:XX:XX:01   9100   up     10000Mb/s (Full)   bond0         XX:XX:XX:XX:XX:01   AggID:1 Peer:AA:BB:CC:DD:EE:01   100;101;102;110;111   10GBASE-SR   -2.32 OK    -2.90 OK       Rx:4.5 Kbps Tx:6.0 Kbps        Rx:3 Tx:4         Rx:0 Tx:0   Rx:0 Tx:0   Rx:0 Tx:0     switch-01.example.net   ifname xe-0/0/2    xe-0/0/2
+       PCIe Slot 3   Intel Corporation   Ethernet Controller XXV710 for 25GbE SFP28   0000:5e:00.1   i40e        9.50 0x8000f251 23.0.8   ens3f1np1   XX:XX:XX:XX:XX:06   9100   up     25000Mb/s (Full)   bond3         XX:XX:XX:XX:XX:06   AggID:1 Peer:AA:BB:CC:DD:EE:04   502                   25GBASE-SR   -2.79 OK    -2.63 OK       Rx:32.7 Mbps Tx:15.9 Mbps      Rx:2180 Tx:2098   Rx:0 Tx:0   Rx:0 Tx:0   Rx:0 Tx:0     switch-01.example.net   ifname et-0/0/39   et-0/0/39
 ...
 
 📊 Metrics sampled over 6s
@@ -347,9 +349,9 @@ Device,Driver,Firmware,Interface,MAC Address,MTU,Link,Speed/Duplex,Parent Bond,S
 
 ```
 $ sudo nic-xray.sh --all --metrics=6 --output csv
-NUMA,PCI Slot,NIC Model,Device,Driver,Firmware,Interface,MAC Address,MTU,Link,Speed/Duplex,Parent Bond,Bond MAC,LACP Status,VLAN,SFP Type,SFP Vendor,Wavelength,Tx Power (dBm),Tx Status,Rx Power (dBm),Rx Status,Lane Count,Rx Bits/s,Tx Bits/s,Rx Packets/s,Tx Packets/s,Rx Drops,Tx Drops,Rx Errors,Tx Errors,Rx FIFO Errors,Tx FIFO Errors,Sample Duration,Switch Name,Port Name,Port Descr
-0,0000:19:00,Ethernet Controller X710 for 10GbE SFP+,0000:19:00.0,i40e,9.50 0x8000f25e 23.0.8,eno1np0,XX:XX:XX:XX:XX:01,9100,up,10000Mb/s (Full),bond0,XX:XX:XX:XX:XX:01,AggID:1 Peer:AA:BB:CC:DD:EE:01,100;101;102;110;111,10GBASE-SR,DELL EMC,850nm,-2.33,OK,-2.91,OK,1,29944,44744,4,6,0,0,0,0,0,0,6,switch-01.example.net,ifname xe-0/0/2,xe-0/0/2
-0,PCIe Slot 3,Ethernet Controller XXV710 for 25GbE SFP28,0000:5e:00.1,i40e,9.50 0x8000f251 23.0.8,ens3f1np1,XX:XX:XX:XX:XX:06,9100,up,25000Mb/s (Full),bond3,XX:XX:XX:XX:XX:06,AggID:1 Peer:AA:BB:CC:DD:EE:04,502,25GBASE-SR,PRECISION,850nm,-2.79,OK,-2.45,OK,1,29774640,10896816,1683,1584,0,0,0,0,0,0,6,switch-01.example.net,ifname et-0/0/39,et-0/0/39
+NUMA,PCI Slot,NIC Vendor,NIC Model,Device,Driver,Firmware,Interface,MAC Address,MTU,Link,Speed/Duplex,Parent Bond,Bond MAC,LACP Status,VLAN,SFP Type,SFP Vendor,Wavelength,Tx Power (dBm),Tx Status,Rx Power (dBm),Rx Status,Lane Count,Rx Bits/s,Tx Bits/s,Rx Packets/s,Tx Packets/s,Rx Drops,Tx Drops,Rx Errors,Tx Errors,Rx FIFO Errors,Tx FIFO Errors,Sample Duration,Switch Name,Port Name,Port Descr
+0,Embedded,Intel Corporation,Ethernet Controller X710 for 10GbE SFP+,0000:19:00.0,i40e,9.50 0x8000f25e 23.0.8,eno1np0,XX:XX:XX:XX:XX:01,9100,up,10000Mb/s (Full),bond0,XX:XX:XX:XX:XX:01,AggID:1 Peer:AA:BB:CC:DD:EE:01,100;101;102;110;111,10GBASE-SR,DELL EMC,850nm,-2.33,OK,-2.91,OK,1,29944,44744,4,6,0,0,0,0,0,0,6,switch-01.example.net,ifname xe-0/0/2,xe-0/0/2
+0,PCIe Slot 3,Intel Corporation,Ethernet Controller XXV710 for 25GbE SFP28,0000:5e:00.1,i40e,9.50 0x8000f251 23.0.8,ens3f1np1,XX:XX:XX:XX:XX:06,9100,up,25000Mb/s (Full),bond3,XX:XX:XX:XX:XX:06,AggID:1 Peer:AA:BB:CC:DD:EE:04,502,25GBASE-SR,PRECISION,850nm,-2.79,OK,-2.45,OK,1,29774640,10896816,1683,1584,0,0,0,0,0,0,6,switch-01.example.net,ifname et-0/0/39,et-0/0/39
 ...
 ```
 
@@ -444,7 +446,7 @@ sudo nic-xray.sh --output svg                    # Render SVG (requires graphviz
 sudo nic-xray.sh --output png                    # Render PNG (requires graphviz)
 ```
 
-The diagram shows server NICs grouped by bond (color-coded), connected to switch ports, with MAC addresses and MTU. VLAN information appears near the NIC end of each link and negotiated speed tier near the switch port end. PVID is bold+underlined to distinguish it from tagged VLANs. Edge thickness scales with link speed. When `--optics` is active, each NIC node includes SFP type and Tx/Rx power levels color-coded by health status. When `--physical` is active, the diagram adds NUMA nodes and PCI slot clusters showing the hardware topology: Server → NUMA → NIC Card → Ports.
+The diagram shows server NICs grouped by bond (color-coded) by default (`--cluster bond`), connected to switch ports, with MAC addresses and MTU. VLAN information appears near the NIC end of each link and negotiated speed tier near the switch port end. PVID is bold+underlined to distinguish it from tagged VLANs. Edge thickness scales with link speed. When `--optics` is active, each NIC node includes SFP type and Tx/Rx power levels color-coded by health status. Use `--cluster nic` to group by physical topology instead (NUMA → PCI slot → NIC card → ports), with bond membership shown via edge colors.
 
 ![Topology diagram](samples/topology.png)
 
@@ -469,4 +471,4 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for gui
 **Ciro Iriarte**
 
 - **Created**: 2025-06-05
-- **Updated**: 2026-03-04
+- **Updated**: 2026-03-10
