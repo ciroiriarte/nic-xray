@@ -1051,8 +1051,10 @@ for _IFACE_PATH in /sys/class/net/*; do
             PHYS_NUMA="N/A"
         fi
         local _PCI_BUS_ADDR="${DEVICE%.*}"
-        # Resolve friendly slot name from dmidecode, fallback to raw bus address
-        if [[ -n "${_DMI_SLOT_CACHE[$_PCI_BUS_ADDR]+x}" ]]; then
+        # Resolve friendly slot name: sysfs label (onboard) -> dmidecode -> raw bus address
+        if [[ -r "$DEVICE_PATH/label" ]]; then
+            PHYS_PCI_SLOT="Embedded"
+        elif [[ -n "${_DMI_SLOT_CACHE[$_PCI_BUS_ADDR]+x}" ]]; then
             PHYS_PCI_SLOT="${_DMI_SLOT_CACHE[$_PCI_BUS_ADDR]}"
         else
             PHYS_PCI_SLOT="$_PCI_BUS_ADDR"
