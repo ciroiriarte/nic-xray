@@ -1644,24 +1644,61 @@ if $SORT_BY_BOND; then
     # Sort bond names
     mapfile -t SORTED_BONDS < <(printf '%s\n' "${UNIQUE_BONDS[@]}" | sort)
 
-    # Append indices for each bond (sorted)
+    # Append indices for each bond, sub-sorted by physical topology when enabled
     for BOND in "${SORTED_BONDS[@]}"; do
-        for ((i = 0; i < ROW_COUNT; i++)); do
-            [[ "${DATA_BOND_PLAIN[$i]}" == "$BOND" ]] && RENDER_ORDER+=("$i")
-        done
+        if $SHOW_PHYSICAL; then
+            declare -a _BOND_PAIRS=()
+            for ((i = 0; i < ROW_COUNT; i++)); do
+                [[ "${DATA_BOND_PLAIN[$i]}" == "$BOND" ]] && \
+                    _BOND_PAIRS+=("$(printf '%s|%s|%s|%d' "${DATA_NUMA[$i]}" "${DATA_PCI_SLOT[$i]}" "${DATA_IFACE[$i]}" "$i")")
+            done
+            mapfile -t _BOND_PAIRS < <(printf '%s\n' "${_BOND_PAIRS[@]}" | sort -t'|' -k1,1 -k2,2 -k3,3)
+            for ENTRY in "${_BOND_PAIRS[@]}"; do
+                RENDER_ORDER+=("${ENTRY##*|}")
+            done
+            unset _BOND_PAIRS
+        else
+            for ((i = 0; i < ROW_COUNT; i++)); do
+                [[ "${DATA_BOND_PLAIN[$i]}" == "$BOND" ]] && RENDER_ORDER+=("$i")
+            done
+        fi
     done
 
-    # Append unbonded interfaces sorted by interface name
+    # Append unbonded interfaces sorted by physical topology or name
     declare -a UNBONDED_PAIRS
     for ((i = 0; i < ROW_COUNT; i++)); do
-        [[ "${DATA_BOND_PLAIN[$i]}" == "None" ]] && UNBONDED_PAIRS+=("${DATA_IFACE[$i]} $i")
+        if [[ "${DATA_BOND_PLAIN[$i]}" == "None" ]]; then
+            if $SHOW_PHYSICAL; then
+                UNBONDED_PAIRS+=("$(printf '%s|%s|%s|%d' "${DATA_NUMA[$i]}" "${DATA_PCI_SLOT[$i]}" "${DATA_IFACE[$i]}" "$i")")
+            else
+                UNBONDED_PAIRS+=("${DATA_IFACE[$i]} $i")
+            fi
+        fi
     done
     if [[ ${#UNBONDED_PAIRS[@]} -gt 0 ]]; then
-        mapfile -t UNBONDED_PAIRS < <(printf '%s\n' "${UNBONDED_PAIRS[@]}" | sort)
-        for ENTRY in "${UNBONDED_PAIRS[@]}"; do
-            RENDER_ORDER+=("${ENTRY##* }")
-        done
+        if $SHOW_PHYSICAL; then
+            mapfile -t UNBONDED_PAIRS < <(printf '%s\n' "${UNBONDED_PAIRS[@]}" | sort -t'|' -k1,1 -k2,2 -k3,3)
+            for ENTRY in "${UNBONDED_PAIRS[@]}"; do
+                RENDER_ORDER+=("${ENTRY##*|}")
+            done
+        else
+            mapfile -t UNBONDED_PAIRS < <(printf '%s\n' "${UNBONDED_PAIRS[@]}" | sort)
+            for ENTRY in "${UNBONDED_PAIRS[@]}"; do
+                RENDER_ORDER+=("${ENTRY##* }")
+            done
+        fi
     fi
+elif $SHOW_PHYSICAL; then
+    # Sort by NUMA -> PCI Slot -> interface name
+    declare -a _PHYS_PAIRS
+    for ((i = 0; i < ROW_COUNT; i++)); do
+        _PHYS_PAIRS+=("$(printf '%s|%s|%s|%d' "${DATA_NUMA[$i]}" "${DATA_PCI_SLOT[$i]}" "${DATA_IFACE[$i]}" "$i")")
+    done
+    mapfile -t _PHYS_PAIRS < <(printf '%s\n' "${_PHYS_PAIRS[@]}" | sort -t'|' -k1,1 -k2,2 -k3,3)
+    for ENTRY in "${_PHYS_PAIRS[@]}"; do
+        RENDER_ORDER+=("${ENTRY##*|}")
+    done
+    unset _PHYS_PAIRS
 else
     for ((i = 0; i < ROW_COUNT; i++)); do
         RENDER_ORDER+=("$i")
