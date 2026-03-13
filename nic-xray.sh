@@ -76,9 +76,9 @@
 #                           colorize_nonzero() helpers
 #                         - Delta clamping via nameref loop
 #
-# Version: 2.9.0
+# Version: 2.10.0
 
-SCRIPT_VERSION="2.9.0"
+SCRIPT_VERSION="2.10.0"
 SCRIPT_YEAR="2026"
 
 # Interface name pattern to skip (virtual, bond masters, etc.)
@@ -459,23 +459,25 @@ watch_sleep() {
     printf '\r%*s\r' 30 '' >&2
 }
 
-# Convert bytes/s to human-readable bandwidth (pure bash)
-human_bandwidth() {
-    local BPS="$1"
-    if (( BPS >= 1073741824 )); then
-        local INT=$((BPS / 1073741824))
-        local FRAC=$(( (BPS % 1073741824) * 10 / 1073741824 ))
-        printf '%d.%d GB/s' "$INT" "$FRAC"
-    elif (( BPS >= 1048576 )); then
-        local INT=$((BPS / 1048576))
-        local FRAC=$(( (BPS % 1048576) * 10 / 1048576 ))
-        printf '%d.%d MB/s' "$INT" "$FRAC"
-    elif (( BPS >= 1024 )); then
-        local INT=$((BPS / 1024))
-        local FRAC=$(( (BPS % 1024) * 10 / 1024 ))
-        printf '%d.%d KB/s' "$INT" "$FRAC"
+# Convert bytes/s to human-readable bitrate with SI decimal prefixes (pure bash)
+# Input: bytes/s (raw sysfs value); output: bits/s with Gbps/Mbps/Kbps/bps labels
+human_bitrate() {
+    local BYTES_PS="$1"
+    local BITS_PS=$(( BYTES_PS * 8 ))
+    if (( BITS_PS >= 1000000000 )); then
+        local INT=$((BITS_PS / 1000000000))
+        local FRAC=$(( (BITS_PS % 1000000000) * 10 / 1000000000 ))
+        printf '%d.%d Gbps' "$INT" "$FRAC"
+    elif (( BITS_PS >= 1000000 )); then
+        local INT=$((BITS_PS / 1000000))
+        local FRAC=$(( (BITS_PS % 1000000) * 10 / 1000000 ))
+        printf '%d.%d Mbps' "$INT" "$FRAC"
+    elif (( BITS_PS >= 1000 )); then
+        local INT=$((BITS_PS / 1000))
+        local FRAC=$(( (BITS_PS % 1000) * 10 / 1000 ))
+        printf '%d.%d Kbps' "$INT" "$FRAC"
     else
-        printf '%d B/s' "$BPS"
+        printf '%d bps' "$BITS_PS"
     fi
 }
 
@@ -1455,8 +1457,8 @@ if $SHOW_METRICS; then
         DATA_MET_TX_FIFO[i]=$D_TX_FIFO
 
         # Plain compound strings for table display
-        RX_BW_STR=$(human_bandwidth "$RX_BPS")
-        TX_BW_STR=$(human_bandwidth "$TX_BPS")
+        RX_BW_STR=$(human_bitrate "$RX_BPS")
+        TX_BW_STR=$(human_bitrate "$TX_BPS")
         DATA_MET_BW_PLAIN[i]="Rx:${RX_BW_STR} Tx:${TX_BW_STR}"
 
         DATA_MET_PPS_PLAIN[i]="Rx:${RX_PPS} Tx:${TX_PPS}"
@@ -1537,8 +1539,8 @@ if $SHOW_METRICS; then
                 # Rebuild the color string for this index
                 case "$METRIC" in
                     RX_BPS)
-                        RX_STR="${RED}$(human_bandwidth "${DATA_MET_RX_BPS[IDX]}")${RESET_COLOR}"
-                        TX_STR=$(human_bandwidth "${DATA_MET_TX_BPS[IDX]}")
+                        RX_STR="${RED}$(human_bitrate "${DATA_MET_RX_BPS[IDX]}")${RESET_COLOR}"
+                        TX_STR=$(human_bitrate "${DATA_MET_TX_BPS[IDX]}")
                         # Preserve TX color if it was already flagged
                         if [[ "${DATA_MET_BW_COLOR[IDX]}" == *$'\033'*"Tx:"* ]]; then
                             TX_PART="${DATA_MET_BW_COLOR[IDX]#*Tx:}"
@@ -1549,7 +1551,7 @@ if $SHOW_METRICS; then
                         ;;
                     TX_BPS)
                         RX_PART="${DATA_MET_BW_COLOR[IDX]%%Tx:*}"
-                        TX_STR="${RED}$(human_bandwidth "${DATA_MET_TX_BPS[IDX]}")${RESET_COLOR}"
+                        TX_STR="${RED}$(human_bitrate "${DATA_MET_TX_BPS[IDX]}")${RESET_COLOR}"
                         DATA_MET_BW_COLOR[IDX]="${RX_PART}Tx:${TX_STR}"
                         ;;
                     RX_PPS)
@@ -1608,7 +1610,7 @@ if $SHOW_OPTICS; then
 fi
 
 if $SHOW_METRICS; then
-    COL_W_MET_BW=$(max_width "Bandwidth" "${DATA_MET_BW_PLAIN[@]}")
+    COL_W_MET_BW=$(max_width "Throughput" "${DATA_MET_BW_PLAIN[@]}")
     COL_W_MET_PPS=$(max_width "Packets/s" "${DATA_MET_PPS_PLAIN[@]}")
     COL_W_MET_DROP=$(max_width "Drops" "${DATA_MET_DROP_PLAIN[@]}")
     COL_W_MET_ERR=$(max_width "Errors" "${DATA_MET_ERR_PLAIN[@]}")
@@ -2063,8 +2065,8 @@ DOTHEADER
     _dot_metrics_rows() {
         local _IDX="$1" _INDENT="$2"
         local _RX_BW _TX_BW _RX_CLR="$SUBTEXT_COLOR" _TX_CLR="$SUBTEXT_COLOR"
-        _RX_BW=$(human_bandwidth "${DATA_MET_RX_BPS[$_IDX]}")
-        _TX_BW=$(human_bandwidth "${DATA_MET_TX_BPS[$_IDX]}")
+        _RX_BW=$(human_bitrate "${DATA_MET_RX_BPS[$_IDX]}")
+        _TX_BW=$(human_bitrate "${DATA_MET_TX_BPS[$_IDX]}")
         # Bond variance detection (harmless for standalone — never contains RED)
         [[ "${DATA_MET_BW_COLOR[$_IDX]}" == *$'\033[1;31m'*"Rx:"* ]] && _RX_CLR="$RED_COLOR"
         [[ "${DATA_MET_BW_COLOR[$_IDX]}" == *"Tx:"*$'\033[1;31m'* ]] && _TX_CLR="$RED_COLOR"
@@ -2500,7 +2502,7 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
         printf "${COL_GAP}%-${COL_W_OPT_RX}s" "Optics Rx"
     fi
     if ${SHOW_METRICS}; then
-        printf "${COL_GAP}%-${COL_W_MET_BW}s" "Bandwidth"
+        printf "${COL_GAP}%-${COL_W_MET_BW}s" "Throughput"
         printf "${COL_GAP}%-${COL_W_MET_PPS}s" "Packets/s"
         printf "${COL_GAP}%-${COL_W_MET_DROP}s" "Drops"
         printf "${COL_GAP}%-${COL_W_MET_ERR}s" "Errors"
@@ -2586,7 +2588,7 @@ elif [[ "${OUTPUT_FORMAT}" == "csv" ]]; then
     fi
     if ${SHOW_METRICS}; then
         printf "${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
-            "Rx Bytes/s" "Tx Bytes/s" "Rx Packets/s" "Tx Packets/s" \
+            "Rx Bits/s" "Tx Bits/s" "Rx Packets/s" "Tx Packets/s" \
             "Rx Drops" "Tx Drops" "Rx Errors" "Tx Errors" \
             "Rx FIFO Errors" "Tx FIFO Errors" "Sample Duration"
     fi
@@ -2612,7 +2614,7 @@ elif [[ "${OUTPUT_FORMAT}" == "csv" ]]; then
         fi
         if ${SHOW_METRICS}; then
             printf "${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
-                "${DATA_MET_RX_BPS[$i]}" "${DATA_MET_TX_BPS[$i]}" \
+                "$((DATA_MET_RX_BPS[$i] * 8))" "$((DATA_MET_TX_BPS[$i] * 8))" \
                 "${DATA_MET_RX_PPS[$i]}" "${DATA_MET_TX_PPS[$i]}" \
                 "${DATA_MET_RX_DROP[$i]}" "${DATA_MET_TX_DROP[$i]}" \
                 "${DATA_MET_RX_ERR[$i]}" "${DATA_MET_TX_ERR[$i]}" \
@@ -2705,8 +2707,8 @@ elif [[ "${OUTPUT_FORMAT}" == "json" ]]; then
         if ${SHOW_METRICS}; then
             printf ',\n    "metrics": {\n'
             printf '      "sample_duration_seconds": %s,\n' "$METRICS_ELAPSED"
-            printf '      "rx_bytes_per_sec": %s,\n' "${DATA_MET_RX_BPS[$i]}"
-            printf '      "tx_bytes_per_sec": %s,\n' "${DATA_MET_TX_BPS[$i]}"
+            printf '      "rx_bits_per_sec": %s,\n' "$((DATA_MET_RX_BPS[$i] * 8))"
+            printf '      "tx_bits_per_sec": %s,\n' "$((DATA_MET_TX_BPS[$i] * 8))"
             printf '      "rx_packets_per_sec": %s,\n' "${DATA_MET_RX_PPS[$i]}"
             printf '      "tx_packets_per_sec": %s,\n' "${DATA_MET_TX_PPS[$i]}"
             printf '      "rx_drops": %s,\n' "${DATA_MET_RX_DROP[$i]}"

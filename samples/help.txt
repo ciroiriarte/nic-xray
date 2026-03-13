@@ -3,7 +3,7 @@ Usage: nic-xray.sh [--lacp] [--vlan] [--bmac] [-o|--optics] [-p|--physical] [--a
        [--group-bond] [-m[SEC]|--metrics[=SEC]] [-w[SEC]|--watch[=SEC]]
        [--output FORMAT] [--diagram-out FILE] [--help]
 
-Version: 2.9.0
+Version: 2.10.0
 
 Description:
  Lists physical network interfaces with detailed information including:

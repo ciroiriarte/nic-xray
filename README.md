@@ -34,7 +34,7 @@ Detailed physical network interface diagnostics for Linux.
 - Optionally: LACP status, VLAN tagging, bond MAC address
 - SFP/QSFP optical transceiver diagnostics: Tx/Rx power levels, health status (with `--optics`)
 - Physical topology: NUMA node, PCI slot, NIC vendor/model (with `--physical`)
-- Real-time traffic metrics: bandwidth, packets/s, drops, errors, FIFO errors (with `--metrics`)
+- Real-time traffic metrics: throughput, packets/s, drops, errors, FIFO errors (with `--metrics`)
 
 Supports multiple output formats: **table** (default, with dynamic column widths), **CSV**, **JSON**, and **network topology diagrams** (DOT/SVG/PNG).
 
@@ -65,7 +65,7 @@ Originally developed for OpenStack node deployments, it is suitable for any Linu
 | **Physical** (`--physical`) | NUMA node | CPU/memory affinity for each NIC |
 | | PCI slot | Shared PCI slot groups multi-port NICs |
 | | NIC vendor/model | Hardware identification via `lspci` |
-| **Metrics** (`--metrics`) | Bandwidth | Real-time Rx/Tx bytes/s (human-readable) |
+| **Metrics** (`--metrics`) | Throughput | Real-time Rx/Tx bitrate (bps/Kbps/Mbps/Gbps) |
 | | Packets/s | Rx/Tx packet rates |
 | | Drops & errors | Rx/Tx drops, errors, and FIFO errors |
 | **Output** | Table | Dynamic column widths, optional separators |
@@ -313,10 +313,10 @@ Health status: **OK** (within normal range), **WARN** (approaching threshold), *
 
 ```
 $ sudo nic-xray.sh --all --metrics=6
-NUMA   PCI Slot      NIC Model                                    Device         Driver      Firmware                 Interface   MAC Address         MTU    Link   Speed/Duplex       Parent Bond   Bond MAC            LACP Status                      VLAN                  SFP Type     Optics Tx   Optics Rx      Bandwidth                   Packets/s         Drops       Errors      FIFO Errors   Switch Name                   Port Name          Port Descr
+NUMA   PCI Slot      NIC Model                                    Device         Driver      Firmware                 Interface   MAC Address         MTU    Link   Speed/Duplex       Parent Bond   Bond MAC            LACP Status                      VLAN                  SFP Type     Optics Tx   Optics Rx      Throughput                   Packets/s         Drops       Errors      FIFO Errors   Switch Name                   Port Name          Port Descr
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-0      0000:19:00    Ethernet Controller X710 for 10GbE SFP+      0000:19:00.0   i40e        9.50 0x8000f25e 23.0.8   eno1np0     XX:XX:XX:XX:XX:01   9100   up     10000Mb/s (Full)   bond0         XX:XX:XX:XX:XX:01   AggID:1 Peer:AA:BB:CC:DD:EE:01   100;101;102;110;111   10GBASE-SR   -2.32 OK    -2.90 OK       Rx:568 B/s Tx:755 B/s       Rx:3 Tx:4         Rx:0 Tx:0   Rx:0 Tx:0   Rx:0 Tx:0     switch-01.example.net   ifname xe-0/0/2    xe-0/0/2
-0      PCIe Slot 3   Ethernet Controller XXV710 for 25GbE SFP28   0000:5e:00.1   i40e        9.50 0x8000f251 23.0.8   ens3f1np1   XX:XX:XX:XX:XX:06   9100   up     25000Mb/s (Full)   bond3         XX:XX:XX:XX:XX:06   AggID:1 Peer:AA:BB:CC:DD:EE:04   502                   25GBASE-SR   -2.79 OK    -2.63 OK       Rx:3.9 MB/s Tx:1.9 MB/s     Rx:2180 Tx:2098   Rx:0 Tx:0   Rx:0 Tx:0   Rx:0 Tx:0     switch-01.example.net   ifname et-0/0/39   et-0/0/39
+0      0000:19:00    Ethernet Controller X710 for 10GbE SFP+      0000:19:00.0   i40e        9.50 0x8000f25e 23.0.8   eno1np0     XX:XX:XX:XX:XX:01   9100   up     10000Mb/s (Full)   bond0         XX:XX:XX:XX:XX:01   AggID:1 Peer:AA:BB:CC:DD:EE:01   100;101;102;110;111   10GBASE-SR   -2.32 OK    -2.90 OK       Rx:4.5 Kbps Tx:6.0 Kbps       Rx:3 Tx:4         Rx:0 Tx:0   Rx:0 Tx:0   Rx:0 Tx:0     switch-01.example.net   ifname xe-0/0/2    xe-0/0/2
+0      PCIe Slot 3   Ethernet Controller XXV710 for 25GbE SFP28   0000:5e:00.1   i40e        9.50 0x8000f251 23.0.8   ens3f1np1   XX:XX:XX:XX:XX:06   9100   up     25000Mb/s (Full)   bond3         XX:XX:XX:XX:XX:06   AggID:1 Peer:AA:BB:CC:DD:EE:04   502                   25GBASE-SR   -2.79 OK    -2.63 OK       Rx:32.7 Mbps Tx:15.9 Mbps     Rx:2180 Tx:2098   Rx:0 Tx:0   Rx:0 Tx:0   Rx:0 Tx:0     switch-01.example.net   ifname et-0/0/39   et-0/0/39
 ...
 
 📊 Metrics sampled over 6s
@@ -347,9 +347,9 @@ Device,Driver,Firmware,Interface,MAC Address,MTU,Link,Speed/Duplex,Parent Bond,S
 
 ```
 $ sudo nic-xray.sh --all --metrics=6 --output csv
-NUMA,PCI Slot,NIC Model,Device,Driver,Firmware,Interface,MAC Address,MTU,Link,Speed/Duplex,Parent Bond,Bond MAC,LACP Status,VLAN,SFP Type,SFP Vendor,Wavelength,Tx Power (dBm),Tx Status,Rx Power (dBm),Rx Status,Lane Count,Rx Bytes/s,Tx Bytes/s,Rx Packets/s,Tx Packets/s,Rx Drops,Tx Drops,Rx Errors,Tx Errors,Rx FIFO Errors,Tx FIFO Errors,Sample Duration,Switch Name,Port Name,Port Descr
-0,0000:19:00,Ethernet Controller X710 for 10GbE SFP+,0000:19:00.0,i40e,9.50 0x8000f25e 23.0.8,eno1np0,XX:XX:XX:XX:XX:01,9100,up,10000Mb/s (Full),bond0,XX:XX:XX:XX:XX:01,AggID:1 Peer:AA:BB:CC:DD:EE:01,100;101;102;110;111,10GBASE-SR,DELL EMC,850nm,-2.33,OK,-2.91,OK,1,3743,5593,4,6,0,0,0,0,0,0,6,switch-01.example.net,ifname xe-0/0/2,xe-0/0/2
-0,PCIe Slot 3,Ethernet Controller XXV710 for 25GbE SFP28,0000:5e:00.1,i40e,9.50 0x8000f251 23.0.8,ens3f1np1,XX:XX:XX:XX:XX:06,9100,up,25000Mb/s (Full),bond3,XX:XX:XX:XX:XX:06,AggID:1 Peer:AA:BB:CC:DD:EE:04,502,25GBASE-SR,PRECISION,850nm,-2.79,OK,-2.45,OK,1,3721830,1362102,1683,1584,0,0,0,0,0,0,6,switch-01.example.net,ifname et-0/0/39,et-0/0/39
+NUMA,PCI Slot,NIC Model,Device,Driver,Firmware,Interface,MAC Address,MTU,Link,Speed/Duplex,Parent Bond,Bond MAC,LACP Status,VLAN,SFP Type,SFP Vendor,Wavelength,Tx Power (dBm),Tx Status,Rx Power (dBm),Rx Status,Lane Count,Rx Bits/s,Tx Bits/s,Rx Packets/s,Tx Packets/s,Rx Drops,Tx Drops,Rx Errors,Tx Errors,Rx FIFO Errors,Tx FIFO Errors,Sample Duration,Switch Name,Port Name,Port Descr
+0,0000:19:00,Ethernet Controller X710 for 10GbE SFP+,0000:19:00.0,i40e,9.50 0x8000f25e 23.0.8,eno1np0,XX:XX:XX:XX:XX:01,9100,up,10000Mb/s (Full),bond0,XX:XX:XX:XX:XX:01,AggID:1 Peer:AA:BB:CC:DD:EE:01,100;101;102;110;111,10GBASE-SR,DELL EMC,850nm,-2.33,OK,-2.91,OK,1,29944,44744,4,6,0,0,0,0,0,0,6,switch-01.example.net,ifname xe-0/0/2,xe-0/0/2
+0,PCIe Slot 3,Ethernet Controller XXV710 for 25GbE SFP28,0000:5e:00.1,i40e,9.50 0x8000f251 23.0.8,ens3f1np1,XX:XX:XX:XX:XX:06,9100,up,25000Mb/s (Full),bond3,XX:XX:XX:XX:XX:06,AggID:1 Peer:AA:BB:CC:DD:EE:04,502,25GBASE-SR,PRECISION,850nm,-2.79,OK,-2.45,OK,1,29774640,10896816,1683,1584,0,0,0,0,0,0,6,switch-01.example.net,ifname et-0/0/39,et-0/0/39
 ...
 ```
 
@@ -417,8 +417,8 @@ $ sudo nic-xray.sh --all --metrics=6 --output json
     },
     "metrics": {
       "sample_duration_seconds": 6,
-      "rx_bytes_per_sec": 3585,
-      "tx_bytes_per_sec": 828,
+      "rx_bits_per_sec": 28680,
+      "tx_bits_per_sec": 6624,
       "rx_packets_per_sec": 4,
       "tx_packets_per_sec": 5,
       "rx_drops": 0,
@@ -450,7 +450,7 @@ The diagram shows server NICs grouped by bond (color-coded), connected to switch
 
 See also: [`samples/topology.dot`](samples/topology.dot) | [`samples/topology.svg`](samples/topology.svg)
 
-When `--metrics` is active, each NIC node also shows real-time bandwidth (with `↓`/`↑` arrows). If any drops, errors, or FIFO errors are detected during sampling, they are shown in red.
+When `--metrics` is active, each NIC node also shows real-time throughput (with `↓`/`↑` arrows). If any drops, errors, or FIFO errors are detected during sampling, they are shown in red.
 
 ![Topology diagram with metrics](samples/topology-metrics.png)
 

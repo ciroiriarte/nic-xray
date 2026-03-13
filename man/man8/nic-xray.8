@@ -1,6 +1,6 @@
 .\" Man page for nic-xray.sh
 .\" Written in classic troff/groff format
-.TH NIC-XRAY 8 "2026-03-03" "nic-xray 2.9.0" "System Administration Commands"
+.TH NIC-XRAY 8 "2026-03-12" "nic-xray 2.10.0" "System Administration Commands"
 .SH NAME
 nic-xray \- detailed physical network interface diagnostics
 .SH SYNOPSIS
@@ -412,9 +412,10 @@ The following columns are shown when
 .B \-\-metrics
 is used:
 .TP
-.B Bandwidth
-Receive and transmit throughput in human-readable units (B/s, KB/s, MB/s,
-GB/s), computed from the sampling window.
+.B Throughput
+Receive and transmit throughput in human-readable bitrate units (bps, Kbps,
+Mbps, Gbps) with SI decimal (1000-based) prefixes, computed from the sampling
+window.
 .TP
 .B Packets/s
 Receive and transmit packet rates per second.
@@ -472,7 +473,7 @@ with dashed blue borders grouping member interfaces and LACP status label
 with colored border (green=UP, red=DOWN), showing interface name, MAC address, MTU,
 and optionally traffic metrics when
 .B \-\-metrics
-is active: bandwidth with colored direction arrows
+is active: throughput with colored direction arrows
 .RB ( "green \(da" " = Rx," " blue \(ua" " = Tx" ),
 and a red error row if drops, errors, or FIFO errors are detected
 .IP \(bu
@@ -561,7 +562,7 @@ warnings.
 .TP
 .B Metrics
 Drops, errors, and FIFO errors are red when greater than zero. For
-non-active-backup bonds, bandwidth and packet rates are red for members whose
+non-active-backup bonds, throughput and packet rates are red for members whose
 value is below 70% of the maximum within the bond (traffic imbalance).
 .SH REQUIREMENTS
 .B nic-xray.sh
