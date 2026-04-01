@@ -76,9 +76,9 @@
 #                           colorize_nonzero() helpers
 #                         - Delta clamping via nameref loop
 #
-# Version: 2.10.0
+# Version: 2.10.1
 
-SCRIPT_VERSION="2.10.0"
+SCRIPT_VERSION="2.10.1"
 SCRIPT_YEAR="2026"
 
 # Interface name pattern to skip (virtual, bond masters, etc.)

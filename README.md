@@ -97,7 +97,96 @@ Originally developed for OpenStack node deployments, it is suitable for any Linu
 
 ## 📦 Installation
 
-### Script
+### Package (recommended)
+
+Pre-built packages are available for several distributions via the [OBS repository](https://build.opensuse.org/package/show/home:ciriarte:network-tools/nic-xray). The package includes the script, man page, and bash completion.
+
+<details>
+<summary><b>Debian 13</b></summary>
+
+```bash
+echo 'deb http://download.opensuse.org/repositories/home:/ciriarte:/network-tools/Debian_13/ /' | sudo tee /etc/apt/sources.list.d/home:ciriarte:network-tools.list
+curl -fsSL https://download.opensuse.org/repositories/home:ciriarte:network-tools/Debian_13/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/home_ciriarte_network-tools.gpg > /dev/null
+sudo apt update
+sudo apt install nic-xray
+```
+</details>
+
+<details>
+<summary><b>Ubuntu 24.04</b></summary>
+
+```bash
+echo 'deb http://download.opensuse.org/repositories/home:/ciriarte:/network-tools/Ubuntu_24.04/ /' | sudo tee /etc/apt/sources.list.d/home:ciriarte:network-tools.list
+curl -fsSL https://download.opensuse.org/repositories/home:ciriarte:network-tools/Ubuntu_24.04/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/home_ciriarte_network-tools.gpg > /dev/null
+sudo apt update
+sudo apt install nic-xray
+```
+</details>
+
+<details>
+<summary><b>Ubuntu 22.04</b></summary>
+
+```bash
+echo 'deb http://download.opensuse.org/repositories/home:/ciriarte:/network-tools/Ubuntu_22.04/ /' | sudo tee /etc/apt/sources.list.d/home:ciriarte:network-tools.list
+curl -fsSL https://download.opensuse.org/repositories/home:ciriarte:network-tools/Ubuntu_22.04/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/home_ciriarte_network-tools.gpg > /dev/null
+sudo apt update
+sudo apt install nic-xray
+```
+</details>
+
+<details>
+<summary><b>openSUSE Tumbleweed</b></summary>
+
+```bash
+zypper addrepo https://download.opensuse.org/repositories/home:ciriarte:network-tools/openSUSE_Tumbleweed/home:ciriarte:network-tools.repo
+zypper refresh
+zypper install nic-xray
+```
+</details>
+
+<details>
+<summary><b>openSUSE Slowroll</b></summary>
+
+```bash
+zypper addrepo https://download.opensuse.org/repositories/home:ciriarte:network-tools/openSUSE_Slowroll/home:ciriarte:network-tools.repo
+zypper refresh
+zypper install nic-xray
+```
+</details>
+
+<details>
+<summary><b>openSUSE Leap 15.6</b></summary>
+
+```bash
+zypper addrepo https://download.opensuse.org/repositories/home:ciriarte:network-tools/openSUSE_Leap_15.6/home:ciriarte:network-tools.repo
+zypper refresh
+zypper install nic-xray
+```
+</details>
+
+<details>
+<summary><b>Rocky Linux 9</b></summary>
+
+```bash
+cd /etc/yum.repos.d/
+wget https://download.opensuse.org/repositories/home:ciriarte:network-tools/Rocky_9/home:ciriarte:network-tools.repo
+yum install nic-xray
+```
+</details>
+
+<details>
+<summary><b>Rocky Linux 10</b></summary>
+
+```bash
+cd /etc/yum.repos.d/
+wget https://download.opensuse.org/repositories/home:ciriarte:network-tools/Rocky_10/home:ciriarte:network-tools.repo
+yum install nic-xray
+```
+</details>
+
+### Manual
+
+#### Script
 
 Copy to `/usr/local/sbin` for easy access:
 
@@ -106,7 +195,7 @@ sudo cp nic-xray.sh /usr/local/sbin/
 sudo chmod +x /usr/local/sbin/nic-xray.sh
 ```
 
-### Man page
+#### Man page
 
 A man page is available under `man/man8/` for detailed reference (section 8: system administration commands).
 
@@ -130,7 +219,7 @@ After installation, use `man nic-xray` to view the man page.
 sudo make uninstall-man
 ```
 
-### Bash completion
+#### Bash completion
 
 A bash completion script is provided for tab-completion of all options.
 
@@ -152,7 +241,7 @@ sudo make install-completion
 sudo make uninstall-completion
 ```
 
-### lldpd service
+#### lldpd service
 
 Ensure lldpd is running to retrieve LLDP information:
 
@@ -469,4 +558,4 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for gui
 **Ciro Iriarte**
 
 - **Created**: 2025-06-05
-- **Updated**: 2026-03-04
+- **Updated**: 2026-04-01
