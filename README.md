@@ -10,6 +10,7 @@ Detailed physical network interface diagnostics for Linux.
 - [Description](#-description)
 - [Features](#-features)
 - [Requirements](#%EF%B8%8F-requirements)
+- [Apstra Configlet API Snippets](#-apstra-configlet-api-snippets)
 - [Installation](#-installation)
 - [Usage](#-usage)
 - [Output Examples](#-output-examples)
@@ -89,11 +90,109 @@ Originally developed for OpenStack node deployments, it is suitable for any Linu
   - `lspci` (from `pciutils`) — used by `--physical` for NIC vendor/model names; falls back to raw PCI IDs if absent
 - Switch configuration:
   - Switch should advertise LLDP messages
-  - Cisco doesn't include VLAN information by default.
-    Hint:
-    ```bash
+  - **Cisco** — VLAN information is not advertised by default. Enable it with:
+    ```
     lldp tlv-select vlan-name
     ```
+  - **Juniper** — LLDP VLAN advertisement behaviour depends on platform:
+    - **EX series** — By default, Junos LLDP PDUs carry at most **5 VLAN Name TLVs** per
+      interface regardless of how many VLANs are configured. Enable full VLAN advertisement
+      with:
+      ```
+      set protocols lldp interface all transmit-max-vlan-name-tlv
+      ```
+      With standard MTU (1500 B) this allows up to 68 VLANs; with jumbo frames (9192 B) up
+      to 523 VLANs. Reference:
+      [Juniper — Configuring the Maximum Number of VLAN Name TLVs to Transmit](https://www.juniper.net/documentation/us/en/software/junos/multicast-l2/topics/task/layer-2-services-lldp-transmit-max-vlan-name-tlv.html)
+
+      > **Apstra / IP Fabric managed fabrics (EX):** Deploy the above as a configlet.
+      > See [Apstra API snippets](#-apstra-configlet-api-snippets) below.
+
+    - **QFX series** — Uses a different option name than EX. On QFX (confirmed on
+      QFX5120 with Junos 23.4R2), use:
+      ```
+      set protocols lldp interface all transmit-max-vlan-tlv
+      ```
+      > **Apstra / IP Fabric managed fabrics (QFX):** Deploy the above as a configlet.
+      > See [Apstra API snippets](#-apstra-configlet-api-snippets) below.
+
+## 🔌 Apstra Configlet API Snippets
+
+For Juniper Apstra (IP Fabric) managed fabrics, the LLDP VLAN fix can be deployed
+as a configlet via the Apstra REST API.
+
+### 1. Authenticate
+
+```bash
+TOKEN=$(curl -sk -X POST https://<apstra-ip>/api/user/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"<password>"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+```
+
+### 2. Create the configlet in the design catalog
+
+```bash
+curl -sk -X POST https://<apstra-ip>/api/design/configlets \
+  -H "AuthToken: $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "display_name": "LLDP_transmit-max-vlan-tlv",
+    "ref_archs": ["two_stage_l3clos"],
+    "generators": [{
+      "config_style": "junos",
+      "section": "system",
+      "template_text": "protocols {\n    lldp {\n        interface all {\n            transmit-max-vlan-tlv;\n        }\n    }\n}",
+      "negation_template_text": "",
+      "filename": ""
+    }]
+  }'
+```
+
+> **Note:** `transmit-max-vlan-tlv` is the correct option for **QFX** platforms
+> (e.g., QFX5120). On **EX** series use `transmit-max-vlan-name-tlv` instead.
+
+### 3. Assign the configlet to a blueprint
+
+Replace `<blueprint-id>` with your blueprint UUID (found in the Apstra URL or via
+`GET /api/blueprints`).
+
+```bash
+BLUEPRINT_ID="<blueprint-id>"
+
+curl -sk -X POST "https://<apstra-ip>/api/blueprints/${BLUEPRINT_ID}/configlets" \
+  -H "AuthToken: $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "label": "LLDP_transmit-max-vlan-tlv",
+    "condition": "role in [\"leaf\"]",
+    "configlet": {
+      "display_name": "LLDP_transmit-max-vlan-tlv",
+      "generators": [{
+        "config_style": "junos",
+        "section": "system",
+        "template_text": "protocols {\n    lldp {\n        interface all {\n            transmit-max-vlan-tlv;\n        }\n    }\n}",
+        "negation_template_text": "",
+        "filename": ""
+      }]
+    }
+  }'
+```
+
+### 4. Deploy the blueprint
+
+```bash
+# Get current staging version
+STAGING=$(curl -sk -H "AuthToken: $TOKEN" \
+  "https://<apstra-ip>/api/blueprints/${BLUEPRINT_ID}/diff-status" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['staging_version'])")
+
+# Deploy
+curl -sk -X PUT "https://<apstra-ip>/api/blueprints/${BLUEPRINT_ID}/deploy" \
+  -H "AuthToken: $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"version\": ${STAGING}, \"description\": \"Enable LLDP full VLAN advertisement\"}"
+```
 
 ## 📦 Installation
 

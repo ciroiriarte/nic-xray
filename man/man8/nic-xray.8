@@ -1,6 +1,6 @@
 .\" Man page for nic-xray.sh
 .\" Written in classic troff/groff format
-.TH NIC-XRAY 8 "2026-03-12" "nic-xray 2.10.1" "System Administration Commands"
+.TH NIC-XRAY 8 "2026-04-11" "nic-xray 2.10.2" "System Administration Commands"
 .SH NAME
 nic-xray \- detailed physical network interface diagnostics
 .SH SYNOPSIS
@@ -626,6 +626,27 @@ with:
 .PP
 .RS
 .B lldp tlv-select vlan-name
+.RE
+.PP
+On Juniper
+.B EX series
+switches, LLDP PDUs are limited to
+.B 5 VLAN Name TLVs
+per interface by default, regardless of how many VLANs are configured on the
+port. To advertise the full VLAN list (up to 68 VLANs at 1500\~B MTU, up to
+523 at 9192\~B MTU):
+.PP
+.RS
+.B set protocols lldp interface all transmit-max-vlan-name-tlv
+.RE
+.PP
+On Juniper
+.B QFX series
+switches (e.g., QFX5120 running Junos 23.4R2), the option name differs from
+EX series:
+.PP
+.RS
+.B set protocols lldp interface all transmit-max-vlan-tlv
 .RE
 .SH RECOMMENDATIONS
 Copy the script to
