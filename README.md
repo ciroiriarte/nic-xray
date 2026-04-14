@@ -205,7 +205,7 @@ Pre-built packages are available for several distributions via the [OBS reposito
 
 ```bash
 echo 'deb http://download.opensuse.org/repositories/home:/ciriarte:/network-tools/Debian_13/ /' | sudo tee /etc/apt/sources.list.d/home:ciriarte:network-tools.list
-curl -fsSL https://download.opensuse.org/repositories/home:ciriarte:network-tools/Debian_13/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/home_ciriarte_network-tools.gpg > /dev/null
+curl -fsSL https://download.opensuse.org/repositories/home:/ciriarte:/network-tools/Debian_13/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/home_ciriarte_network-tools.gpg > /dev/null
 sudo apt update
 sudo apt install nic-xray
 ```
@@ -216,7 +216,7 @@ sudo apt install nic-xray
 
 ```bash
 echo 'deb http://download.opensuse.org/repositories/home:/ciriarte:/network-tools/Ubuntu_24.04/ /' | sudo tee /etc/apt/sources.list.d/home:ciriarte:network-tools.list
-curl -fsSL https://download.opensuse.org/repositories/home:ciriarte:network-tools/Ubuntu_24.04/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/home_ciriarte_network-tools.gpg > /dev/null
+curl -fsSL https://download.opensuse.org/repositories/home:/ciriarte:/network-tools/Ubuntu_24.04/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/home_ciriarte_network-tools.gpg > /dev/null
 sudo apt update
 sudo apt install nic-xray
 ```
@@ -227,7 +227,7 @@ sudo apt install nic-xray
 
 ```bash
 echo 'deb http://download.opensuse.org/repositories/home:/ciriarte:/network-tools/Ubuntu_22.04/ /' | sudo tee /etc/apt/sources.list.d/home:ciriarte:network-tools.list
-curl -fsSL https://download.opensuse.org/repositories/home:ciriarte:network-tools/Ubuntu_22.04/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/home_ciriarte_network-tools.gpg > /dev/null
+curl -fsSL https://download.opensuse.org/repositories/home:/ciriarte:/network-tools/Ubuntu_22.04/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/home_ciriarte_network-tools.gpg > /dev/null
 sudo apt update
 sudo apt install nic-xray
 ```
@@ -237,7 +237,7 @@ sudo apt install nic-xray
 <summary><b>openSUSE Tumbleweed</b></summary>
 
 ```bash
-zypper addrepo https://download.opensuse.org/repositories/home:ciriarte:network-tools/openSUSE_Tumbleweed/home:ciriarte:network-tools.repo
+zypper addrepo https://download.opensuse.org/repositories/home:/ciriarte:/network-tools/openSUSE_Tumbleweed/home:ciriarte:network-tools.repo
 zypper refresh
 zypper install nic-xray
 ```
@@ -247,7 +247,7 @@ zypper install nic-xray
 <summary><b>openSUSE Slowroll</b></summary>
 
 ```bash
-zypper addrepo https://download.opensuse.org/repositories/home:ciriarte:network-tools/openSUSE_Slowroll/home:ciriarte:network-tools.repo
+zypper addrepo https://download.opensuse.org/repositories/home:/ciriarte:/network-tools/openSUSE_Slowroll/home:ciriarte:network-tools.repo
 zypper refresh
 zypper install nic-xray
 ```
@@ -257,7 +257,7 @@ zypper install nic-xray
 <summary><b>openSUSE Leap 15.6</b></summary>
 
 ```bash
-zypper addrepo https://download.opensuse.org/repositories/home:ciriarte:network-tools/openSUSE_Leap_15.6/home:ciriarte:network-tools.repo
+zypper addrepo https://download.opensuse.org/repositories/home:/ciriarte:/network-tools/openSUSE_Leap_15.6/home:ciriarte:network-tools.repo
 zypper refresh
 zypper install nic-xray
 ```
@@ -268,7 +268,7 @@ zypper install nic-xray
 
 ```bash
 cd /etc/yum.repos.d/
-wget https://download.opensuse.org/repositories/home:ciriarte:network-tools/Rocky_9/home:ciriarte:network-tools.repo
+wget https://download.opensuse.org/repositories/home:/ciriarte:/network-tools/Rocky_9/home:ciriarte:network-tools.repo
 yum install nic-xray
 ```
 </details>
@@ -278,7 +278,7 @@ yum install nic-xray
 
 ```bash
 cd /etc/yum.repos.d/
-wget https://download.opensuse.org/repositories/home:ciriarte:network-tools/Rocky_10/home:ciriarte:network-tools.repo
+wget https://download.opensuse.org/repositories/home:/ciriarte:/network-tools/Rocky_10/home:ciriarte:network-tools.repo
 yum install nic-xray
 ```
 </details>
