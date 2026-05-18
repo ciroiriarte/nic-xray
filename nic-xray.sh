@@ -61,6 +61,11 @@
 #                         - Lane variance detection (>2dB flags outlier channel)
 #                         - Optics supported across all output formats
 #                           (table, CSV, JSON, DOT/SVG/PNG)
+#   - 2026-05-18: v2.10.0 - Added --physical flag: NUMA node, PCI slot, NIC vendor/model
+#                          columns; onboard NIC detection via sysfs device/label
+#                        - Added --cluster bond|nic DOT diagram mode
+#                        - Sort render order by NUMA -> PCI slot -> interface name
+#                        - NIC vendor column added to table, CSV, JSON, DOT outputs
 #   - 2026-03-03: v2.9.0 - Enhanced DOT diagram nodes with hardware/software
 #                         descriptions, serial numbers, and generation timestamp
 #   - 2026-03-03: v2.8.0 - Added --watch mode for continuous refresh during
@@ -254,7 +259,8 @@ while true; do
 			echo -e "                     Health status: OK (green), WARN (yellow), ALARM (red),"
 			echo -e "                     N/DOM (no DOM data), N/A (no SFP or copper)"
 			echo -e " -p, --physical      Show physical topology: NUMA node, PCI slot, NIC vendor/model"
-			echo -e "                     Useful for NUMA affinity analysis and PCIe placement"
+			echo -e "                     NUMA affinity: co-locating NIC and CPU on the same memory"
+			echo -e "                     node reduces latency; useful for PCIe placement analysis"
 			echo -e " --all               Enable all optional columns (--lacp --vlan --bmac --optics --physical)"
 			echo -e " --no-color          Disable color output (auto-disabled for non-terminal)"
 			echo -e " --filter-link TYPE  Show only interfaces with link up or down"
@@ -1671,11 +1677,11 @@ if $SORT_BY_BOND; then
             declare -a _BOND_PAIRS=()
             for ((i = 0; i < ROW_COUNT; i++)); do
                 [[ "${DATA_BOND_PLAIN[$i]}" == "$BOND" ]] && \
-                    _BOND_PAIRS+=("$(printf '%s|%s|%s|%d' "${DATA_NUMA[$i]}" "${DATA_PCI_SLOT[$i]}" "${DATA_IFACE[$i]}" "$i")")
+                    _BOND_PAIRS+=("$(printf '%s\t%s\t%s\t%d' "${DATA_NUMA[$i]}" "${DATA_PCI_SLOT[$i]}" "${DATA_IFACE[$i]}" "$i")")
             done
-            mapfile -t _BOND_PAIRS < <(printf '%s\n' "${_BOND_PAIRS[@]}" | sort -t'|' -k1,1 -k2,2 -k3,3)
+            mapfile -t _BOND_PAIRS < <(printf '%s\n' "${_BOND_PAIRS[@]}" | sort -t$'\t' -k1,1n -k2,2 -k3,3)
             for ENTRY in "${_BOND_PAIRS[@]}"; do
-                RENDER_ORDER+=("${ENTRY##*|}")
+                RENDER_ORDER+=("${ENTRY##*$'\t'}")
             done
             unset _BOND_PAIRS
         else
@@ -1690,7 +1696,7 @@ if $SORT_BY_BOND; then
     for ((i = 0; i < ROW_COUNT; i++)); do
         if [[ "${DATA_BOND_PLAIN[$i]}" == "None" ]]; then
             if $SHOW_PHYSICAL; then
-                UNBONDED_PAIRS+=("$(printf '%s|%s|%s|%d' "${DATA_NUMA[$i]}" "${DATA_PCI_SLOT[$i]}" "${DATA_IFACE[$i]}" "$i")")
+                UNBONDED_PAIRS+=("$(printf '%s\t%s\t%s\t%d' "${DATA_NUMA[$i]}" "${DATA_PCI_SLOT[$i]}" "${DATA_IFACE[$i]}" "$i")")
             else
                 UNBONDED_PAIRS+=("${DATA_IFACE[$i]} $i")
             fi
@@ -1698,9 +1704,9 @@ if $SORT_BY_BOND; then
     done
     if [[ ${#UNBONDED_PAIRS[@]} -gt 0 ]]; then
         if $SHOW_PHYSICAL; then
-            mapfile -t UNBONDED_PAIRS < <(printf '%s\n' "${UNBONDED_PAIRS[@]}" | sort -t'|' -k1,1 -k2,2 -k3,3)
+            mapfile -t UNBONDED_PAIRS < <(printf '%s\n' "${UNBONDED_PAIRS[@]}" | sort -t$'\t' -k1,1n -k2,2 -k3,3)
             for ENTRY in "${UNBONDED_PAIRS[@]}"; do
-                RENDER_ORDER+=("${ENTRY##*|}")
+                RENDER_ORDER+=("${ENTRY##*$'\t'}")
             done
         else
             mapfile -t UNBONDED_PAIRS < <(printf '%s\n' "${UNBONDED_PAIRS[@]}" | sort)
@@ -1713,11 +1719,11 @@ elif $SHOW_PHYSICAL; then
     # Sort by NUMA -> PCI Slot -> interface name
     declare -a _PHYS_PAIRS
     for ((i = 0; i < ROW_COUNT; i++)); do
-        _PHYS_PAIRS+=("$(printf '%s|%s|%s|%d' "${DATA_NUMA[$i]}" "${DATA_PCI_SLOT[$i]}" "${DATA_IFACE[$i]}" "$i")")
+        _PHYS_PAIRS+=("$(printf '%s\t%s\t%s\t%d' "${DATA_NUMA[$i]}" "${DATA_PCI_SLOT[$i]}" "${DATA_IFACE[$i]}" "$i")")
     done
-    mapfile -t _PHYS_PAIRS < <(printf '%s\n' "${_PHYS_PAIRS[@]}" | sort -t'|' -k1,1 -k2,2 -k3,3)
+    mapfile -t _PHYS_PAIRS < <(printf '%s\n' "${_PHYS_PAIRS[@]}" | sort -t$'\t' -k1,1n -k2,2 -k3,3)
     for ENTRY in "${_PHYS_PAIRS[@]}"; do
-        RENDER_ORDER+=("${ENTRY##*|}")
+        RENDER_ORDER+=("${ENTRY##*$'\t'}")
     done
     unset _PHYS_PAIRS
 else
