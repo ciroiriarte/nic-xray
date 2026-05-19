@@ -417,6 +417,17 @@ pad_color() {
     printf "%b%*s" "$TEXT" "$PAD" ""
 }
 
+# Pad plain (non-colored) text to a visual column width.
+# Uses %s+%*s so padding is measured in display columns, not bytes.
+# Required when TEXT may contain multi-byte UTF-8 chars (e.g. —, └─).
+pad_plain() {
+    local TEXT="$1"
+    local WIDTH="$2"
+    local PAD=$(( WIDTH - ${#TEXT} ))
+    (( PAD < 0 )) && PAD=0
+    printf "%s%*s" "$TEXT" "$PAD" ""
+}
+
 # --- Helper: escape string for JSON output ---
 json_escape() {
     local STR="$1"
@@ -1939,7 +1950,25 @@ compute_layout() {
 COL_W_DEVICE=$(max_width "Device" "${DATA_DEVICE[@]}")
 COL_W_DRIVER=$(max_width "Driver" "${DATA_DRIVER[@]}")
 COL_W_FIRMWARE=$(max_width "Firmware" "${DATA_FIRMWARE[@]}")
-COL_W_IFACE=$(max_width "Interface" "${DATA_IFACE[@]}")
+if $SHOW_VIRTUAL; then
+    # Build display names with tree-indent prefix to get the correct visual column width.
+    # Non-root interfaces (those with a known parent) get a "└─ " (3-col) prefix.
+    declare -A _VW_KNOWN
+    for (( _vwi = 0; _vwi < ROW_COUNT; _vwi++ )); do _VW_KNOWN["${DATA_IFACE[$_vwi]}"]=1; done
+    local -a _VW_NAMES=()
+    for (( _vwi = 0; _vwi < ROW_COUNT; _vwi++ )); do
+        local _vwp="${DATA_VIRT_PARENT[$_vwi]}"
+        if [[ -n "$_vwp" && "$_vwp" != "—" && -n "${_VW_KNOWN[$_vwp]+x}" ]]; then
+            _VW_NAMES+=("└─ ${DATA_IFACE[$_vwi]}")
+        else
+            _VW_NAMES+=("${DATA_IFACE[$_vwi]}")
+        fi
+    done
+    COL_W_IFACE=$(max_width "Interface" "${_VW_NAMES[@]}")
+    unset _VW_KNOWN _VW_NAMES _vwi _vwp
+else
+    COL_W_IFACE=$(max_width "Interface" "${DATA_IFACE[@]}")
+fi
 COL_W_MAC=$(max_width "MAC Address" "${DATA_MAC[@]}")
 COL_W_MTU=$(max_width "MTU" "${DATA_MTU[@]}")
 COL_W_LINK=$(max_width "Link" "${DATA_LINK_PLAIN[@]}")
@@ -3108,8 +3137,12 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
                 FRAG) _W_COL="${YELLOW}!${RESET_COLOR}" ;;
                 DROP) _W_COL="${RED}✗${RESET_COLOR}" ;;
             esac
-            printf "%-${COL_W_VIRT_TYPE}s${COL_GAP}%-${COL_W_VIRT_PARENT}s${COL_GAP}%-${COL_W_VIRT_ENCAP}s${COL_GAP}" \
-                "${DATA_VIRT_TYPE[$i]}" "${DATA_VIRT_PARENT[$i]}" "$_ENCAP_DISP"
+            pad_plain "${DATA_VIRT_TYPE[$i]}" "$COL_W_VIRT_TYPE"
+            printf '%s' "${COL_GAP}"
+            pad_plain "${DATA_VIRT_PARENT[$i]}" "$COL_W_VIRT_PARENT"
+            printf '%s' "${COL_GAP}"
+            pad_plain "$_ENCAP_DISP" "$COL_W_VIRT_ENCAP"
+            printf '%s' "${COL_GAP}"
             pad_color "$_W_COL" 1
             printf '%s' "${COL_GAP}"
         fi
@@ -3137,8 +3170,10 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
             FRAG) $SHOW_VIRTUAL && _MTU_CELL="${YELLOW}${DATA_MTU[$i]}${RESET_COLOR}" ;;
             DROP) $SHOW_VIRTUAL && _MTU_CELL="${RED}${DATA_MTU[$i]}${RESET_COLOR}" ;;
         esac
-        printf "%-${COL_W_DEVICE}s${COL_GAP}%-${COL_W_DRIVER}s${COL_GAP}%-${COL_W_FIRMWARE}s${COL_GAP}%-${COL_W_IFACE}s${COL_GAP}%-${COL_W_MAC}s${COL_GAP}" \
-            "${DATA_DEVICE[$i]}" "${DATA_DRIVER[$i]}" "${DATA_FIRMWARE[$i]}" "$_IFACE_DISP" "${DATA_MAC[$i]}"
+        printf "%-${COL_W_DEVICE}s${COL_GAP}%-${COL_W_DRIVER}s${COL_GAP}%-${COL_W_FIRMWARE}s${COL_GAP}" \
+            "${DATA_DEVICE[$i]}" "${DATA_DRIVER[$i]}" "${DATA_FIRMWARE[$i]}"
+        pad_plain "$_IFACE_DISP" "$COL_W_IFACE"
+        printf "${COL_GAP}%-${COL_W_MAC}s${COL_GAP}" "${DATA_MAC[$i]}"
         pad_color "$_MTU_CELL" "$COL_W_MTU"
         printf '%s' "${COL_GAP}"
         pad_color "${DATA_LINK_COLOR[$i]}" "$COL_W_LINK"
