@@ -35,7 +35,10 @@ Detailed physical network interface diagnostics for Linux.
 - Optionally: LACP status, VLAN tagging, bond MAC address
 - SFP/QSFP optical transceiver diagnostics: Tx/Rx power levels, health status (with `--optics`)
 - Physical topology: NUMA node, PCI slot, NIC vendor/model (with `--physical`)
+- Virtual/logical interfaces: VLANs, bridges, tap/tun, VXLAN, GRE, WireGuard, ZeroTier, OvS (with `--virtual`)
+- Bond MTU consistency checking: detects mismatches between members and masters
 - Real-time traffic metrics: throughput, packets/s, drops, errors, FIFO errors (with `--metrics`)
+- MTU color coding: yellow for FRAG risk (effective <1500B), red for DROP risk (effective <576B)
 
 Supports multiple output formats: **table** (default, with dynamic column widths), **CSV**, **JSON**, and **network topology diagrams** (DOT/SVG/PNG).
 
@@ -55,6 +58,7 @@ Originally developed for OpenStack node deployments, it is suitable for any Linu
 | **Bonding** | Bond membership | Parent bond device |
 | | Bond MAC (`--bmac`) | Bridge MAC address of the bond |
 | | LACP status (`--lacp`) | Aggregator ID and LACP partner MAC |
+| | MTU consistency | Checks member-to-master and member-to-member MTU mismatches |
 | **Switching** | LLDP peer | Connected switch name, port, and port description |
 | | Cisco ACI support | Automatic detection of ACI fabric switches via vendor TLVs |
 | | VLAN tagging (`--vlan`) | Tagged VLANs with PVID identification |
@@ -66,6 +70,10 @@ Originally developed for OpenStack node deployments, it is suitable for any Linu
 | **Physical** (`--physical`) | NUMA node | CPU/memory affinity for each NIC |
 | | PCI slot | Shared PCI slot groups multi-port NICs |
 | | NIC vendor/model | Hardware identification via `lspci` |
+| **Virtual** (`--virtual`) | Type | Virtual interface type (VLAN, bridge, tap/tun, VXLAN, GRE, WireGuard, ZeroTier, OvS) |
+| | Parent | Logical parent interface (tree-indented with └─ prefix) |
+| | Encap | Encapsulation overhead in bytes |
+| | W (Warning) | MTU warning: ! (yellow FRAG <1500B), ✗ (red DROP <576B effective) |
 | **Metrics** (`--metrics`) | Throughput | Real-time Rx/Tx bitrate (bps/Kbps/Mbps/Gbps) |
 | | Packets/s | Rx/Tx packet rates |
 | | Drops & errors | Rx/Tx drops, errors, and FIFO errors |
@@ -369,6 +377,7 @@ sudo nic-xray.sh --vlan       # Show VLAN information
 sudo nic-xray.sh --bmac       # Show bond MAC address
 sudo nic-xray.sh --optics     # Show SFP/QSFP transceiver diagnostics
 sudo nic-xray.sh --physical   # Show NUMA node, PCI slot, NIC vendor/model
+sudo nic-xray.sh --virtual    # Show virtual/logical interfaces (VLANs, bridges, tap/tun, VXLAN, etc.)
 ```
 
 ### Traffic metrics

@@ -257,7 +257,7 @@ while true; do
 			echo -e " Lists physical network interfaces with detailed information including:"
 			echo -e " PCI slot, driver, firmware, MAC, MTU, link, speed/duplex, bond membership,"
 			echo -e " LLDP peer info, and optionally LACP status, VLAN tagging, SFP optics,"
-			echo -e " and physical topology (NUMA node, PCI slot, NIC vendor/model)."
+			echo -e " physical topology (NUMA node, PCI slot, NIC vendor/model), and virtual interfaces."
 			echo -e ""
 			echo -e "Options:"
 			echo -e " --lacp              Show LACP Aggregator ID and Partner MAC per interface"
@@ -272,6 +272,10 @@ while true; do
 			echo -e " -V, --virtual       Show virtual/logical interfaces (VLANs 🏷, bridges 🌉, tap/tun 💻,"
 			echo -e "                     VXLAN 🌌, GRE 🚇, WireGuard 🔐, ZeroTier 🛡, OvS bridges 🔀)"
 			echo -e "                     Scope: root network namespace only"
+			echo -e "                     Columns: Type (interface type), Parent (logical parent),"
+			echo -e "                     Encap (encapsulation overhead in bytes)"
+			echo -e "                     Tree-indented child interfaces with └─ prefix"
+			echo -e "                     W column: ! (yellow FRAG <1500B), ✗ (red DROP <576B effective MTU)"
 			echo -e "                     ZeroTier (zt*) MTU 2800 is by design and not flagged as FRAG"
 			echo -e "                     Note: OpenStack Neutron qr-*/qg-* live in per-router namespaces"
 			echo -e "                     and are not visible from the root namespace (out of scope)"
@@ -299,6 +303,12 @@ while true; do
 			echo -e "                     Default: /tmp/nic-xray-<hostname>.{svg,png}"
 			echo -e " -v, --version       Display version information"
 			echo -e " -h, --help          Display this help message"
+			echo -e ""
+			echo -e "Bond MTU Consistency:"
+			echo -e " Bonded interface members are checked for MTU mismatches with the bond"
+			echo -e " master or each other. Mismatches are marked in red with [MISMATCH]."
+			echo -e " MTU column is color-coded: yellow shows FRAG risk (effective <1500B),"
+			echo -e " red shows DROP risk (effective <576B)."
 			exit 0
 			;;
 		--)
