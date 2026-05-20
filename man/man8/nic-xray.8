@@ -10,6 +10,7 @@ nic-xray \- detailed physical network interface diagnostics
 .RI [ \-\-bmac ]
 .RI [ \-o | \-\-optics ]
 .RI [ \-p | \-\-physical ]
+.RI [ \-V | \-\-virtual ]
 .RI [ \-\-all ]
 .RI [ \-\-no\-color ]
 .RI [ \-\-filter\-link
@@ -28,14 +29,15 @@ nic-xray \- detailed physical network interface diagnostics
 .RI [ \-h | \-\-help ]
 .SH DESCRIPTION
 .B nic-xray.sh
-provides a detailed overview of all physical network interfaces on a Linux
-system. It collects and displays PCI slot, driver name, firmware version,
+provides a detailed overview of all physical and virtual network interfaces on
+a Linux system. It collects and displays PCI slot, driver name, firmware version,
 interface name, MAC address, MTU, link status, negotiated speed and duplex,
 bond membership, and LLDP peer information (switch name, port, and port
 description).
 Optionally: LACP status, VLAN tagging, bond MAC address, SFP/QSFP
-optical transceiver diagnostics, and physical topology (NUMA node, PCI slot,
-NIC vendor/model).
+optical transceiver diagnostics, physical topology (NUMA node, PCI slot,
+NIC vendor/model), and virtual interfaces (VLANs, bridges, tap/tun, VXLAN, etc.).
+Performs bond MTU consistency checking to detect mismatches between members.
 With
 .BR \-\-metrics ,
 it can also sample real-time traffic metrics: bandwidth, packets/s, drops,
@@ -116,7 +118,9 @@ For multi-lane modules (QSFP+/QSFP28), the worst-case (minimum) power level
 across all lanes is shown. If lane variance exceeds 2\ dB, the outlier channel
 is flagged (e.g.,
 .BR "Ch3\(da2dB" ).
-Per-lane detail is available in CSV and JSON output.
+JSON output includes per-lane power arrays
+.RB ( tx_lanes_dbm ", " rx_lanes_dbm )
+for full per-channel detail, which is not available in CSV output.
 .TP
 .BR \-p ", " \-\-physical
 Show physical topology information: NUMA node, PCI slot designation, NIC
@@ -142,6 +146,50 @@ name. When combined with
 sorting is by bond group first, then by physical topology within each group.
 .IP
 Useful for NUMA affinity analysis and PCIe placement.
+.TP
+.BR \-V ", " \-\-virtual
+Show virtual and logical interfaces in the root network namespace. Displays:
+VLAN interfaces, bridges, tap/tun devices, veth pairs, VXLAN, Geneve, GRE,
+WireGuard, ZeroTier, and Open vSwitch bridges.
+.IP
+Tree-indented child interfaces are prefixed with
+.B \[u2514]\[u2500]
+to show logical parent-child relationships.
+.IP
+Additional columns shown:
+.RS
+.TP
+.B Type
+Virtual interface type (e.g., vlan, bridge, tun, vxlan, gre, wg, vpn, ovs).
+.TP
+.B Parent
+Logical parent interface name (if applicable).
+.TP
+.B Encap
+Encapsulation overhead in bytes.
+.TP
+.B ! (Warning)
+Per-row MTU warning indicator:
+.B !
+(yellow) indicates FRAG risk with effective MTU < 1500B;
+.B \(tx
+(red) indicates DROP risk with effective MTU < 576B.
+ZeroTier (zt*) MTU of 2800 is by design and not flagged as FRAG.
+.RE
+.IP
+Scope is limited to the root network namespace. OpenStack Neutron routers
+(qr-*, qg-*) and other per-namespace interfaces are not visible.
+.IP
+Can be combined with
+.B \-\-physical
+for a full hardware-to-software stack view.
+.IP
+.B Bond MTU consistency check
+is always performed when bonded interfaces are present. MTU mismatches between
+bond members or between a member and its master are marked in red with
+.B [MISMATCH]
+warning. The MTU column itself is color-coded: yellow for FRAG risk
+(effective < 1500B), red for DROP risk (effective < 576B).
 .TP
 .B \-\-all
 Enable all optional columns. Equivalent to specifying
@@ -278,13 +326,24 @@ but renders in PNG format.
 .RE
 .TP
 .BI \-\-diagram\-out " FILE"
-Set the output file path for
-.B svg
+Set the output file path for diagram output.
+When used with
+.B \-\-output svg
 or
-.B png
-diagram formats. Defaults to
-.IR /tmp/nic\-xray\-<hostname>.{svg,png} .
-Ignored for other output formats.
+.BR \-\-output png ,
+saves the rendered diagram to
+.IR FILE .
+When used with the default table output, the normal table is printed to
+standard output
+.I and
+a PNG diagram is also saved to
+.I FILE
+(requires
+.BR dot (1)
+from graphviz). A confirmation message is printed to standard error.
+Defaults to
+.IR /tmp/nic\-xray\-<hostname>.{svg,png}
+for svg/png formats.
 .TP
 .BR \-v ", " \-\-version
 Display version information and exit.
@@ -422,6 +481,38 @@ NIC model name from
 Falls back to raw PCI device ID when
 .B lspci
 is not available.
+.PP
+The following columns are shown when
+.B \-\-virtual
+is used:
+.TP
+.B Type
+(shown with
+.BR \-\-virtual )
+Virtual interface type (e.g.,
+.IR vlan ", " bridge ", " tun ", " vxlan ", " gre ", " wg ", " vpn ", " ovs ).
+.TP
+.B Parent
+(shown with
+.BR \-\-virtual )
+Name of the logical parent interface, or
+.B \-\-
+for root-level virtual interfaces without a parent.
+.TP
+.B Encap
+(shown with
+.BR \-\-virtual )
+Encapsulation overhead in bytes (e.g., 4 for VLAN 802.1Q, 50 for VXLAN).
+.TP
+.B ! (Warning)
+(shown with
+.BR \-\-virtual )
+Per-row MTU warning indicator.
+.B !
+(yellow) indicates FRAG risk with effective MTU < 1500B;
+.B \(tx
+(red) indicates DROP risk with effective MTU < 576B.
+ZeroTier (zt*) with MTU 2800 is exempt from FRAG warnings.
 .PP
 The following columns are shown when
 .B \-\-optics
@@ -614,6 +705,16 @@ cycling through a palette to visually group member interfaces.
 Green for fully converged, yellow for partial, red for pending or mismatch
 warnings.
 .TP
+.B MTU
+Yellow when effective MTU < 1500B (FRAG risk after encapsulation), red when
+effective MTU < 576B (DROP risk). Follows the logical MTU walk through parent
+interfaces and their encapsulation overhead.
+.TP
+.B Bond MTU mismatches
+Marked in red with
+.B [MISMATCH]
+warning when member-to-member or member-to-master MTU differs.
+.TP
 .B Metrics
 Drops, errors, and FIFO errors are red when greater than zero. For
 non-active-backup bonds, throughput and packet rates are red for members whose
@@ -784,6 +885,24 @@ Show physical topology (NUMA node, PCI slot, NIC model):
 .PP
 .RS
 .B sudo nic-xray.sh \-\-physical
+.RE
+.PP
+Show virtual/logical interfaces (VLANs, bridges, tap/tun, etc.):
+.PP
+.RS
+.B sudo nic-xray.sh \-\-virtual
+.RE
+.PP
+Generate a virtual interface topology diagram (DOT source):
+.PP
+.RS
+.B sudo nic-xray.sh \-\-virtual \-\-output dot > topology-virtual.dot
+.RE
+.PP
+Render virtual interface topology as PNG:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-virtual \-\-output png \-\-diagram\-out /tmp/topology-virtual.png
 .RE
 .PP
 Show all optional columns at once:

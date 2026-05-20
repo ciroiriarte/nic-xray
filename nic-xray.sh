@@ -89,6 +89,9 @@ SCRIPT_YEAR="2026"
 # Interface name pattern to skip (virtual, bond masters, etc.)
 IFACE_SKIP_PATTERN='^(lo|vnet|virbr|br|bond|docker|tap|tun)'
 
+# Interface name pattern to skip when --virtual is active (only hard-skip these)
+VIRTUAL_SKIP_PATTERN='^(lo|ovs-system|bonding_masters)$'
+
 # LOCALE setup, we expect output in English for proper parsing
 LANG=en_US.UTF-8
 
@@ -106,13 +109,14 @@ SHOW_METRICS=false
 METRICS_DURATION=30
 SHOW_OPTICS=false
 SHOW_PHYSICAL=false
+SHOW_VIRTUAL=false
 CLUSTER_MODE="bond"
 WATCH_MODE=false
 WATCH_INTERVAL=5
 
 
 # Parse options using getopt
-if ! OPTIONS=$(getopt -o hvs::m::ow::p --long help,version,lacp,vlan,bmac,optics,physical,separator::,group-bond,output:,no-color,all,filter-link:,diagram-out:,metrics::,watch::,cluster: -n "$0" -- "$@"); then
+if ! OPTIONS=$(getopt -o hvs::m::ow::pV --long help,version,lacp,vlan,bmac,optics,physical,virtual,separator::,group-bond,output:,no-color,all,filter-link:,diagram-out:,metrics::,watch::,cluster: -n "$0" -- "$@"); then
 	echo "Failed to parse options." >&2
 	exit 1
 fi
@@ -142,6 +146,10 @@ while true; do
 			;;
 		-p|--physical)
 			SHOW_PHYSICAL=true
+			shift
+			;;
+		-V|--virtual)
+			SHOW_VIRTUAL=true
 			shift
 			;;
 		-s|--separator)
@@ -238,7 +246,7 @@ while true; do
 			exit 0
 			;;
 		-h|--help)
-			echo -e "Usage: $0 [--lacp] [--vlan] [--bmac] [-o|--optics] [-p|--physical] [--all]"
+			echo -e "Usage: $0 [--lacp] [--vlan] [--bmac] [-o|--optics] [-p|--physical] [-V|--virtual] [--all]"
 			echo -e "       [--no-color] [--filter-link up|down] [-s[SEP]|--separator[=SEP]]"
 			echo -e "       [--group-bond] [--cluster bond|nic] [-m[SEC]|--metrics[=SEC]]"
 			echo -e "       [-w[SEC]|--watch[=SEC]] [--output FORMAT] [--diagram-out FILE] [--help]"
@@ -249,7 +257,7 @@ while true; do
 			echo -e " Lists physical network interfaces with detailed information including:"
 			echo -e " PCI slot, driver, firmware, MAC, MTU, link, speed/duplex, bond membership,"
 			echo -e " LLDP peer info, and optionally LACP status, VLAN tagging, SFP optics,"
-			echo -e " and physical topology (NUMA node, PCI slot, NIC vendor/model)."
+			echo -e " physical topology (NUMA node, PCI slot, NIC vendor/model), and virtual interfaces."
 			echo -e ""
 			echo -e "Options:"
 			echo -e " --lacp              Show LACP Aggregator ID and Partner MAC per interface"
@@ -258,9 +266,21 @@ while true; do
 			echo -e " -o, --optics        Show SFP/QSFP transceiver diagnostics (Tx/Rx power, health)"
 			echo -e "                     Health status: OK (green), WARN (yellow), ALARM (red),"
 			echo -e "                     N/DOM (no DOM data), N/A (no SFP or copper)"
+			echo -e "                     JSON output includes per-lane detail for multi-lane transceivers."
 			echo -e " -p, --physical      Show physical topology: NUMA node, PCI slot, NIC vendor/model"
 			echo -e "                     NUMA affinity: co-locating NIC and CPU on the same memory"
 			echo -e "                     node reduces latency; useful for PCIe placement analysis"
+			echo -e " -V, --virtual       Show virtual/logical interfaces (VLANs 🏷, bridges 🌉, tap/tun 💻,"
+			echo -e "                     VXLAN 🌌, GRE 🚇, WireGuard 🔐, ZeroTier 🛡, OvS bridges 🔀)"
+			echo -e "                     Scope: root network namespace only"
+			echo -e "                     Columns: Type (interface type), Parent (logical parent),"
+			echo -e "                     Encap (encapsulation overhead in bytes)"
+			echo -e "                     Tree-indented child interfaces with └─ prefix"
+			echo -e "                     ! column: ! (yellow FRAG <1500B), ✗ (red DROP <576B effective MTU)"
+			echo -e "                     ZeroTier (zt*) MTU 2800 is by design and not flagged as FRAG"
+			echo -e "                     Note: OpenStack Neutron qr-*/qg-* live in per-router namespaces"
+			echo -e "                     and are not visible from the root namespace (out of scope)"
+			echo -e "                     Can be combined with --physical for a full hardware-to-software stack view."
 			echo -e " --all               Enable all optional columns (--lacp --vlan --bmac --optics --physical)"
 			echo -e " --no-color          Disable color output (auto-disabled for non-terminal)"
 			echo -e " --filter-link TYPE  Show only interfaces with link up or down"
@@ -281,10 +301,19 @@ while true; do
 			echo -e " --output TYPE       Output format: table (default), csv, json, dot, svg, or png"
 			echo -e "                     dot/svg/png generate a network topology diagram"
 			echo -e "                     svg/png require graphviz (dot command)"
-			echo -e " --diagram-out FILE  Output file path for svg/png diagrams"
+			echo -e " --diagram-out FILE  Output file path for diagrams"
+			echo -e "                     With --output svg|png: saves diagram to FILE"
+			echo -e "                     With table output (default): prints table to stdout AND saves"
+			echo -e "                     a PNG diagram to FILE (requires graphviz)"
 			echo -e "                     Default: /tmp/nic-xray-<hostname>.{svg,png}"
 			echo -e " -v, --version       Display version information"
 			echo -e " -h, --help          Display this help message"
+			echo -e ""
+			echo -e "Bond MTU Consistency:"
+			echo -e " Bonded interface members are checked for MTU mismatches with the bond"
+			echo -e " master or each other. Mismatches are marked in red with [MISMATCH]."
+			echo -e " MTU column is color-coded: yellow shows FRAG risk (effective <1500B),"
+			echo -e " red shows DROP risk (effective <576B)."
 			exit 0
 			;;
 		--)
@@ -403,12 +432,44 @@ pad_color() {
     printf "%b%*s" "$TEXT" "$PAD" ""
 }
 
+# Pad plain (non-colored) text to a visual column width.
+# Uses %s+%*s so padding is measured in display columns, not bytes.
+# Required when TEXT may contain multi-byte UTF-8 chars (e.g. —, └─).
+pad_plain() {
+    local TEXT="$1"
+    local WIDTH="$2"
+    local PAD=$(( WIDTH - ${#TEXT} ))
+    (( PAD < 0 )) && PAD=0
+    printf "%s%*s" "$TEXT" "$PAD" ""
+}
+
 # --- Helper: escape string for JSON output ---
 json_escape() {
     local STR="$1"
     STR="${STR//\\/\\\\}"
     STR="${STR//\"/\\\"}"
     printf '%s' "$STR"
+}
+
+# --- Helper: wrap a CSV field value in double-quotes (RFC 4180) ---
+csv_escape() {
+    local V="$1"
+    V="${V//\"/\"\"}"
+    printf '"%s"' "$V"
+}
+
+# --- Helpers: parse speed_mbps and duplex from DATA_SPEED_PLAIN ---
+_parse_speed_mbps() {
+    local S="$1"
+    [[ "$S" =~ ^([0-9]+)Mb/s ]] && printf '%s' "${BASH_REMATCH[1]}" || printf ''
+}
+_parse_duplex() {
+    local S="$1"
+    case "${S,,}" in
+        *full*) printf 'full' ;;
+        *half*) printf 'half' ;;
+        *)      printf '' ;;
+    esac
 }
 
 # --- Helper: compute max width from header label and data values ---
@@ -976,11 +1037,247 @@ declare -a DATA_MET_RX_DROP DATA_MET_TX_DROP
 declare -a DATA_MET_RX_ERR DATA_MET_TX_ERR
 declare -a DATA_MET_RX_FIFO DATA_MET_TX_FIFO
 declare -a DATA_NUMA DATA_PCI_SLOT DATA_NIC_VENDOR DATA_NIC_MODEL
+declare -a DATA_VIRT_TYPE
+declare -a DATA_VIRT_PARENT
+declare -a DATA_VIRT_ENCAP_OVERHEAD
+declare -a DATA_MTU_WARN
+declare -a DATA_VIRT_DEPTH
+declare -a DATA_IS_PHYSICAL
+
+declare -A IFACE_MTU_MAP
+declare -A IFACE_OVERHEAD_MAP
+declare -A IFACE_PARENT_MAP
+declare -A IFACE_EFFECTIVE_MTU
+
 declare -A BOND_MODE_MAP
 declare -A DATA_SWITCH_DESCR
 declare -A DATA_SWITCH_SERIAL
 declare -a RENDER_ORDER
 ROW_COUNT=0
+
+# --- Virtual interface helpers ---
+
+# Build ENUM_IFACES array: single source of truth for interface enumeration.
+# Respects SHOW_VIRTUAL: when true, uses VIRTUAL_SKIP_PATTERN (only lo and ovs-system)
+# rather than IFACE_SKIP_PATTERN which skips all virtual devices.
+enumerate_ifaces() {
+	ENUM_IFACES=()
+	local _SKIP_PAT
+	if $SHOW_VIRTUAL; then
+		_SKIP_PAT="$VIRTUAL_SKIP_PATTERN"
+	else
+		_SKIP_PAT="$IFACE_SKIP_PATTERN"
+	fi
+
+	for _IFACE_PATH in /sys/class/net/*; do
+		local _IFACE="${_IFACE_PATH##*/}"
+		[[ "$_IFACE" =~ $_SKIP_PAT ]] && continue
+
+		if ! $SHOW_VIRTUAL; then
+			# Physical-only gates (existing behavior)
+			[[ "$_IFACE" == *.* ]] && continue
+			[[ ! -e "/sys/class/net/$_IFACE/device" ]] && continue
+		fi
+		ENUM_IFACES+=("$_IFACE")
+	done
+}
+
+# Classify an interface into its virtual type.
+# Sets globals: VIRT_TYPE (type code string), IS_PHYSICAL (true/false)
+detect_virtual_type() {
+	local IFACE="$1"
+	IS_PHYSICAL=false
+	VIRT_TYPE="unknown"
+
+	# Physical gate: presence of the device symlink means a real PCI/USB NIC
+	if [[ -e "/sys/class/net/$IFACE/device" ]]; then
+		IS_PHYSICAL=true
+		VIRT_TYPE="physical"
+		return
+	fi
+
+	# Bond master
+	[[ -f "/proc/net/bonding/$IFACE" ]] && { VIRT_TYPE="bond"; return; }
+
+	# VLAN: /proc/net/vlan entry or uevent DEVTYPE
+	if [[ -r "/proc/net/vlan/$IFACE" ]]; then
+		VIRT_TYPE="vlan"; return
+	fi
+	local _DEVTYPE=""
+	[[ -r "/sys/class/net/$IFACE/uevent" ]] && \
+		_DEVTYPE=$(awk -F= '/^DEVTYPE=/{print $2}' "/sys/class/net/$IFACE/uevent")
+	[[ "$_DEVTYPE" == "vlan" ]] && { VIRT_TYPE="vlan"; return; }
+
+	# OvS bridge (check before plain bridge — OvS bridges also have bridge/ dir)
+	if [[ -d "/sys/class/net/$IFACE/bridge" ]] && command -v ovs-vsctl &>/dev/null; then
+		if ovs-vsctl list-br 2>/dev/null | grep -qx "$IFACE"; then
+			VIRT_TYPE="ovs-br"; return
+		fi
+	fi
+
+	# Linux bridge
+	[[ -d "/sys/class/net/$IFACE/bridge" ]] && { VIRT_TYPE="bridge"; return; }
+
+	# Tun/Tap: tun_flags bit 0 = tap, bit 1 = tun
+	if [[ -r "/sys/class/net/$IFACE/tun_flags" ]]; then
+		local _FLAGS
+		_FLAGS=$(< "/sys/class/net/$IFACE/tun_flags")
+		_FLAGS=$(( 16#${_FLAGS#0x} ))
+		(( (_FLAGS & 0x0001) != 0 )) && { VIRT_TYPE="tap"; return; }
+		VIRT_TYPE="tun"; return
+	fi
+
+	# VXLAN
+	if [[ -d "/sys/class/net/$IFACE/vxlan" || "$_DEVTYPE" == "vxlan" ]]; then
+		VIRT_TYPE="vxlan"; return
+	fi
+
+	# Geneve
+	if [[ -d "/sys/class/net/$IFACE/geneve" || "$_DEVTYPE" == "geneve" ]]; then
+		VIRT_TYPE="geneve"; return
+	fi
+
+	# GRE / IPIP via sysfs type number
+	local _SYSFS_TYPE=0
+	[[ -r "/sys/class/net/$IFACE/type" ]] && _SYSFS_TYPE=$(< "/sys/class/net/$IFACE/type")
+	case "$_SYSFS_TYPE" in
+		778|779|11|768|769|776) VIRT_TYPE="gre"; return ;;
+	esac
+
+	# WireGuard
+	if [[ "$_DEVTYPE" == "wireguard" || -d "/sys/class/net/$IFACE/wireguard" ]]; then
+		VIRT_TYPE="wireguard"; return
+	fi
+
+	# ZeroTier: name = zt + exactly 10 alphanumeric chars
+	if [[ "$IFACE" =~ ^zt[0-9a-zA-Z]{10}$ ]]; then
+		VIRT_TYPE="vpn"; return
+	fi
+
+	# veth: peer_ifindex (newer kernels) or iflink != ifindex without a lower_ device
+	# (macvlan/ipvlan also have iflink != ifindex but expose lower_<dev> symlinks)
+	local _IFIDX _IFLINK
+	_IFIDX=$(cat "/sys/class/net/$IFACE/ifindex" 2>/dev/null)
+	_IFLINK=$(cat "/sys/class/net/$IFACE/iflink" 2>/dev/null)
+	if [[ -r "/sys/class/net/$IFACE/peer_ifindex" ]] || \
+	   { [[ -n "$_IFIDX" && -n "$_IFLINK" && "$_IFIDX" != "$_IFLINK" ]] && \
+	     ! compgen -G "/sys/class/net/$IFACE/lower_*" > /dev/null 2>&1; }; then
+		VIRT_TYPE="veth"; return
+	fi
+
+	# Dummy
+	[[ "$_DEVTYPE" == "dummy" ]] && { VIRT_TYPE="dummy"; return; }
+
+	VIRT_TYPE="virtual"
+}
+
+# Determine the logical parent interface for a virtual device.
+# Sets global: VIRT_PARENT (iface name or "—" when no parent exists)
+detect_virtual_parent() {
+	local IFACE="$1"
+	local TYPE="$2"
+	VIRT_PARENT="—"
+
+	# VLAN: /proc/net/vlan/config is authoritative
+	if [[ "$TYPE" == "vlan" && -r "/proc/net/vlan/config" ]]; then
+		local _P
+		_P=$(awk -v iface="$IFACE" '$1==iface {print $NF}' /proc/net/vlan/config)
+		[[ -n "$_P" ]] && { VIRT_PARENT="$_P"; return; }
+	fi
+
+	# master symlink (bond members, bridge members)
+	if [[ -L "/sys/class/net/$IFACE/master" ]]; then
+		local _MASTER
+		_MASTER=$(basename "$(readlink -f "/sys/class/net/$IFACE/master")")
+		VIRT_PARENT="$_MASTER"; return
+	fi
+
+	# Generic: first lower_* symlink (tunnel underlay: VXLAN, GRE, Geneve, unmatched VLAN)
+	# Skip for bridge/bond/ovs-br: their lower_* are member interfaces, not parents,
+	# and following them creates mutual cycles with the master symlink on the member side.
+	if [[ "$TYPE" != "bridge" && "$TYPE" != "bond" && "$TYPE" != "ovs-br" ]]; then
+		local _LOWER
+		for _LOWER in /sys/class/net/"$IFACE"/lower_*; do
+			[[ -e "$_LOWER" ]] || continue
+			VIRT_PARENT="${_LOWER##*/lower_}"
+			return
+		done
+	fi
+
+	# ZeroTier and WireGuard have no sysfs parent — leave as "—"
+}
+
+# Map virtual type to encapsulation overhead in bytes.
+# Sets global: VIRT_ENCAP (integer)
+compute_encap_overhead() {
+	local TYPE="$1"
+	case "$TYPE" in
+		vlan)      VIRT_ENCAP=4  ;;   # 802.1Q tag
+		vxlan)     VIRT_ENCAP=50 ;;   # 14 ETH + 20 IP + 8 UDP + 8 VXLAN
+		geneve)    VIRT_ENCAP=50 ;;   # minimum; options make it larger
+		gre)       VIRT_ENCAP=24 ;;   # worst-case: 20 IP + 4 GRE min + flags
+		wireguard) VIRT_ENCAP=60 ;;   # 20 IP + 8 UDP + 32 WireGuard header
+		vpn)       VIRT_ENCAP=80 ;;   # ZeroTier approx; documented as estimate
+		bridge|tap|tun|veth|bond|ovs-br|dummy|virtual|physical) VIRT_ENCAP=0 ;;
+		*)         VIRT_ENCAP=0 ;;
+	esac
+}
+
+# Compute effective payload MTU for an interface by walking the parent chain.
+# Iterative implementation — avoids recursive subshells and is cycle-safe.
+# Memoized via IFACE_EFFECTIVE_MTU associative array.
+# Prints result to stdout; side-effect: populates IFACE_EFFECTIVE_MTU[$IFACE]
+compute_effective_mtu() {
+	local IFACE="$1"
+
+	[[ -n "${IFACE_EFFECTIVE_MTU[$IFACE]+x}" ]] && {
+		printf '%s' "${IFACE_EFFECTIVE_MTU[$IFACE]}"
+		return
+	}
+
+	# Walk parent chain iteratively, collecting nodes from IFACE to root.
+	local -a _CHAIN=("$IFACE")
+	local _CUR="$IFACE"
+	local _VISITED=" $IFACE "
+
+	while true; do
+		local _PARENT="${IFACE_PARENT_MAP[$_CUR]:-}"
+		[[ -z "$_PARENT" || "$_PARENT" == "—" ]] && break
+		# Cycle guard
+		[[ "$_VISITED" == *" $_PARENT "* ]] && break
+		# Stop at already-cached node; treat it as root
+		if [[ -n "${IFACE_EFFECTIVE_MTU[$_PARENT]+x}" ]]; then
+			_CHAIN+=("$_PARENT")
+			break
+		fi
+		_VISITED+="$_PARENT "
+		_CHAIN+=("$_PARENT")
+		_CUR="$_PARENT"
+	done
+
+	# Seed effective MTU from the root (last element in _CHAIN)
+	local _ROOT="${_CHAIN[-1]}"
+	local _EFF
+	if [[ -n "${IFACE_EFFECTIVE_MTU[$_ROOT]+x}" ]]; then
+		_EFF="${IFACE_EFFECTIVE_MTU[$_ROOT]}"
+	else
+		_EFF="${IFACE_MTU_MAP[$_ROOT]:-1500}"
+		IFACE_EFFECTIVE_MTU[$_ROOT]="$_EFF"
+	fi
+
+	# Walk from root back toward IFACE, applying overhead at each layer.
+	local _N="${#_CHAIN[@]}"
+	for (( _k = _N - 2; _k >= 0; _k-- )); do
+		local _NODE="${_CHAIN[$_k]}"
+		local _NODE_OVERHEAD="${IFACE_OVERHEAD_MAP[$_NODE]:-0}"
+		local _NODE_RAW="${IFACE_MTU_MAP[$_NODE]:-1500}"
+		_EFF=$(( _EFF - _NODE_OVERHEAD ))
+		(( _NODE_RAW < _EFF )) && _EFF="$_NODE_RAW"
+		IFACE_EFFECTIVE_MTU[$_NODE]="$_EFF"
+	done
+
+	printf '%s' "${IFACE_EFFECTIVE_MTU[$IFACE]}"
+}
 
 # --- Data collection: metrics snapshots, interface enumeration, LACP validation ---
 collect_data() {
@@ -998,6 +1295,9 @@ collect_data() {
     DATA_OPTICS_VENDOR=(); DATA_OPTICS_WAVELENGTH=()
     DATA_OPTICS_TX_LANES=(); DATA_OPTICS_RX_LANES=(); DATA_OPTICS_LANE_COUNT=()
     DATA_NUMA=(); DATA_PCI_SLOT=(); DATA_NIC_VENDOR=(); DATA_NIC_MODEL=()
+    DATA_VIRT_TYPE=(); DATA_VIRT_PARENT=(); DATA_VIRT_ENCAP_OVERHEAD=()
+    DATA_MTU_WARN=(); DATA_VIRT_DEPTH=(); DATA_IS_PHYSICAL=()
+    IFACE_MTU_MAP=(); IFACE_OVERHEAD_MAP=(); IFACE_PARENT_MAP=(); IFACE_EFFECTIVE_MTU=()
     BOND_MODE_MAP=()
     DATA_SWITCH_DESCR=()
     DATA_SWITCH_SERIAL=()
@@ -1041,35 +1341,37 @@ collect_data() {
     fi
 
     # --- Metrics: Snapshot 1 (before data collection) ---
+enumerate_ifaces
 if $SHOW_METRICS; then
     declare -A S1_rx_bytes S1_tx_bytes S1_rx_packets S1_tx_packets
     declare -A S1_rx_dropped S1_tx_dropped S1_rx_errors S1_tx_errors
     declare -A S1_rx_fifo_errors S1_tx_fifo_errors
-    METRICS_IFACES=()
-    for _IFACE in /sys/class/net/*; do
-        _IFACE="${_IFACE##*/}"
-        [[ "$_IFACE" =~ $IFACE_SKIP_PATTERN ]] && continue
-        [[ "$_IFACE" == *.* ]] && continue
-        [[ ! -e "/sys/class/net/$_IFACE/device" ]] && continue
-        METRICS_IFACES+=("$_IFACE")
-    done
+    METRICS_IFACES=("${ENUM_IFACES[@]}")
     read_iface_stats "S1" "${METRICS_IFACES[@]}"
     METRICS_START=$(date +%s)
 fi
 
 # --- Data Collection ---
-for _IFACE_PATH in /sys/class/net/*; do
-    IFACE="${_IFACE_PATH##*/}"
-    [[ "$IFACE" =~ $IFACE_SKIP_PATTERN ]] && continue
-    [[ "$IFACE" == *.* ]] && continue
+for IFACE in "${ENUM_IFACES[@]}"; do
+    detect_virtual_type "$IFACE"
+    [[ "$VIRT_TYPE" == "skip" ]] && continue
 
-    DEVICE_PATH="/sys/class/net/$IFACE/device"
-    [[ ! -e "$DEVICE_PATH" ]] && continue
+    detect_virtual_parent "$IFACE" "$VIRT_TYPE"
+    compute_encap_overhead "$VIRT_TYPE"
 
-    DEVICE=$(basename "$(readlink -f "$DEVICE_PATH")")
+    IFACE_MTU_MAP[$IFACE]=$(read_sysfs "$IFACE" mtu)
+    IFACE_PARENT_MAP[$IFACE]="$VIRT_PARENT"
+    IFACE_OVERHEAD_MAP[$IFACE]="$VIRT_ENCAP"
+
+    local DEVICE_PATH="/sys/class/net/$IFACE/device"
+    if $IS_PHYSICAL; then
+        DEVICE=$(basename "$(readlink -f "$DEVICE_PATH")")
+    else
+        DEVICE="virtual"
+    fi
 
     # Physical topology: NUMA node, PCI slot, NIC vendor/model
-    if $SHOW_PHYSICAL; then
+    if $SHOW_PHYSICAL && $IS_PHYSICAL; then
         local _NUMA_RAW=""
         [[ -r "$DEVICE_PATH/numa_node" ]] && _NUMA_RAW=$(< "$DEVICE_PATH/numa_node")
         if [[ "$_NUMA_RAW" =~ ^-?[0-9]+$ && "$_NUMA_RAW" -ge 0 ]]; then
@@ -1109,11 +1411,19 @@ for _IFACE_PATH in /sys/class/net/*; do
             _LSPCI_VENDOR_CACHE["$_PCI_BUS_ADDR"]="$PHYS_NIC_VENDOR"
             _LSPCI_MODEL_CACHE["$_PCI_BUS_ADDR"]="$PHYS_NIC_MODEL"
         fi
+    else
+        PHYS_NUMA="N/A"; PHYS_PCI_SLOT="N/A"
+        PHYS_NIC_VENDOR="N/A"; PHYS_NIC_MODEL="N/A"
     fi
 
-    ETHTOOL_I=$(ethtool -i "$IFACE" 2>/dev/null)
+    ETHTOOL_I=""
+    if $IS_PHYSICAL || ethtool -i "$IFACE" &>/dev/null; then
+        ETHTOOL_I=$(ethtool -i "$IFACE" 2>/dev/null)
+    fi
     FIRMWARE=$(echo "$ETHTOOL_I" | awk -F': ' '/firmware-version/ {print $2}')
+    FIRMWARE="${FIRMWARE:-N/A}"
     DRIVER=$(echo "$ETHTOOL_I" | awk -F': ' '/^driver:/ {print $2}')
+    DRIVER="${DRIVER:-N/A}"
     MTU=$(read_sysfs "$IFACE" mtu)
 
     LINK_RAW=$(read_sysfs "$IFACE" operstate)
@@ -1130,15 +1440,17 @@ for _IFACE_PATH in /sys/class/net/*; do
         continue
     fi
 
-    ETHTOOL_OUT=$(ethtool "$IFACE" 2>/dev/null)
+    ETHTOOL_OUT=""
+    $IS_PHYSICAL && ETHTOOL_OUT=$(ethtool "$IFACE" 2>/dev/null)
     SPEED=$(echo "$ETHTOOL_OUT" | awk -F': ' '/Speed:/ {print $2}' | sed 's/Unknown.*/N\/A/')
     DUPLEX=$(echo "$ETHTOOL_OUT" | awk -F': ' '/Duplex:/ {print $2}' | sed 's/Unknown.*/N\/A/')
     SPEED_DUPLEX="${SPEED:-N/A} (${DUPLEX:-N/A})"
 
+    BOND_MASTER="None"
     if [[ -L "/sys/class/net/$IFACE/master" ]]; then
-        BOND_MASTER=$(basename "$(readlink -f "/sys/class/net/$IFACE/master")")
-    else
-        BOND_MASTER="None"
+        local _MASTER
+        _MASTER=$(basename "$(readlink -f "/sys/class/net/$IFACE/master")")
+        [[ -f "/proc/net/bonding/$_MASTER" ]] && BOND_MASTER="$_MASTER"
     fi
 
     if [[ "$BOND_MASTER" != "None" ]]; then
@@ -1208,65 +1520,70 @@ for _IFACE_PATH in /sys/class/net/*; do
         fi
     fi
 
-    # LLDP Info
-    LLDP_OUTPUT=$(lldpctl "$IFACE" 2>/dev/null)
-    SWITCH_NAME=$(echo "$LLDP_OUTPUT" | awk -F'SysName: ' '/SysName:/ {print $2}' | xargs)
-    PORT_NAME=$(echo "$LLDP_OUTPUT" | awk -F'PortID: ' '/PortID:/ {print $2}' | xargs)
+    # LLDP Info (physical interfaces only — virtual devices have no LLDP peers)
+    if $IS_PHYSICAL; then
+        LLDP_OUTPUT=$(lldpctl "$IFACE" 2>/dev/null)
+        SWITCH_NAME=$(echo "$LLDP_OUTPUT" | awk -F'SysName: ' '/SysName:/ {print $2}' | xargs)
+        PORT_NAME=$(echo "$LLDP_OUTPUT" | awk -F'PortID: ' '/PortID:/ {print $2}' | xargs)
 
-    # LLDP PortDescr
-    PORT_DESCR=$(echo "$LLDP_OUTPUT" | awk -F'PortDescr: ' '/PortDescr:/ {print $2}' | xargs)
-    # ACI topology paths: extract policy name from pathep-[POLICY_NAME]
-    if [[ "$PORT_DESCR" =~ pathep-\[([^]]+)\] ]]; then
-        PORT_DESCR="VPC: ${BASH_REMATCH[1]}"
-    fi
-    [[ -z "$PORT_DESCR" ]] && PORT_DESCR="N/A"
+        # LLDP PortDescr
+        PORT_DESCR=$(echo "$LLDP_OUTPUT" | awk -F'PortDescr: ' '/PortDescr:/ {print $2}' | xargs)
+        # ACI topology paths: extract policy name from pathep-[POLICY_NAME]
+        if [[ "$PORT_DESCR" =~ pathep-\[([^]]+)\] ]]; then
+            PORT_DESCR="VPC: ${BASH_REMATCH[1]}"
+        fi
+        [[ -z "$PORT_DESCR" ]] && PORT_DESCR="N/A"
 
-    # LLDP PortAggregID (link aggregation group on the switch side)
-    LLDP_AGGID=$(echo "$LLDP_OUTPUT" | awk '/PortAggregID:/ {print $NF}')
-    [[ -z "$LLDP_AGGID" ]] && LLDP_AGGID="N/A"
+        # LLDP PortAggregID (link aggregation group on the switch side)
+        LLDP_AGGID=$(echo "$LLDP_OUTPUT" | awk '/PortAggregID:/ {print $NF}')
+        [[ -z "$LLDP_AGGID" ]] && LLDP_AGGID="N/A"
 
-    # Switch SysDescr & serial (for diagram — deduplicated by switch name)
-    if [[ -n "$SWITCH_NAME" && -z "${DATA_SWITCH_DESCR[$SWITCH_NAME]+x}" ]]; then
-        local _RAW_DESCR
-        _RAW_DESCR=$(echo "$LLDP_OUTPUT" | awk -F'SysDescr:' '/SysDescr:/ {sub(/^[ \t]+/, "", $2); print $2; exit}')
+        # Switch SysDescr & serial (for diagram — deduplicated by switch name)
+        if [[ -n "$SWITCH_NAME" && -z "${DATA_SWITCH_DESCR[$SWITCH_NAME]+x}" ]]; then
+            local _RAW_DESCR
+            _RAW_DESCR=$(echo "$LLDP_OUTPUT" | awk -F'SysDescr:' '/SysDescr:/ {sub(/^[ \t]+/, "", $2); print $2; exit}')
 
-        # Cisco ACI: SysDescr is "topology/pod-N/node-NNN" — useless for
-        # brand/model/software.  Extract from vendor TLVs instead and build
-        # a synthetic SysDescr the parser can handle.
-        if [[ "$_RAW_DESCR" == topology/pod-* ]]; then
-            local _ACI_MODEL _ACI_FW
-            _ACI_MODEL=$(_extract_lldp_tlv "$LLDP_OUTPUT" "00,01,42" "214")
-            _ACI_FW=$(_extract_lldp_tlv "$LLDP_OUTPUT" "00,01,42" "210")
-            if [[ -n "$_ACI_MODEL" && -n "$_ACI_FW" ]]; then
-                _RAW_DESCR="Cisco ACI ${_ACI_MODEL}, ${_ACI_FW}"
-            elif [[ -n "$_ACI_MODEL" ]]; then
-                _RAW_DESCR="Cisco ACI ${_ACI_MODEL}"
-            else
-                _RAW_DESCR="Cisco ACI"
+            # Cisco ACI: SysDescr is "topology/pod-N/node-NNN" — useless for
+            # brand/model/software.  Extract from vendor TLVs instead and build
+            # a synthetic SysDescr the parser can handle.
+            if [[ "$_RAW_DESCR" == topology/pod-* ]]; then
+                local _ACI_MODEL _ACI_FW
+                _ACI_MODEL=$(_extract_lldp_tlv "$LLDP_OUTPUT" "00,01,42" "214")
+                _ACI_FW=$(_extract_lldp_tlv "$LLDP_OUTPUT" "00,01,42" "210")
+                if [[ -n "$_ACI_MODEL" && -n "$_ACI_FW" ]]; then
+                    _RAW_DESCR="Cisco ACI ${_ACI_MODEL}, ${_ACI_FW}"
+                elif [[ -n "$_ACI_MODEL" ]]; then
+                    _RAW_DESCR="Cisco ACI ${_ACI_MODEL}"
+                else
+                    _RAW_DESCR="Cisco ACI"
+                fi
             fi
+
+            DATA_SWITCH_DESCR["$SWITCH_NAME"]="$_RAW_DESCR"
+            DATA_SWITCH_SERIAL["$SWITCH_NAME"]=$(parse_lldp_serial "$LLDP_OUTPUT")
         fi
 
-        DATA_SWITCH_DESCR["$SWITCH_NAME"]="$_RAW_DESCR"
-        DATA_SWITCH_SERIAL["$SWITCH_NAME"]=$(parse_lldp_serial "$LLDP_OUTPUT")
+        # VLAN Info from LLDP
+        VLAN_INFO=""
+        if $SHOW_VLAN; then
+            while IFS= read -r LINE; do
+                VLAN_ID=$(echo "$LINE" | awk -F'VLAN: ' '{print $2}' | awk -F', ' '{print $1}'|awk '{ print $1 }')
+                PVID=$(echo "$LINE" | awk -F'pvid: ' '{print $2}' | awk '{print $1}')
+                [[ $PVID == "yes" ]] && VLAN_INFO+="${VLAN_ID}[P];" || VLAN_INFO+="${VLAN_ID};"
+            done <<< "$(echo "$LLDP_OUTPUT" | grep -E 'VLAN:\s+[0-9]')"
+            VLAN_INFO=${VLAN_INFO%, }
+            VLAN_INFO="${VLAN_INFO%;}"
+            if [[ -z "$VLAN_INFO" ]]; then
+                VLAN_INFO="N/A"
+            fi
+        fi
+    else
+        SWITCH_NAME=""; PORT_NAME=""; PORT_DESCR="N/A"
+        LLDP_AGGID="N/A"; VLAN_INFO="N/A"
     fi
 
-    # VLAN Info from LLDP
-    VLAN_INFO=""
-    if $SHOW_VLAN; then
-        while IFS= read -r LINE; do
-            VLAN_ID=$(echo "$LINE" | awk -F'VLAN: ' '{print $2}' | awk -F', ' '{print $1}'|awk '{ print $1 }')
-            PVID=$(echo "$LINE" | awk -F'pvid: ' '{print $2}' | awk '{print $1}')
-            [[ $PVID == "yes" ]] && VLAN_INFO+="${VLAN_ID}[P];" || VLAN_INFO+="${VLAN_ID};"
-        done <<< "$(echo "$LLDP_OUTPUT" | grep -E 'VLAN:\s+[0-9]')"
-        VLAN_INFO=${VLAN_INFO%, }
-	VLAN_INFO="${VLAN_INFO%;}"
-	if [[ -z "$VLAN_INFO" ]]; then
-		VLAN_INFO="N/A"
-	fi
-    fi
-
-    # Optics data collection
-    if $SHOW_OPTICS; then
+    # Optics data collection (physical interfaces only — virtual devices have no SFP)
+    if $SHOW_OPTICS && $IS_PHYSICAL; then
         parse_optics "$IFACE"
         normalize_sfp_type "$OPTICS_TYPE_ALL" "$OPTICS_BAUD" "$SPEED"
 
@@ -1285,6 +1602,10 @@ for _IFACE_PATH in /sys/class/net/*; do
         colorize_optics "$OPTICS_RX_DBM" "$OPTICS_RX_STATUS" "$RX_SUFFIX"
         OPT_RX_PLAIN="$OPTICS_CLR_PLAIN"
         OPT_RX_COLOR="$OPTICS_CLR_COLOR"
+    else
+        OPTICS_TYPE="N/A"
+        OPT_TX_PLAIN="N/A"; OPT_TX_COLOR="N/A"
+        OPT_RX_PLAIN="N/A"; OPT_RX_COLOR="N/A"
     fi
 
     # Store collected data
@@ -1331,12 +1652,32 @@ for _IFACE_PATH in /sys/class/net/*; do
         DATA_NIC_VENDOR[ROW_COUNT]="$PHYS_NIC_VENDOR"
         DATA_NIC_MODEL[ROW_COUNT]="$PHYS_NIC_MODEL"
     fi
+    DATA_VIRT_TYPE[ROW_COUNT]="$VIRT_TYPE"
+    DATA_VIRT_PARENT[ROW_COUNT]="$VIRT_PARENT"
+    DATA_VIRT_ENCAP_OVERHEAD[ROW_COUNT]="$VIRT_ENCAP"
+    DATA_IS_PHYSICAL[ROW_COUNT]="$IS_PHYSICAL"
     ((ROW_COUNT++))
 done
 
+# --- Step 5: Post-collection MTU warning pass ---
+if $SHOW_VIRTUAL; then
+    for (( i = 0; i < ROW_COUNT; i++ )); do
+        local _EFF
+        _EFF=$(compute_effective_mtu "${DATA_IFACE[$i]}")
+        local _TYPE="${DATA_VIRT_TYPE[$i]}"
+        if (( _EFF < 576 )); then
+            DATA_MTU_WARN[$i]="DROP"
+        elif (( _EFF < 1500 )) && [[ "$_TYPE" != "vpn" ]]; then
+            DATA_MTU_WARN[$i]="FRAG"
+        else
+            DATA_MTU_WARN[$i]=""
+        fi
+    done
+fi
+
 # --- Guard: no interfaces found ---
 if [[ $ROW_COUNT -eq 0 ]]; then
-    echo "No physical network interfaces found." >&2
+    echo "No matching network interfaces found." >&2
     exit 0
 fi
 
@@ -1406,6 +1747,46 @@ if $SHOW_LACP; then
     done
     unset BOND_MEMBER_INDICES
 fi
+
+# --- Bond MTU consistency validation (always active, no flag required) ---
+{
+    declare -A _BOND_MTU_IDX
+    for ((i = 0; i < ROW_COUNT; i++)); do
+        local_bond="${DATA_BOND_PLAIN[$i]}"
+        [[ "$local_bond" == "None" ]] && continue
+        _BOND_MTU_IDX["$local_bond"]+="$i "
+    done
+
+    for BOND_NAME in "${!_BOND_MTU_IDX[@]}"; do
+        read -ra MEMBERS <<< "${_BOND_MTU_IDX[$BOND_NAME]}"
+        [[ ${#MEMBERS[@]} -lt 1 ]] && continue
+
+        # Member-to-member MTU consistency
+        declare -A _UNIQ_MTU
+        for IDX in "${MEMBERS[@]}"; do
+            _UNIQ_MTU["${DATA_MTU[$IDX]}"]=1
+        done
+        if [[ ${#_UNIQ_MTU[@]} -gt 1 ]]; then
+            for IDX in "${MEMBERS[@]}"; do
+                DATA_MTU_WARN[$IDX]="MISMATCH"
+            done
+        fi
+        unset _UNIQ_MTU
+
+        # Bond master MTU vs members
+        local _MASTER_MTU_FILE="/sys/class/net/${BOND_NAME}/mtu"
+        if [[ -r "$_MASTER_MTU_FILE" ]]; then
+            local _MASTER_MTU
+            _MASTER_MTU=$(<"$_MASTER_MTU_FILE")
+            for IDX in "${MEMBERS[@]}"; do
+                if [[ "${DATA_MTU[$IDX]}" != "$_MASTER_MTU" ]]; then
+                    DATA_MTU_WARN[$IDX]="MISMATCH"
+                fi
+            done
+        fi
+    done
+    unset _BOND_MTU_IDX
+}
 
 # --- Metrics: Sleep, Snapshot 2, Delta Computation ---
 if $SHOW_METRICS; then
@@ -1613,7 +1994,25 @@ compute_layout() {
 COL_W_DEVICE=$(max_width "Device" "${DATA_DEVICE[@]}")
 COL_W_DRIVER=$(max_width "Driver" "${DATA_DRIVER[@]}")
 COL_W_FIRMWARE=$(max_width "Firmware" "${DATA_FIRMWARE[@]}")
-COL_W_IFACE=$(max_width "Interface" "${DATA_IFACE[@]}")
+if $SHOW_VIRTUAL; then
+    # Build display names with tree-indent prefix to get the correct visual column width.
+    # Non-root interfaces (those with a known parent) get a "└─ " (3-col) prefix.
+    declare -A _VW_KNOWN
+    for (( _vwi = 0; _vwi < ROW_COUNT; _vwi++ )); do _VW_KNOWN["${DATA_IFACE[$_vwi]}"]=1; done
+    local -a _VW_NAMES=()
+    for (( _vwi = 0; _vwi < ROW_COUNT; _vwi++ )); do
+        local _vwp="${DATA_VIRT_PARENT[$_vwi]}"
+        if [[ -n "$_vwp" && "$_vwp" != "—" && -n "${_VW_KNOWN[$_vwp]+x}" ]]; then
+            _VW_NAMES+=("└─ ${DATA_IFACE[$_vwi]}")
+        else
+            _VW_NAMES+=("${DATA_IFACE[$_vwi]}")
+        fi
+    done
+    COL_W_IFACE=$(max_width "Interface" "${_VW_NAMES[@]}")
+    unset _VW_KNOWN _VW_NAMES _vwi _vwp
+else
+    COL_W_IFACE=$(max_width "Interface" "${DATA_IFACE[@]}")
+fi
 COL_W_MAC=$(max_width "MAC Address" "${DATA_MAC[@]}")
 COL_W_MTU=$(max_width "MTU" "${DATA_MTU[@]}")
 COL_W_LINK=$(max_width "Link" "${DATA_LINK_PLAIN[@]}")
@@ -1631,6 +2030,12 @@ if $SHOW_PHYSICAL; then
     COL_W_PCI_SLOT=$(max_width "PCI Slot" "${DATA_PCI_SLOT[@]}")
     COL_W_NIC_VENDOR=$(max_width "NIC Vendor" "${DATA_NIC_VENDOR[@]}")
     COL_W_NIC_MODEL=$(max_width "NIC Model" "${DATA_NIC_MODEL[@]}")
+fi
+
+if $SHOW_VIRTUAL; then
+    COL_W_VIRT_TYPE=$(max_width "Type" "${DATA_VIRT_TYPE[@]}")
+    COL_W_VIRT_PARENT=$(max_width "Parent" "${DATA_VIRT_PARENT[@]}")
+    COL_W_VIRT_ENCAP=$(max_width "Encap" "${DATA_VIRT_ENCAP_OVERHEAD[@]}")
 fi
 
 if $SHOW_OPTICS; then
@@ -1972,6 +2377,21 @@ generate_dot() {
     local NUMA_COLOR="#cba6f7"       # Mauve — NUMA nodes
     local NIC_CARD_COLOR="#94e2d5"   # Teal — NIC card nodes
 
+    # Virtual interface colors (Catppuccin Mocha)
+    local VIRT_COLOR_VLAN="#fab387"      # Peach
+    local VIRT_COLOR_BRIDGE="#cba6f7"    # Mauve
+    local VIRT_COLOR_OVS="#b4befe"       # Lavender
+    local VIRT_COLOR_VXLAN="#74c7ec"     # Sapphire
+    local VIRT_COLOR_GENEVE="#89b4fa"    # Blue
+    local VIRT_COLOR_GRE="#f2cdcd"       # Flamingo
+    local VIRT_COLOR_TAP="#94e2d5"       # Teal
+    local VIRT_COLOR_TUN="#89dceb"       # Sky
+    local VIRT_COLOR_VETH="#a6e3a1"      # Green
+    local VIRT_COLOR_WG="#cdd6f4"        # Text
+    local VIRT_COLOR_VPN="#eba0ac"       # Maroon
+    local VIRT_EDGE_COLOR="#585b70"      # Surface2
+    local VIRT_WARN_COLOR="#f38ba8"      # Red
+
     # Per-bond color palette (Catppuccin Mocha accents)
     local -a DOT_BOND_COLORS=(
         "#89b4fa"   # Blue
@@ -2247,6 +2667,7 @@ DOTHEADER
 
         # --- Standalone interface nodes ---
         for IDX in "${STANDALONE_INDICES[@]}"; do
+            $SHOW_VIRTUAL && [[ "${DATA_IS_PHYSICAL[$IDX]}" != "true" ]] && continue
             _dot_nic_node "$IDX" "    "
             printf '\n'
         done
@@ -2451,6 +2872,10 @@ DOTHEADER
         printf '\n'
     else
         for ((i = 0; i < ROW_COUNT; i++)); do
+            if $SHOW_VIRTUAL && [[ "${DATA_IS_PHYSICAL[$i]}" != "true" ]]; then
+                local _VP="${DATA_VIRT_PARENT[$i]:-}"
+                [[ -n "$_VP" && "$_VP" != "—" ]] && continue
+            fi
             local IFACE="${DATA_IFACE[$i]}"
             local NODE_ID
             NODE_ID=$(dot_id "$IFACE")
@@ -2462,6 +2887,7 @@ DOTHEADER
 
     # --- Edges: interfaces -> switch ports / stubs ---
     for ((i = 0; i < ROW_COUNT; i++)); do
+        $SHOW_VIRTUAL && [[ "${DATA_IS_PHYSICAL[$i]}" != "true" ]] && continue
         local IFACE="${DATA_IFACE[$i]}"
         local NODE_ID
         NODE_ID=$(dot_id "$IFACE")
@@ -2546,6 +2972,107 @@ DOTHEADER
     unset EMITTED_SW_EDGES
     printf '\n'
 
+    # --- Virtual interface nodes and edges (when --virtual is active) ---
+    if $SHOW_VIRTUAL; then
+        # Helper: map virt type to DOT node color
+        _virt_node_color() {
+            case "$1" in
+                vlan)             printf '%s' "$VIRT_COLOR_VLAN" ;;
+                bridge|ovs-br)    printf '%s' "$VIRT_COLOR_BRIDGE" ;;
+                vxlan|geneve)     printf '%s' "$VIRT_COLOR_VXLAN" ;;
+                tap)              printf '%s' "$VIRT_COLOR_TAP" ;;
+                tun)              printf '%s' "$VIRT_COLOR_TUN" ;;
+                veth)             printf '%s' "$VIRT_COLOR_VETH" ;;
+                wireguard|vpn)    printf '%s' "$VIRT_COLOR_WG" ;;
+                *)                printf '%s' "$BORDER_COLOR" ;;
+            esac
+        }
+        # Helper: map virt type to DOT node shape and style
+        _virt_node_shape() {
+            case "$1" in
+                bridge|ovs-br)    printf 'rectangle' ;;
+                vlan)             printf 'hexagon' ;;
+                vxlan|geneve)     printf 'diamond' ;;
+                tap|tun)          printf 'folder' ;;
+                veth)             printf 'parallelogram' ;;
+                wireguard|vpn)    printf 'doubleoctagon' ;;
+                *)                printf 'ellipse' ;;
+            esac
+        }
+        _virt_node_style() {
+            case "$1" in
+                bridge|ovs-br)    printf 'rounded,dashed,filled' ;;
+                *)                printf 'filled' ;;
+            esac
+        }
+
+        # Build set of physical NIC node IDs for edge style decisions
+        declare -A _PHYS_NODE_SET
+        for (( vi = 0; vi < ROW_COUNT; vi++ )); do
+            if [[ "${DATA_IS_PHYSICAL[$vi]}" == "true" ]]; then
+                _PHYS_NODE_SET["$(dot_id "${DATA_IFACE[$vi]}")"]="1"
+            fi
+        done
+
+        # Emit virtual nodes grouped per physical parent (subgraph per physical NIC)
+        declare -A _VIRT_EMITTED_SUBGRAPH
+        for (( vi = 0; vi < ROW_COUNT; vi++ )); do
+            [[ "${DATA_IS_PHYSICAL[$vi]}" == "true" ]] && continue
+            local _VTYPE="${DATA_VIRT_TYPE[$vi]}"
+            local _VPAR="${DATA_VIRT_PARENT[$vi]}"
+            local _VIFACE="${DATA_IFACE[$vi]}"
+            local _VNODE_ID
+            _VNODE_ID=$(dot_id "$_VIFACE")
+            local _VCOLOR
+            _VCOLOR=$(_virt_node_color "$_VTYPE")
+            local _VSHAPE
+            _VSHAPE=$(_virt_node_shape "$_VTYPE")
+            local _VSTYLE
+            _VSTYLE=$(_virt_node_style "$_VTYPE")
+            local _VMTU="${DATA_MTU[$vi]}"
+            local _VWARN="${DATA_MTU_WARN[$vi]:-}"
+            local _VBORDER="$_VCOLOR"
+            [[ -n "$_VWARN" ]] && _VBORDER="$VIRT_WARN_COLOR"
+
+            printf '    %s [shape=%s, style="%s", fillcolor="%s", color="%s", fontcolor="%s", ' \
+                "$_VNODE_ID" "$_VSHAPE" "$_VSTYLE" "$_VCOLOR" "$_VBORDER" "$BG_COLOR"
+            printf 'label=<<B>%s</B><BR/><FONT POINT-SIZE="8">%s</FONT><BR/><FONT POINT-SIZE="9">MTU %s</FONT>>];\n' \
+                "$(dot_escape "$_VIFACE")" "$(dot_escape "$_VTYPE")" "$(dot_escape "$_VMTU")"
+        done
+        printf '\n'
+
+        # Emit edges from parent to virtual child
+        for (( vi = 0; vi < ROW_COUNT; vi++ )); do
+            [[ "${DATA_IS_PHYSICAL[$vi]}" == "true" ]] && continue
+            local _VPAR="${DATA_VIRT_PARENT[$vi]}"
+            local _VIFACE="${DATA_IFACE[$vi]}"
+            local _VNODE_ID
+            _VNODE_ID=$(dot_id "$_VIFACE")
+            local _VWARN="${DATA_MTU_WARN[$vi]:-}"
+
+            if [[ -z "$_VPAR" || "$_VPAR" == "—" ]]; then
+                continue
+            fi
+
+            local _PNODE_ID
+            _PNODE_ID=$(dot_id "$_VPAR")
+            local _ESTYLE="dotted"
+            local _ECOLOR="$VIRT_EDGE_COLOR"
+            local _EPW="1"
+            # If parent is a virtual node (not physical), use dashed
+            [[ -z "${_PHYS_NODE_SET[$_PNODE_ID]+x}" ]] && _ESTYLE="dashed"
+            # Warn edge coloring
+            if [[ -n "$_VWARN" ]]; then
+                _ECOLOR="$VIRT_WARN_COLOR"
+                _EPW="2"
+            fi
+            printf '    %s -> %s [style=%s, color="%s", penwidth=%s, arrowsize=0.7];\n' \
+                "$_PNODE_ID" "$_VNODE_ID" "$_ESTYLE" "$_ECOLOR" "$_EPW"
+        done
+        unset _PHYS_NODE_SET _VIRT_EMITTED_SUBGRAPH
+        printf '\n'
+    fi
+
     # --- Rank constraints ---
     printf '    { rank=min; server; }\n'
 
@@ -2568,7 +3095,43 @@ DOTHEADER
 render_output() {
 
 if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
+    # Build interface depth map for tree indentation when --virtual is active
+    declare -A _IFACE_DEPTH_MAP
+    if $SHOW_VIRTUAL; then
+        # Build set of known interfaces in this dataset
+        declare -A _KNOWN_IFACES
+        for (( _di = 0; _di < ROW_COUNT; _di++ )); do
+            _KNOWN_IFACES["${DATA_IFACE[$_di]}"]=1
+        done
+        # Compute depth by walking parent chain
+        for (( _di = 0; _di < ROW_COUNT; _di++ )); do
+            local _WALK="${DATA_IFACE[$_di]}"
+            local _DEPTH=0
+            local _P="${DATA_VIRT_PARENT[$_di]}"
+            while [[ -n "$_P" && "$_P" != "—" && -n "${_KNOWN_IFACES[$_P]+x}" ]]; do
+                (( _DEPTH++ ))
+                # find parent's parent
+                local _PI
+                for (( _pj = 0; _pj < ROW_COUNT; _pj++ )); do
+                    if [[ "${DATA_IFACE[$_pj]}" == "$_P" ]]; then
+                        _P="${DATA_VIRT_PARENT[$_pj]}"
+                        break
+                    fi
+                done
+                # break cycle guard: if _P didn't change, exit
+                [[ "${DATA_IFACE[$_di]}" == "$_P" ]] && break
+                (( _DEPTH > 10 )) && break
+            done
+            _IFACE_DEPTH_MAP["${DATA_IFACE[$_di]}"]="$_DEPTH"
+        done
+        unset _KNOWN_IFACES
+    fi
+
     # Header
+    if ${SHOW_VIRTUAL}; then
+        printf "%-${COL_W_VIRT_TYPE}s${COL_GAP}%-${COL_W_VIRT_PARENT}s${COL_GAP}%-${COL_W_VIRT_ENCAP}s${COL_GAP}%s${COL_GAP}" \
+            "Type" "Parent" "Encap" "!"
+    fi
     if ${SHOW_PHYSICAL}; then
         printf "%-${COL_W_NUMA}s${COL_GAP}%-${COL_W_PCI_SLOT}s${COL_GAP}%-${COL_W_NIC_VENDOR}s${COL_GAP}%-${COL_W_NIC_MODEL}s${COL_GAP}" \
             "NUMA" "PCI Slot" "NIC Vendor" "NIC Model"
@@ -2593,8 +3156,11 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
     printf "${COL_GAP}%-${COL_W_SWITCH}s${COL_GAP}%-${COL_W_PORT}s${COL_GAP}%s\n" "Switch Name" "Port Name" "Port Descr"
     # Separator line
     SEP_WIDTH=0
+    if ${SHOW_VIRTUAL}; then
+        SEP_WIDTH=$((COL_W_VIRT_TYPE + COL_GAP_WIDTH + COL_W_VIRT_PARENT + COL_GAP_WIDTH + COL_W_VIRT_ENCAP + COL_GAP_WIDTH + 1 + COL_GAP_WIDTH))
+    fi
     if ${SHOW_PHYSICAL}; then
-        SEP_WIDTH=$((COL_W_NUMA + COL_GAP_WIDTH + COL_W_PCI_SLOT + COL_GAP_WIDTH + COL_W_NIC_VENDOR + COL_GAP_WIDTH + COL_W_NIC_MODEL + COL_GAP_WIDTH))
+        SEP_WIDTH=$((SEP_WIDTH + COL_W_NUMA + COL_GAP_WIDTH + COL_W_PCI_SLOT + COL_GAP_WIDTH + COL_W_NIC_VENDOR + COL_GAP_WIDTH + COL_W_NIC_MODEL + COL_GAP_WIDTH))
     fi
     SEP_WIDTH=$((SEP_WIDTH + COL_W_DEVICE + COL_GAP_WIDTH + COL_W_DRIVER + COL_GAP_WIDTH + COL_W_FIRMWARE + COL_GAP_WIDTH + COL_W_IFACE + COL_GAP_WIDTH + COL_W_MAC + COL_GAP_WIDTH + COL_W_MTU + COL_GAP_WIDTH + COL_W_LINK + COL_GAP_WIDTH + COL_W_SPEED + COL_GAP_WIDTH + COL_W_BOND))
     ${SHOW_BMAC} && SEP_WIDTH=$((SEP_WIDTH + COL_GAP_WIDTH + COL_W_BMAC))
@@ -2610,12 +3176,56 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
     printf '%*s\n' "$SEP_WIDTH" '' | tr ' ' '-'
     # Data rows
     for i in "${RENDER_ORDER[@]}"; do
+        if ${SHOW_VIRTUAL}; then
+            # Encap: show "—" for 0 to reduce noise
+            local _ENCAP_DISP="${DATA_VIRT_ENCAP_OVERHEAD[$i]}"
+            [[ "$_ENCAP_DISP" == "0" ]] && _ENCAP_DISP="—"
+            # W column: MTU warning indicator
+            local _W_COL=" "
+            local _WARN="${DATA_MTU_WARN[$i]:-}"
+            case "$_WARN" in
+                FRAG) _W_COL="${YELLOW}!${RESET_COLOR}" ;;
+                DROP) _W_COL="${RED}✗${RESET_COLOR}" ;;
+            esac
+            pad_plain "${DATA_VIRT_TYPE[$i]}" "$COL_W_VIRT_TYPE"
+            printf '%s' "${COL_GAP}"
+            pad_plain "${DATA_VIRT_PARENT[$i]}" "$COL_W_VIRT_PARENT"
+            printf '%s' "${COL_GAP}"
+            pad_plain "$_ENCAP_DISP" "$COL_W_VIRT_ENCAP"
+            printf '%s' "${COL_GAP}"
+            pad_color "$_W_COL" 1
+            printf '%s' "${COL_GAP}"
+        fi
         if ${SHOW_PHYSICAL}; then
             printf "%-${COL_W_NUMA}s${COL_GAP}%-${COL_W_PCI_SLOT}s${COL_GAP}%-${COL_W_NIC_VENDOR}s${COL_GAP}%-${COL_W_NIC_MODEL}s${COL_GAP}" \
                 "${DATA_NUMA[$i]}" "${DATA_PCI_SLOT[$i]}" "${DATA_NIC_VENDOR[$i]}" "${DATA_NIC_MODEL[$i]}"
         fi
-        printf "%-${COL_W_DEVICE}s${COL_GAP}%-${COL_W_DRIVER}s${COL_GAP}%-${COL_W_FIRMWARE}s${COL_GAP}%-${COL_W_IFACE}s${COL_GAP}%-${COL_W_MAC}s${COL_GAP}%-${COL_W_MTU}s${COL_GAP}" \
-            "${DATA_DEVICE[$i]}" "${DATA_DRIVER[$i]}" "${DATA_FIRMWARE[$i]}" "${DATA_IFACE[$i]}" "${DATA_MAC[$i]}" "${DATA_MTU[$i]}"
+        # Interface name: apply depth indentation when --virtual is active
+        local _IFACE_DISP="${DATA_IFACE[$i]}"
+        if $SHOW_VIRTUAL; then
+            local _IDEPTH="${_IFACE_DEPTH_MAP[${DATA_IFACE[$i]}]:-0}"
+            if (( _IDEPTH > 0 )); then
+                local _INDENT=""
+                local _k
+                for (( _k = 1; _k < _IDEPTH; _k++ )); do
+                    _INDENT+="  "
+                done
+                _IFACE_DISP="${_INDENT}└─ ${DATA_IFACE[$i]}"
+            fi
+        fi
+        # MTU cell: color based on MTU warning
+        local _MTU_CELL="${DATA_MTU[$i]}"
+        case "${DATA_MTU_WARN[$i]:-}" in
+            MISMATCH) _MTU_CELL="${RED}${DATA_MTU[$i]}${RESET_COLOR}" ;;
+            FRAG) $SHOW_VIRTUAL && _MTU_CELL="${YELLOW}${DATA_MTU[$i]}${RESET_COLOR}" ;;
+            DROP) $SHOW_VIRTUAL && _MTU_CELL="${RED}${DATA_MTU[$i]}${RESET_COLOR}" ;;
+        esac
+        printf "%-${COL_W_DEVICE}s${COL_GAP}%-${COL_W_DRIVER}s${COL_GAP}%-${COL_W_FIRMWARE}s${COL_GAP}" \
+            "${DATA_DEVICE[$i]}" "${DATA_DRIVER[$i]}" "${DATA_FIRMWARE[$i]}"
+        pad_plain "$_IFACE_DISP" "$COL_W_IFACE"
+        printf "${COL_GAP}%-${COL_W_MAC}s${COL_GAP}" "${DATA_MAC[$i]}"
+        pad_color "$_MTU_CELL" "$COL_W_MTU"
+        printf '%s' "${COL_GAP}"
         pad_color "${DATA_LINK_COLOR[$i]}" "$COL_W_LINK"
         printf '%s' "${COL_GAP}"
         pad_color "${DATA_SPEED_COLOR[$i]}" "$COL_W_SPEED"
@@ -2650,16 +3260,21 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
         fi
         printf "${COL_GAP}%-${COL_W_SWITCH}s${COL_GAP}%-${COL_W_PORT}s${COL_GAP}%s\n" "${DATA_SWITCH[$i]}" "${DATA_PORT[$i]}" "${DATA_PORT_DESCR[$i]}"
     done
+    unset _IFACE_DEPTH_MAP
     if ${SHOW_METRICS}; then
         printf '\n📊 Metrics sampled over %ds\n' "$METRICS_ELAPSED"
     fi
 elif [[ "${OUTPUT_FORMAT}" == "csv" ]]; then
     FS="${FIELD_SEP:-,}"
     # CSV Header
+    if ${SHOW_VIRTUAL}; then
+        printf "%s${FS}%s${FS}%s${FS}%s${FS}" "type" "parent" "encap_overhead_bytes" "mtu_warn"
+    fi
     if ${SHOW_PHYSICAL}; then
         printf "%s${FS}%s${FS}%s${FS}%s${FS}" "NUMA" "PCI Slot" "NIC Vendor" "NIC Model"
     fi
-    printf "%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" "Device" "Driver" "Firmware" "Interface" "MAC Address" "MTU" "Link" "Speed/Duplex" "Parent Bond"
+    printf "%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
+        "Device" "Driver" "Firmware" "Interface" "MAC Address" "MTU" "MTU Warn" "Link" "Speed/Duplex" "Speed Mb/s" "Duplex" "Parent Bond"
     ${SHOW_BMAC} && printf "${FS}%s" "Bond MAC"
     ${SHOW_LACP} && printf "${FS}%s" "LACP Status"
     ${SHOW_VLAN} && printf "${FS}%s" "VLAN"
@@ -2670,46 +3285,89 @@ elif [[ "${OUTPUT_FORMAT}" == "csv" ]]; then
     fi
     if ${SHOW_METRICS}; then
         printf "${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
-            "Rx Bits/s" "Tx Bits/s" "Rx Packets/s" "Tx Packets/s" \
+            "Rx bps" "Tx bps" "Rx pps" "Tx pps" \
             "Rx Drops" "Tx Drops" "Rx Errors" "Tx Errors" \
-            "Rx FIFO Errors" "Tx FIFO Errors" "Sample Duration"
+            "Rx FIFO Errors" "Tx FIFO Errors" "Sample Duration (s)"
     fi
     printf "${FS}%s${FS}%s${FS}%s\n" "Switch Name" "Port Name" "Port Descr"
     # CSV Data rows
     for i in "${RENDER_ORDER[@]}"; do
+        local _SPD_MBPS _DUPLEX
+        _SPD_MBPS="$(_parse_speed_mbps "${DATA_SPEED_PLAIN[$i]}")"
+        _DUPLEX="$(_parse_duplex "${DATA_SPEED_PLAIN[$i]}")"
+        if ${SHOW_VIRTUAL}; then
+            printf "%s${FS}%s${FS}%s${FS}%s${FS}" \
+                "$(csv_escape "${DATA_VIRT_TYPE[$i]}")" \
+                "$(csv_escape "${DATA_VIRT_PARENT[$i]}")" \
+                "$(csv_escape "${DATA_VIRT_ENCAP_OVERHEAD[$i]}")" \
+                "$(csv_escape "${DATA_MTU_WARN[$i]:-}")"
+        fi
         if ${SHOW_PHYSICAL}; then
             printf "%s${FS}%s${FS}%s${FS}%s${FS}" \
-                "${DATA_NUMA[$i]}" "${DATA_PCI_SLOT[$i]}" "${DATA_NIC_VENDOR[$i]}" "${DATA_NIC_MODEL[$i]}"
+                "$(csv_escape "${DATA_NUMA[$i]}")" \
+                "$(csv_escape "${DATA_PCI_SLOT[$i]}")" \
+                "$(csv_escape "${DATA_NIC_VENDOR[$i]}")" \
+                "$(csv_escape "${DATA_NIC_MODEL[$i]}")"
         fi
-        printf "%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
-            "${DATA_DEVICE[$i]}" "${DATA_DRIVER[$i]}" "${DATA_FIRMWARE[$i]}" "${DATA_IFACE[$i]}" "${DATA_MAC[$i]}" \
-            "${DATA_MTU[$i]}" "${DATA_LINK_PLAIN[$i]}" "${DATA_SPEED_PLAIN[$i]}" "${DATA_BOND_PLAIN[$i]}"
-        ${SHOW_BMAC} && printf "${FS}%s" "${DATA_BMAC[$i]}"
-        ${SHOW_LACP} && printf "${FS}%s" "${DATA_LACP_PLAIN[$i]}"
-        ${SHOW_VLAN} && printf "${FS}%s" "${DATA_VLAN[$i]}"
+        printf "%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
+            "$(csv_escape "${DATA_DEVICE[$i]}")" \
+            "$(csv_escape "${DATA_DRIVER[$i]}")" \
+            "$(csv_escape "${DATA_FIRMWARE[$i]}")" \
+            "$(csv_escape "${DATA_IFACE[$i]}")" \
+            "$(csv_escape "${DATA_MAC[$i]}")" \
+            "$(csv_escape "${DATA_MTU[$i]}")" \
+            "$(csv_escape "${DATA_MTU_WARN[$i]:-}")" \
+            "$(csv_escape "${DATA_LINK_PLAIN[$i]}")" \
+            "$(csv_escape "${DATA_SPEED_PLAIN[$i]}")" \
+            "$(csv_escape "$_SPD_MBPS")" \
+            "$(csv_escape "$_DUPLEX")" \
+            "$(csv_escape "${DATA_BOND_PLAIN[$i]}")"
+        ${SHOW_BMAC} && printf "${FS}%s" "$(csv_escape "${DATA_BMAC[$i]}")"
+        ${SHOW_LACP} && printf "${FS}%s" "$(csv_escape "${DATA_LACP_PLAIN[$i]}")"
+        ${SHOW_VLAN} && printf "${FS}%s" "$(csv_escape "${DATA_VLAN[$i]}")"
         if ${SHOW_OPTICS}; then
             printf "${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
-                "${DATA_OPTICS_TYPE[$i]}" "${DATA_OPTICS_VENDOR[$i]}" \
-                "${DATA_OPTICS_WAVELENGTH[$i]}" "${DATA_OPTICS_TX_DBM[$i]}" \
-                "${DATA_OPTICS_TX_STATUS[$i]}" "${DATA_OPTICS_RX_DBM[$i]}" \
-                "${DATA_OPTICS_RX_STATUS[$i]}" "${DATA_OPTICS_LANE_COUNT[$i]}"
+                "$(csv_escape "${DATA_OPTICS_TYPE[$i]}")" \
+                "$(csv_escape "${DATA_OPTICS_VENDOR[$i]}")" \
+                "$(csv_escape "${DATA_OPTICS_WAVELENGTH[$i]}")" \
+                "$(csv_escape "${DATA_OPTICS_TX_DBM[$i]}")" \
+                "$(csv_escape "${DATA_OPTICS_TX_STATUS[$i]}")" \
+                "$(csv_escape "${DATA_OPTICS_RX_DBM[$i]}")" \
+                "$(csv_escape "${DATA_OPTICS_RX_STATUS[$i]}")" \
+                "$(csv_escape "${DATA_OPTICS_LANE_COUNT[$i]}")"
         fi
         if ${SHOW_METRICS}; then
             printf "${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
-                "$((DATA_MET_RX_BPS[$i] * 8))" "$((DATA_MET_TX_BPS[$i] * 8))" \
-                "${DATA_MET_RX_PPS[$i]}" "${DATA_MET_TX_PPS[$i]}" \
-                "${DATA_MET_RX_DROP[$i]}" "${DATA_MET_TX_DROP[$i]}" \
-                "${DATA_MET_RX_ERR[$i]}" "${DATA_MET_TX_ERR[$i]}" \
-                "${DATA_MET_RX_FIFO[$i]}" "${DATA_MET_TX_FIFO[$i]}" \
-                "${METRICS_ELAPSED}"
+                "$(csv_escape "$((DATA_MET_RX_BPS[$i] * 8))")" \
+                "$(csv_escape "$((DATA_MET_TX_BPS[$i] * 8))")" \
+                "$(csv_escape "${DATA_MET_RX_PPS[$i]}")" \
+                "$(csv_escape "${DATA_MET_TX_PPS[$i]}")" \
+                "$(csv_escape "${DATA_MET_RX_DROP[$i]}")" \
+                "$(csv_escape "${DATA_MET_TX_DROP[$i]}")" \
+                "$(csv_escape "${DATA_MET_RX_ERR[$i]}")" \
+                "$(csv_escape "${DATA_MET_TX_ERR[$i]}")" \
+                "$(csv_escape "${DATA_MET_RX_FIFO[$i]}")" \
+                "$(csv_escape "${DATA_MET_TX_FIFO[$i]}")" \
+                "$(csv_escape "${METRICS_ELAPSED}")"
         fi
-        printf "${FS}%s${FS}%s${FS}%s\n" "${DATA_SWITCH[$i]}" "${DATA_PORT[$i]}" "${DATA_PORT_DESCR[$i]}"
+        printf "${FS}%s${FS}%s${FS}%s\n" \
+            "$(csv_escape "${DATA_SWITCH[$i]}")" \
+            "$(csv_escape "${DATA_PORT[$i]}")" \
+            "$(csv_escape "${DATA_PORT_DESCR[$i]}")"
     done
 elif [[ "${OUTPUT_FORMAT}" == "json" ]]; then
     printf '[\n'
     LAST_IDX="${RENDER_ORDER[-1]}"
     for i in "${RENDER_ORDER[@]}"; do
+        local _SPD_MBPS _DUPLEX
+        _SPD_MBPS="$(_parse_speed_mbps "${DATA_SPEED_PLAIN[$i]}")"
+        _DUPLEX="$(_parse_duplex "${DATA_SPEED_PLAIN[$i]}")"
         printf '  {\n'
+        if ${SHOW_VIRTUAL}; then
+            printf '    "type": "%s",\n' "$(json_escape "${DATA_VIRT_TYPE[$i]}")"
+            printf '    "parent": "%s",\n' "$(json_escape "${DATA_VIRT_PARENT[$i]}")"
+            printf '    "encap_overhead_bytes": %s,\n' "${DATA_VIRT_ENCAP_OVERHEAD[$i]:-0}"
+        fi
         if ${SHOW_PHYSICAL}; then
             printf '    "numa_node": "%s",\n' "$(json_escape "${DATA_NUMA[$i]}")"
             printf '    "pci_slot": "%s",\n' "$(json_escape "${DATA_PCI_SLOT[$i]}")"
@@ -2722,8 +3380,19 @@ elif [[ "${OUTPUT_FORMAT}" == "json" ]]; then
         printf '    "interface": "%s",\n' "$(json_escape "${DATA_IFACE[$i]}")"
         printf '    "mac_address": "%s",\n' "$(json_escape "${DATA_MAC[$i]}")"
         printf '    "mtu": %s,\n' "${DATA_MTU[$i]:-0}"
+        printf '    "mtu_warn": "%s",\n' "$(json_escape "${DATA_MTU_WARN[$i]:-}")"
         printf '    "link": "%s",\n' "$(json_escape "${DATA_LINK_PLAIN[$i]}")"
         printf '    "speed_duplex": "%s",\n' "$(json_escape "${DATA_SPEED_PLAIN[$i]}")"
+        if [[ -n "$_SPD_MBPS" ]]; then
+            printf '    "speed_mbps": %s,\n' "$_SPD_MBPS"
+        else
+            printf '    "speed_mbps": null,\n'
+        fi
+        if [[ -n "$_DUPLEX" ]]; then
+            printf '    "duplex": "%s",\n' "$_DUPLEX"
+        else
+            printf '    "duplex": null,\n'
+        fi
         printf '    "parent_bond": "%s"' "$(json_escape "${DATA_BOND_PLAIN[$i]}")"
         if ${SHOW_BMAC}; then
             printf ',\n    "bond_mac": "%s"' "$(json_escape "${DATA_BMAC[$i]}")"
@@ -2823,6 +3492,15 @@ elif [[ "$OUTPUT_FORMAT" == "svg" || "$OUTPUT_FORMAT" == "png" ]]; then
     else
         echo "Failed to render diagram. Check that graphviz is working correctly." >&2
         exit 1
+    fi
+fi
+
+# When table output is requested with --diagram-out, also generate a diagram
+if [[ "$OUTPUT_FORMAT" == "table" && -n "$DIAGRAM_OUTPUT_FILE" ]]; then
+    if generate_dot | dot -Tpng -o "$DIAGRAM_OUTPUT_FILE" 2>/dev/null; then
+        echo "Diagram saved to: $DIAGRAM_OUTPUT_FILE" >&2
+    else
+        echo "Failed to render diagram. Check that graphviz is installed." >&2
     fi
 fi
 }

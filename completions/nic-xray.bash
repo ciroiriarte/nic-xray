@@ -41,6 +41,7 @@ _nic_xray() {
 			-w --watch
 			-o --optics
 			-p --physical
+			-V --virtual
 			--lacp
 			--vlan
 			--bmac
