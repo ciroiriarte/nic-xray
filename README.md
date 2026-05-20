@@ -411,10 +411,12 @@ sudo nic-xray.sh --all --output json               # All columns as JSON
 ### Topology diagrams
 
 ```bash
-sudo nic-xray.sh --output dot > topology.dot                   # DOT source
-sudo nic-xray.sh --output svg                                  # SVG diagram
-sudo nic-xray.sh --output png --diagram-out /tmp/network.png   # PNG with custom path
-sudo nic-xray.sh --cluster nic --output svg                    # Physical layout (NUMA/slot clusters)
+sudo nic-xray.sh --output dot > topology.dot                             # DOT source
+sudo nic-xray.sh --output svg                                            # SVG diagram
+sudo nic-xray.sh --output png --diagram-out /tmp/network.png             # PNG with custom path
+sudo nic-xray.sh --cluster nic --output svg                              # Physical layout (NUMA/slot clusters)
+sudo nic-xray.sh --virtual --output dot > topology-virtual.dot           # Virtual iface topology DOT
+sudo nic-xray.sh --virtual --output png --diagram-out /tmp/virtual.png   # Virtual iface topology PNG
 ```
 
 ### Formatting
@@ -496,6 +498,28 @@ N/A    1-14.3:1      Unknown             Unknown                                
 ```
 
 Shows NUMA node, PCI slot designation (`Embedded` for onboard NICs, `dmidecode` slot name for add-in cards, raw bus address as fallback), NIC vendor, and NIC model. Interfaces sharing a PCI slot belong to the same physical NIC card. Rows are sorted by NUMA → slot → interface, with repeated values suppressed for visual grouping.
+
+### Virtual interfaces
+
+```
+$ sudo nic-xray.sh --virtual
+Type       Parent      Encap   W   Device         Driver                Firmware               Interface      MAC Address         MTU    Link   Speed/Duplex       Parent Bond   Switch Name   Port Name                     Port Descr
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+physical   vmbr0       —           0000:05:00.0   ixgbe                 0x800009e1, 1.3227.0   └─ ens6f0      14:02:ec:83:1c:e0   9216   up     10000Mb/s (Full)   None          sw01          ifname gigabitethernet0/1/1   GE0/1/1
+physical   —           —           0000:05:00.1   ixgbe                 0x800009e1, 1.3227.0   ens6f1         14:02:ec:83:1c:e1   1500   down   N/A (N/A)          None                                                      N/A
+bridge     —           —           virtual        bridge                N/A                    fwbr102i0      62:f8:2d:7d:ed:bb   9216   up     N/A (N/A)          None                                                      N/A
+virtual    fwbr102i0   —           virtual        veth                  N/A                    └─ fwln102i0   62:f8:2d:7d:ed:bb   9216   up     N/A (N/A)          None                                                      N/A
+virtual    vmbr0       —           virtual        veth                  N/A                    └─ fwpr102p0   ba:5f:9b:22:04:85   9216   up     N/A (N/A)          None                                                      N/A
+tun        fwbr107i0   —           virtual        tun                   N/A                    └─ tap107i0    26:71:7d:d8:ef:3f   9216   down   N/A (N/A)          None                                                      N/A
+vlan       vmbr0       4           virtual        802.1Q VLAN Support   N/A                    └─ vlan400     14:02:ec:83:1c:e0   9100   up     N/A (N/A)          None                                                      N/A
+bridge     —           —           virtual        bridge                N/A                    vmbr0          14:02:ec:83:1c:e0   9216   up     N/A (N/A)          None                                                      N/A
+vlan       vmbr0       4           virtual        802.1Q VLAN Support   N/A                    └─ vmbr0.100   14:02:ec:83:1c:e0   1500   up     N/A (N/A)          None                                                      N/A
+...
+```
+
+Physical NICs appear with their virtual parent (bridge, OvS, bond) in the `Parent` column; child interfaces are indented with `└─`. The `W` column flags MTU fragmentation risk (`FRAG`) or packet drop risk (`DROP`) for child interfaces with a smaller MTU than their parent.
+
+See also: [`samples/table-virtual.txt`](samples/table-virtual.txt)
 
 ### Optics diagnostics
 
@@ -659,6 +683,12 @@ When `--metrics` is active, each NIC node also shows real-time throughput (with 
 ![Topology diagram with metrics](samples/topology-metrics.png)
 
 See also: [`samples/topology-metrics.dot`](samples/topology-metrics.dot) | [`samples/topology-metrics.svg`](samples/topology-metrics.svg)
+
+When `--virtual` is active, the diagram includes all virtual interfaces (bridges, VLANs, TAP/TUN devices, veth pairs) with parent–child edges showing the full network stack.
+
+![Virtual topology diagram](samples/topology-virtual.png)
+
+See also: [`samples/topology-virtual.dot`](samples/topology-virtual.dot) | [`samples/topology-virtual.svg`](samples/topology-virtual.svg)
 
 ## 📄 License
 

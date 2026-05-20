@@ -1,15 +1,15 @@
-Usage: nic-xray.sh [--lacp] [--vlan] [--bmac] [-o|--optics] [-p|--physical] [--all]
+Usage: /tmp/nic-xray.sh [--lacp] [--vlan] [--bmac] [-o|--optics] [-p|--physical] [-V|--virtual] [--all]
        [--no-color] [--filter-link up|down] [-s[SEP]|--separator[=SEP]]
        [--group-bond] [--cluster bond|nic] [-m[SEC]|--metrics[=SEC]]
        [-w[SEC]|--watch[=SEC]] [--output FORMAT] [--diagram-out FILE] [--help]
 
-Version: 2.10.0
+Version: 2.10.3
 
 Description:
  Lists physical network interfaces with detailed information including:
  PCI slot, driver, firmware, MAC, MTU, link, speed/duplex, bond membership,
  LLDP peer info, and optionally LACP status, VLAN tagging, SFP optics,
- and physical topology (NUMA node, PCI slot, NIC vendor/model).
+ physical topology (NUMA node, PCI slot, NIC vendor/model), and virtual interfaces.
 
 Options:
  --lacp              Show LACP Aggregator ID and Partner MAC per interface
@@ -18,8 +18,21 @@ Options:
  -o, --optics        Show SFP/QSFP transceiver diagnostics (Tx/Rx power, health)
                      Health status: OK (green), WARN (yellow), ALARM (red),
                      N/DOM (no DOM data), N/A (no SFP or copper)
+                     JSON output includes per-lane detail for multi-lane transceivers.
  -p, --physical      Show physical topology: NUMA node, PCI slot, NIC vendor/model
-                     Useful for NUMA affinity analysis and PCIe placement
+                     NUMA affinity: co-locating NIC and CPU on the same memory
+                     node reduces latency; useful for PCIe placement analysis
+ -V, --virtual       Show virtual/logical interfaces (VLANs 🏷, bridges 🌉, tap/tun 💻,
+                     VXLAN 🌌, GRE 🚇, WireGuard 🔐, ZeroTier 🛡, OvS bridges 🔀)
+                     Scope: root network namespace only
+                     Columns: Type (interface type), Parent (logical parent),
+                     Encap (encapsulation overhead in bytes)
+                     Tree-indented child interfaces with └─ prefix
+                     ! column: ! (yellow FRAG <1500B), ✗ (red DROP <576B effective MTU)
+                     ZeroTier (zt*) MTU 2800 is by design and not flagged as FRAG
+                     Note: OpenStack Neutron qr-*/qg-* live in per-router namespaces
+                     and are not visible from the root namespace (out of scope)
+                     Can be combined with --physical for a full hardware-to-software stack view.
  --all               Enable all optional columns (--lacp --vlan --bmac --optics --physical)
  --no-color          Disable color output (auto-disabled for non-terminal)
  --filter-link TYPE  Show only interfaces with link up or down
@@ -40,7 +53,16 @@ Options:
  --output TYPE       Output format: table (default), csv, json, dot, svg, or png
                      dot/svg/png generate a network topology diagram
                      svg/png require graphviz (dot command)
- --diagram-out FILE  Output file path for svg/png diagrams
+ --diagram-out FILE  Output file path for diagrams
+                     With --output svg|png: saves diagram to FILE
+                     With table output (default): prints table to stdout AND saves
+                     a PNG diagram to FILE (requires graphviz)
                      Default: /tmp/nic-xray-<hostname>.{svg,png}
  -v, --version       Display version information
  -h, --help          Display this help message
+
+Bond MTU Consistency:
+ Bonded interface members are checked for MTU mismatches with the bond
+ master or each other. Mismatches are marked in red with [MISMATCH].
+ MTU column is color-coded: yellow shows FRAG risk (effective <1500B),
+ red shows DROP risk (effective <576B).

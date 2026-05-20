@@ -266,6 +266,7 @@ while true; do
 			echo -e " -o, --optics        Show SFP/QSFP transceiver diagnostics (Tx/Rx power, health)"
 			echo -e "                     Health status: OK (green), WARN (yellow), ALARM (red),"
 			echo -e "                     N/DOM (no DOM data), N/A (no SFP or copper)"
+			echo -e "                     JSON output includes per-lane detail for multi-lane transceivers."
 			echo -e " -p, --physical      Show physical topology: NUMA node, PCI slot, NIC vendor/model"
 			echo -e "                     NUMA affinity: co-locating NIC and CPU on the same memory"
 			echo -e "                     node reduces latency; useful for PCIe placement analysis"
@@ -275,10 +276,11 @@ while true; do
 			echo -e "                     Columns: Type (interface type), Parent (logical parent),"
 			echo -e "                     Encap (encapsulation overhead in bytes)"
 			echo -e "                     Tree-indented child interfaces with └─ prefix"
-			echo -e "                     W column: ! (yellow FRAG <1500B), ✗ (red DROP <576B effective MTU)"
+			echo -e "                     ! column: ! (yellow FRAG <1500B), ✗ (red DROP <576B effective MTU)"
 			echo -e "                     ZeroTier (zt*) MTU 2800 is by design and not flagged as FRAG"
 			echo -e "                     Note: OpenStack Neutron qr-*/qg-* live in per-router namespaces"
 			echo -e "                     and are not visible from the root namespace (out of scope)"
+			echo -e "                     Can be combined with --physical for a full hardware-to-software stack view."
 			echo -e " --all               Enable all optional columns (--lacp --vlan --bmac --optics --physical)"
 			echo -e " --no-color          Disable color output (auto-disabled for non-terminal)"
 			echo -e " --filter-link TYPE  Show only interfaces with link up or down"
@@ -299,7 +301,10 @@ while true; do
 			echo -e " --output TYPE       Output format: table (default), csv, json, dot, svg, or png"
 			echo -e "                     dot/svg/png generate a network topology diagram"
 			echo -e "                     svg/png require graphviz (dot command)"
-			echo -e " --diagram-out FILE  Output file path for svg/png diagrams"
+			echo -e " --diagram-out FILE  Output file path for diagrams"
+			echo -e "                     With --output svg|png: saves diagram to FILE"
+			echo -e "                     With table output (default): prints table to stdout AND saves"
+			echo -e "                     a PNG diagram to FILE (requires graphviz)"
 			echo -e "                     Default: /tmp/nic-xray-<hostname>.{svg,png}"
 			echo -e " -v, --version       Display version information"
 			echo -e " -h, --help          Display this help message"
@@ -444,6 +449,27 @@ json_escape() {
     STR="${STR//\\/\\\\}"
     STR="${STR//\"/\\\"}"
     printf '%s' "$STR"
+}
+
+# --- Helper: wrap a CSV field value in double-quotes (RFC 4180) ---
+csv_escape() {
+    local V="$1"
+    V="${V//\"/\"\"}"
+    printf '"%s"' "$V"
+}
+
+# --- Helpers: parse speed_mbps and duplex from DATA_SPEED_PLAIN ---
+_parse_speed_mbps() {
+    local S="$1"
+    [[ "$S" =~ ^([0-9]+)Mb/s ]] && printf '%s' "${BASH_REMATCH[1]}" || printf ''
+}
+_parse_duplex() {
+    local S="$1"
+    case "${S,,}" in
+        *full*) printf 'full' ;;
+        *half*) printf 'half' ;;
+        *)      printf '' ;;
+    esac
 }
 
 # --- Helper: compute max width from header label and data values ---
@@ -1128,8 +1154,16 @@ detect_virtual_type() {
 		VIRT_TYPE="vpn"; return
 	fi
 
-	# veth: peer_ifindex sysfs file
-	[[ -r "/sys/class/net/$IFACE/peer_ifindex" ]] && { VIRT_TYPE="veth"; return; }
+	# veth: peer_ifindex (newer kernels) or iflink != ifindex without a lower_ device
+	# (macvlan/ipvlan also have iflink != ifindex but expose lower_<dev> symlinks)
+	local _IFIDX _IFLINK
+	_IFIDX=$(cat "/sys/class/net/$IFACE/ifindex" 2>/dev/null)
+	_IFLINK=$(cat "/sys/class/net/$IFACE/iflink" 2>/dev/null)
+	if [[ -r "/sys/class/net/$IFACE/peer_ifindex" ]] || \
+	   { [[ -n "$_IFIDX" && -n "$_IFLINK" && "$_IFIDX" != "$_IFLINK" ]] && \
+	     ! compgen -G "/sys/class/net/$IFACE/lower_*" > /dev/null 2>&1; }; then
+		VIRT_TYPE="veth"; return
+	fi
 
 	# Dummy
 	[[ "$_DEVTYPE" == "dummy" ]] && { VIRT_TYPE="dummy"; return; }
@@ -2633,6 +2667,7 @@ DOTHEADER
 
         # --- Standalone interface nodes ---
         for IDX in "${STANDALONE_INDICES[@]}"; do
+            $SHOW_VIRTUAL && [[ "${DATA_IS_PHYSICAL[$IDX]}" != "true" ]] && continue
             _dot_nic_node "$IDX" "    "
             printf '\n'
         done
@@ -2837,6 +2872,10 @@ DOTHEADER
         printf '\n'
     else
         for ((i = 0; i < ROW_COUNT; i++)); do
+            if $SHOW_VIRTUAL && [[ "${DATA_IS_PHYSICAL[$i]}" != "true" ]]; then
+                local _VP="${DATA_VIRT_PARENT[$i]:-}"
+                [[ -n "$_VP" && "$_VP" != "—" ]] && continue
+            fi
             local IFACE="${DATA_IFACE[$i]}"
             local NODE_ID
             NODE_ID=$(dot_id "$IFACE")
@@ -2848,6 +2887,7 @@ DOTHEADER
 
     # --- Edges: interfaces -> switch ports / stubs ---
     for ((i = 0; i < ROW_COUNT; i++)); do
+        $SHOW_VIRTUAL && [[ "${DATA_IS_PHYSICAL[$i]}" != "true" ]] && continue
         local IFACE="${DATA_IFACE[$i]}"
         local NODE_ID
         NODE_ID=$(dot_id "$IFACE")
@@ -2961,7 +3001,7 @@ DOTHEADER
         }
         _virt_node_style() {
             case "$1" in
-                bridge|ovs-br)    printf 'rounded,dashed' ;;
+                bridge|ovs-br)    printf 'rounded,dashed,filled' ;;
                 *)                printf 'filled' ;;
             esac
         }
@@ -2996,8 +3036,8 @@ DOTHEADER
 
             printf '    %s [shape=%s, style="%s", fillcolor="%s", color="%s", fontcolor="%s", ' \
                 "$_VNODE_ID" "$_VSHAPE" "$_VSTYLE" "$_VCOLOR" "$_VBORDER" "$BG_COLOR"
-            printf 'label=<%s<BR/><FONT POINT-SIZE="9">MTU %s</FONT>>];\n' \
-                "$(dot_escape "$_VIFACE")" "$(dot_escape "$_VMTU")"
+            printf 'label=<<B>%s</B><BR/><FONT POINT-SIZE="8">%s</FONT><BR/><FONT POINT-SIZE="9">MTU %s</FONT>>];\n' \
+                "$(dot_escape "$_VIFACE")" "$(dot_escape "$_VTYPE")" "$(dot_escape "$_VMTU")"
         done
         printf '\n'
 
@@ -3090,7 +3130,7 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
     # Header
     if ${SHOW_VIRTUAL}; then
         printf "%-${COL_W_VIRT_TYPE}s${COL_GAP}%-${COL_W_VIRT_PARENT}s${COL_GAP}%-${COL_W_VIRT_ENCAP}s${COL_GAP}%s${COL_GAP}" \
-            "Type" "Parent" "Encap" "W"
+            "Type" "Parent" "Encap" "!"
     fi
     if ${SHOW_PHYSICAL}; then
         printf "%-${COL_W_NUMA}s${COL_GAP}%-${COL_W_PCI_SLOT}s${COL_GAP}%-${COL_W_NIC_VENDOR}s${COL_GAP}%-${COL_W_NIC_MODEL}s${COL_GAP}" \
@@ -3233,7 +3273,8 @@ elif [[ "${OUTPUT_FORMAT}" == "csv" ]]; then
     if ${SHOW_PHYSICAL}; then
         printf "%s${FS}%s${FS}%s${FS}%s${FS}" "NUMA" "PCI Slot" "NIC Vendor" "NIC Model"
     fi
-    printf "%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" "Device" "Driver" "Firmware" "Interface" "MAC Address" "MTU" "Link" "Speed/Duplex" "Parent Bond"
+    printf "%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
+        "Device" "Driver" "Firmware" "Interface" "MAC Address" "MTU" "MTU Warn" "Link" "Speed/Duplex" "Speed Mb/s" "Duplex" "Parent Bond"
     ${SHOW_BMAC} && printf "${FS}%s" "Bond MAC"
     ${SHOW_LACP} && printf "${FS}%s" "LACP Status"
     ${SHOW_VLAN} && printf "${FS}%s" "VLAN"
@@ -3244,56 +3285,88 @@ elif [[ "${OUTPUT_FORMAT}" == "csv" ]]; then
     fi
     if ${SHOW_METRICS}; then
         printf "${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
-            "Rx Bits/s" "Tx Bits/s" "Rx Packets/s" "Tx Packets/s" \
+            "Rx bps" "Tx bps" "Rx pps" "Tx pps" \
             "Rx Drops" "Tx Drops" "Rx Errors" "Tx Errors" \
-            "Rx FIFO Errors" "Tx FIFO Errors" "Sample Duration"
+            "Rx FIFO Errors" "Tx FIFO Errors" "Sample Duration (s)"
     fi
     printf "${FS}%s${FS}%s${FS}%s\n" "Switch Name" "Port Name" "Port Descr"
     # CSV Data rows
     for i in "${RENDER_ORDER[@]}"; do
+        local _SPD_MBPS _DUPLEX
+        _SPD_MBPS="$(_parse_speed_mbps "${DATA_SPEED_PLAIN[$i]}")"
+        _DUPLEX="$(_parse_duplex "${DATA_SPEED_PLAIN[$i]}")"
         if ${SHOW_VIRTUAL}; then
             printf "%s${FS}%s${FS}%s${FS}%s${FS}" \
-                "${DATA_VIRT_TYPE[$i]}" "${DATA_VIRT_PARENT[$i]}" \
-                "${DATA_VIRT_ENCAP_OVERHEAD[$i]}" "${DATA_MTU_WARN[$i]:-}"
+                "$(csv_escape "${DATA_VIRT_TYPE[$i]}")" \
+                "$(csv_escape "${DATA_VIRT_PARENT[$i]}")" \
+                "$(csv_escape "${DATA_VIRT_ENCAP_OVERHEAD[$i]}")" \
+                "$(csv_escape "${DATA_MTU_WARN[$i]:-}")"
         fi
         if ${SHOW_PHYSICAL}; then
             printf "%s${FS}%s${FS}%s${FS}%s${FS}" \
-                "${DATA_NUMA[$i]}" "${DATA_PCI_SLOT[$i]}" "${DATA_NIC_VENDOR[$i]}" "${DATA_NIC_MODEL[$i]}"
+                "$(csv_escape "${DATA_NUMA[$i]}")" \
+                "$(csv_escape "${DATA_PCI_SLOT[$i]}")" \
+                "$(csv_escape "${DATA_NIC_VENDOR[$i]}")" \
+                "$(csv_escape "${DATA_NIC_MODEL[$i]}")"
         fi
-        printf "%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
-            "${DATA_DEVICE[$i]}" "${DATA_DRIVER[$i]}" "${DATA_FIRMWARE[$i]}" "${DATA_IFACE[$i]}" "${DATA_MAC[$i]}" \
-            "${DATA_MTU[$i]}" "${DATA_LINK_PLAIN[$i]}" "${DATA_SPEED_PLAIN[$i]}" "${DATA_BOND_PLAIN[$i]}"
-        ${SHOW_BMAC} && printf "${FS}%s" "${DATA_BMAC[$i]}"
-        ${SHOW_LACP} && printf "${FS}%s" "${DATA_LACP_PLAIN[$i]}"
-        ${SHOW_VLAN} && printf "${FS}%s" "${DATA_VLAN[$i]}"
+        printf "%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
+            "$(csv_escape "${DATA_DEVICE[$i]}")" \
+            "$(csv_escape "${DATA_DRIVER[$i]}")" \
+            "$(csv_escape "${DATA_FIRMWARE[$i]}")" \
+            "$(csv_escape "${DATA_IFACE[$i]}")" \
+            "$(csv_escape "${DATA_MAC[$i]}")" \
+            "$(csv_escape "${DATA_MTU[$i]}")" \
+            "$(csv_escape "${DATA_MTU_WARN[$i]:-}")" \
+            "$(csv_escape "${DATA_LINK_PLAIN[$i]}")" \
+            "$(csv_escape "${DATA_SPEED_PLAIN[$i]}")" \
+            "$(csv_escape "$_SPD_MBPS")" \
+            "$(csv_escape "$_DUPLEX")" \
+            "$(csv_escape "${DATA_BOND_PLAIN[$i]}")"
+        ${SHOW_BMAC} && printf "${FS}%s" "$(csv_escape "${DATA_BMAC[$i]}")"
+        ${SHOW_LACP} && printf "${FS}%s" "$(csv_escape "${DATA_LACP_PLAIN[$i]}")"
+        ${SHOW_VLAN} && printf "${FS}%s" "$(csv_escape "${DATA_VLAN[$i]}")"
         if ${SHOW_OPTICS}; then
             printf "${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
-                "${DATA_OPTICS_TYPE[$i]}" "${DATA_OPTICS_VENDOR[$i]}" \
-                "${DATA_OPTICS_WAVELENGTH[$i]}" "${DATA_OPTICS_TX_DBM[$i]}" \
-                "${DATA_OPTICS_TX_STATUS[$i]}" "${DATA_OPTICS_RX_DBM[$i]}" \
-                "${DATA_OPTICS_RX_STATUS[$i]}" "${DATA_OPTICS_LANE_COUNT[$i]}"
+                "$(csv_escape "${DATA_OPTICS_TYPE[$i]}")" \
+                "$(csv_escape "${DATA_OPTICS_VENDOR[$i]}")" \
+                "$(csv_escape "${DATA_OPTICS_WAVELENGTH[$i]}")" \
+                "$(csv_escape "${DATA_OPTICS_TX_DBM[$i]}")" \
+                "$(csv_escape "${DATA_OPTICS_TX_STATUS[$i]}")" \
+                "$(csv_escape "${DATA_OPTICS_RX_DBM[$i]}")" \
+                "$(csv_escape "${DATA_OPTICS_RX_STATUS[$i]}")" \
+                "$(csv_escape "${DATA_OPTICS_LANE_COUNT[$i]}")"
         fi
         if ${SHOW_METRICS}; then
             printf "${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
-                "$((DATA_MET_RX_BPS[$i] * 8))" "$((DATA_MET_TX_BPS[$i] * 8))" \
-                "${DATA_MET_RX_PPS[$i]}" "${DATA_MET_TX_PPS[$i]}" \
-                "${DATA_MET_RX_DROP[$i]}" "${DATA_MET_TX_DROP[$i]}" \
-                "${DATA_MET_RX_ERR[$i]}" "${DATA_MET_TX_ERR[$i]}" \
-                "${DATA_MET_RX_FIFO[$i]}" "${DATA_MET_TX_FIFO[$i]}" \
-                "${METRICS_ELAPSED}"
+                "$(csv_escape "$((DATA_MET_RX_BPS[$i] * 8))")" \
+                "$(csv_escape "$((DATA_MET_TX_BPS[$i] * 8))")" \
+                "$(csv_escape "${DATA_MET_RX_PPS[$i]}")" \
+                "$(csv_escape "${DATA_MET_TX_PPS[$i]}")" \
+                "$(csv_escape "${DATA_MET_RX_DROP[$i]}")" \
+                "$(csv_escape "${DATA_MET_TX_DROP[$i]}")" \
+                "$(csv_escape "${DATA_MET_RX_ERR[$i]}")" \
+                "$(csv_escape "${DATA_MET_TX_ERR[$i]}")" \
+                "$(csv_escape "${DATA_MET_RX_FIFO[$i]}")" \
+                "$(csv_escape "${DATA_MET_TX_FIFO[$i]}")" \
+                "$(csv_escape "${METRICS_ELAPSED}")"
         fi
-        printf "${FS}%s${FS}%s${FS}%s\n" "${DATA_SWITCH[$i]}" "${DATA_PORT[$i]}" "${DATA_PORT_DESCR[$i]}"
+        printf "${FS}%s${FS}%s${FS}%s\n" \
+            "$(csv_escape "${DATA_SWITCH[$i]}")" \
+            "$(csv_escape "${DATA_PORT[$i]}")" \
+            "$(csv_escape "${DATA_PORT_DESCR[$i]}")"
     done
 elif [[ "${OUTPUT_FORMAT}" == "json" ]]; then
     printf '[\n'
     LAST_IDX="${RENDER_ORDER[-1]}"
     for i in "${RENDER_ORDER[@]}"; do
+        local _SPD_MBPS _DUPLEX
+        _SPD_MBPS="$(_parse_speed_mbps "${DATA_SPEED_PLAIN[$i]}")"
+        _DUPLEX="$(_parse_duplex "${DATA_SPEED_PLAIN[$i]}")"
         printf '  {\n'
         if ${SHOW_VIRTUAL}; then
-            printf '    "virt_type": "%s",\n' "$(json_escape "${DATA_VIRT_TYPE[$i]}")"
-            printf '    "virt_parent": "%s",\n' "$(json_escape "${DATA_VIRT_PARENT[$i]}")"
+            printf '    "type": "%s",\n' "$(json_escape "${DATA_VIRT_TYPE[$i]}")"
+            printf '    "parent": "%s",\n' "$(json_escape "${DATA_VIRT_PARENT[$i]}")"
             printf '    "encap_overhead_bytes": %s,\n' "${DATA_VIRT_ENCAP_OVERHEAD[$i]:-0}"
-            printf '    "mtu_warn": "%s",\n' "$(json_escape "${DATA_MTU_WARN[$i]:-}")"
         fi
         if ${SHOW_PHYSICAL}; then
             printf '    "numa_node": "%s",\n' "$(json_escape "${DATA_NUMA[$i]}")"
@@ -3307,8 +3380,19 @@ elif [[ "${OUTPUT_FORMAT}" == "json" ]]; then
         printf '    "interface": "%s",\n' "$(json_escape "${DATA_IFACE[$i]}")"
         printf '    "mac_address": "%s",\n' "$(json_escape "${DATA_MAC[$i]}")"
         printf '    "mtu": %s,\n' "${DATA_MTU[$i]:-0}"
+        printf '    "mtu_warn": "%s",\n' "$(json_escape "${DATA_MTU_WARN[$i]:-}")"
         printf '    "link": "%s",\n' "$(json_escape "${DATA_LINK_PLAIN[$i]}")"
         printf '    "speed_duplex": "%s",\n' "$(json_escape "${DATA_SPEED_PLAIN[$i]}")"
+        if [[ -n "$_SPD_MBPS" ]]; then
+            printf '    "speed_mbps": %s,\n' "$_SPD_MBPS"
+        else
+            printf '    "speed_mbps": null,\n'
+        fi
+        if [[ -n "$_DUPLEX" ]]; then
+            printf '    "duplex": "%s",\n' "$_DUPLEX"
+        else
+            printf '    "duplex": null,\n'
+        fi
         printf '    "parent_bond": "%s"' "$(json_escape "${DATA_BOND_PLAIN[$i]}")"
         if ${SHOW_BMAC}; then
             printf ',\n    "bond_mac": "%s"' "$(json_escape "${DATA_BMAC[$i]}")"
@@ -3408,6 +3492,15 @@ elif [[ "$OUTPUT_FORMAT" == "svg" || "$OUTPUT_FORMAT" == "png" ]]; then
     else
         echo "Failed to render diagram. Check that graphviz is working correctly." >&2
         exit 1
+    fi
+fi
+
+# When table output is requested with --diagram-out, also generate a diagram
+if [[ "$OUTPUT_FORMAT" == "table" && -n "$DIAGRAM_OUTPUT_FILE" ]]; then
+    if generate_dot | dot -Tpng -o "$DIAGRAM_OUTPUT_FILE" 2>/dev/null; then
+        echo "Diagram saved to: $DIAGRAM_OUTPUT_FILE" >&2
+    else
+        echo "Failed to render diagram. Check that graphviz is installed." >&2
     fi
 fi
 }

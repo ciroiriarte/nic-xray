@@ -118,7 +118,9 @@ For multi-lane modules (QSFP+/QSFP28), the worst-case (minimum) power level
 across all lanes is shown. If lane variance exceeds 2\ dB, the outlier channel
 is flagged (e.g.,
 .BR "Ch3\(da2dB" ).
-Per-lane detail is available in CSV and JSON output.
+JSON output includes per-lane power arrays
+.RB ( tx_lanes_dbm ", " rx_lanes_dbm )
+for full per-channel detail, which is not available in CSV output.
 .TP
 .BR \-p ", " \-\-physical
 Show physical topology information: NUMA node, PCI slot designation, NIC
@@ -166,7 +168,7 @@ Logical parent interface name (if applicable).
 .B Encap
 Encapsulation overhead in bytes.
 .TP
-.B W (Warning)
+.B ! (Warning)
 Per-row MTU warning indicator:
 .B !
 (yellow) indicates FRAG risk with effective MTU < 1500B;
@@ -177,6 +179,10 @@ ZeroTier (zt*) MTU of 2800 is by design and not flagged as FRAG.
 .IP
 Scope is limited to the root network namespace. OpenStack Neutron routers
 (qr-*, qg-*) and other per-namespace interfaces are not visible.
+.IP
+Can be combined with
+.B \-\-physical
+for a full hardware-to-software stack view.
 .IP
 .B Bond MTU consistency check
 is always performed when bonded interfaces are present. MTU mismatches between
@@ -320,13 +326,24 @@ but renders in PNG format.
 .RE
 .TP
 .BI \-\-diagram\-out " FILE"
-Set the output file path for
-.B svg
+Set the output file path for diagram output.
+When used with
+.B \-\-output svg
 or
-.B png
-diagram formats. Defaults to
-.IR /tmp/nic\-xray\-<hostname>.{svg,png} .
-Ignored for other output formats.
+.BR \-\-output png ,
+saves the rendered diagram to
+.IR FILE .
+When used with the default table output, the normal table is printed to
+standard output
+.I and
+a PNG diagram is also saved to
+.I FILE
+(requires
+.BR dot (1)
+from graphviz). A confirmation message is printed to standard error.
+Defaults to
+.IR /tmp/nic\-xray\-<hostname>.{svg,png}
+for svg/png formats.
 .TP
 .BR \-v ", " \-\-version
 Display version information and exit.
@@ -487,7 +504,7 @@ for root-level virtual interfaces without a parent.
 .BR \-\-virtual )
 Encapsulation overhead in bytes (e.g., 4 for VLAN 802.1Q, 50 for VXLAN).
 .TP
-.B W (Warning)
+.B ! (Warning)
 (shown with
 .BR \-\-virtual )
 Per-row MTU warning indicator.
@@ -874,6 +891,18 @@ Show virtual/logical interfaces (VLANs, bridges, tap/tun, etc.):
 .PP
 .RS
 .B sudo nic-xray.sh \-\-virtual
+.RE
+.PP
+Generate a virtual interface topology diagram (DOT source):
+.PP
+.RS
+.B sudo nic-xray.sh \-\-virtual \-\-output dot > topology-virtual.dot
+.RE
+.PP
+Render virtual interface topology as PNG:
+.PP
+.RS
+.B sudo nic-xray.sh \-\-virtual \-\-output png \-\-diagram\-out /tmp/topology-virtual.png
 .RE
 .PP
 Show all optional columns at once:
