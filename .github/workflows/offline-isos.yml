@@ -1,0 +1,143 @@
+name: Offline installer ISOs
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version string to embed in ISO filenames (defaults to tag or nic-xray.sh SCRIPT_VERSION)
+        required: false
+        type: string
+      with_graphviz:
+        description: Include graphviz in the offline bundle
+        required: false
+        default: true
+        type: boolean
+  pull_request:
+    paths:
+      - .github/workflows/offline-isos.yml
+      - ci/build-offline-iso.sh
+      - nic-xray.sh
+  push:
+    tags:
+      - 'v*'
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.distro.id }} ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    container: ${{ matrix.distro.container }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64]
+        distro:
+          - id: debian-12
+            container: debian:bookworm
+            obs_path: Debian_12
+            package_manager: apt
+          - id: debian-13
+            container: debian:trixie
+            obs_path: Debian_13
+            package_manager: apt
+          - id: ubuntu-22.04
+            container: ubuntu:22.04
+            obs_path: Ubuntu_22.04
+            package_manager: apt
+          - id: ubuntu-24.04
+            container: ubuntu:24.04
+            obs_path: Ubuntu_24.04
+            package_manager: apt
+          - id: opensuse-tumbleweed
+            container: opensuse/tumbleweed:latest
+            obs_path: openSUSE_Tumbleweed
+            package_manager: zypper
+          - id: opensuse-slowroll
+            container: opensuse/tumbleweed:latest
+            obs_path: openSUSE_Slowroll
+            package_manager: zypper
+          - id: opensuse-leap-15.6
+            container: opensuse/leap:15.6
+            obs_path: openSUSE_Leap_15.6
+            package_manager: zypper
+          - id: rocky-9
+            container: rockylinux/rockylinux:9
+            obs_path: Rocky_9
+            package_manager: dnf
+          - id: rocky-10
+            container: rockylinux/rockylinux:10
+            obs_path: Rocky_10
+            package_manager: dnf
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ -n "${{ inputs.version || '' }}" ]]; then
+            version="${{ inputs.version }}"
+          elif [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          elif [[ "${{ github.event_name }}" == "release" ]]; then
+            version="${{ github.event.release.tag_name }}"
+            version="${version#v}"
+          else
+            version="$(awk -F'"' '/^SCRIPT_VERSION=/ { print $2; exit }' nic-xray.sh)"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build offline ISO
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ./ci/build-offline-iso.sh \
+            --distro-id '${{ matrix.distro.id }}' \
+            --obs-path '${{ matrix.distro.obs_path }}' \
+            --package-manager '${{ matrix.distro.package_manager }}' \
+            --arch '${{ matrix.arch }}' \
+            --version '${{ steps.version.outputs.version }}' \
+            --with-graphviz '${{ github.event_name != 'workflow_dispatch' || inputs.with_graphviz }}'
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nic-xray-offline-${{ matrix.distro.id }}-${{ matrix.arch }}
+          path: |
+            dist/*.iso
+            dist/*.sha256
+          if-no-files-found: error
+
+  release-assets:
+    name: Attach offline ISOs to release
+    if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download ISO artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: nic-xray-offline-*
+          merge-multiple: true
+
+      - name: Attach assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            tag="${{ github.event.release.tag_name }}"
+          fi
+          gh release view "$tag" >/dev/null 2>&1 || \
+            gh release create "$tag" --verify-tag --title "$tag" --notes "nic-xray $tag"
+          gh release upload "$tag" release-assets/* --clobber
