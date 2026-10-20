@@ -2,7 +2,7 @@ PREFIX      ?= /usr/local
 MANDIR      ?= $(PREFIX)/share/man
 COMPDIR     ?= /etc/bash_completion.d
 
-.PHONY: install-man uninstall-man install-completion uninstall-completion
+.PHONY: install-man uninstall-man install-completion uninstall-completion test
 
 install-man:
 	install -d $(DESTDIR)$(MANDIR)/man8
@@ -17,3 +17,6 @@ install-completion:
 
 uninstall-completion:
 	rm -f $(DESTDIR)$(COMPDIR)/nic-xray
+
+test:
+	bash tests/nic-health-test.sh
