@@ -6,10 +6,10 @@ getopt      required  found     /usr/bin/getopt         Command-line parsing
 readlink    required  found     /usr/bin/readlink       sysfs path resolution
 lspci       optional  found     /usr/bin/lspci          NIC vendor/model names (falls back to PCI IDs)
 devlink     optional  found     /usr/sbin/devlink       devlink health reporter checks
+ip          optional  found     /usr/sbin/ip            Global addresses for generic.link.state (port in use)
 timeout     optional  found     /usr/bin/timeout        Bounds deep-mode and journal queries (required for -l deep)
 journalctl  optional  found     /usr/bin/journalctl     Link-down look-back from the kernel journal (-L/--lookback)
-mlxlink     optional  missing   -                       mlx5 deep mode (-l deep) via NVIDIA MFT (preferred)
-                                                        ↳ package: NVIDIA MFT (proprietary, install manually)
+mlxlink     optional  found     /usr/bin/mlxlink        mlx5 deep mode (-l deep) via NVIDIA MFT (preferred)
 mstlink     optional  found     /usr/bin/mstlink        mlx5 deep mode (-l deep) via open-source mstflint
 
 ✅ All required tools present. Missing optional tools only disable the checks listed.

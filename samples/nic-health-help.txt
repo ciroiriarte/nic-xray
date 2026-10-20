@@ -36,6 +36,10 @@ Checks:
  generic.temperature    hwmon sensor within 10C of critical or above max (WARN),
                         at/over critical (CRIT)
  generic.devlink.health Reporter not healthy (CRIT), new errors in window (WARN)
+ generic.link.state     No link on a port in use: bond/bridge member, upper device, SR-IOV VFs
+                        or global address (WARN; CRIT when its bond is down too). Spare ports:
+                        N/A (WARN if link came up more than once this boot); use
+                        undeterminable (ip missing/failed): UNKNOWN
  generic.link.flaps     Carrier transitions in window (WARN)
  generic.link.lookback  Link-down messages in the last -L minutes (WARN); 3 or more while
                         still flapping in the window (CRIT)
@@ -44,6 +48,7 @@ Checks:
                         congestion, pause storms, module faults, PHY link-down events
  mlx5.deep.*            -l deep: tool troubleshooting code, module/link FEC mismatch,
                         effective BER since last clear, module ranges and lane fault flags
+                        (ports without carrier: link checks N/A, Rx power/LOS/CDR LOL not judged)
 
 Exit status (Nagios-compatible):
  0  All checks OK or N/A

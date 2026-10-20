@@ -775,14 +775,14 @@ Design and rationale: [`docs/design/nic-health.md`](docs/design/nic-health.md). 
 | PCIe errors | `generic.pcie.aer` | sysfs AER counters (fatal/non-fatal → CRIT, correctable → WARN) |
 | Temperature | `generic.temperature` | hwmon sensors (critical → CRIT, within 10 °C → WARN) |
 | Firmware/driver health | `generic.devlink.health.*` | `devlink health` reporters (device and port) |
-| Link stability | `generic.link.flaps`, `generic.link.lookback` | sysfs `carrier_changes` (in the window); driver link-down messages in the kernel journal over the last `-L` minutes |
+| Link stability | `generic.link.state`, `generic.link.flaps`, `generic.link.lookback` | no carrier on a port in use (bond/bridge member, VLAN, SR-IOV VFs, global address; spare ports N/A, WARN if they had link this boot; `ip` missing → UNKNOWN); sysfs `carrier_changes` (in the window); driver link-down messages in the kernel journal over the last `-L` minutes |
 | NVIDIA ConnectX (`mlx5_core`) | `mlx5.rx.starvation`, `mlx5.nic.discards`, `mlx5.phy.errors`, `mlx5.frame.errors`, `mlx5.pcie.path`, `mlx5.datapath.faults`, `mlx5.congestion`, `mlx5.pause.storm`, `mlx5.module`, `mlx5.link.phy_down` | `ethtool -S` (aggregate counters) |
 | Deep mode (`-l deep`) | `mlx5.deep.troubleshooting`, `mlx5.deep.fec`, `mlx5.deep.ber`, `mlx5.deep.module` | `mlxlink` / `mstlink -d <BDF> -m -c` |
 
 ### 🧰 Requirements and optional tools
 
 - **Required:** Bash ≥ 4.4, root, `ethtool`, `getopt` (util-linux), `readlink` (coreutils).
-- **Optional:** `lspci` (pciutils, model names), `devlink` (iproute2, health reporters), `timeout` (coreutils, required for `-l deep`), `journalctl` (systemd, link-down look-back).
+- **Optional:** `lspci` (pciutils, model names), `devlink` and `ip` (iproute2, health reporters and port-in-use addresses), `timeout` (coreutils, required for `-l deep`), `journalctl` (systemd, link-down look-back).
 - **Deep mode on ConnectX:** `mstflint` (distribution package, provides `mstlink`) or NVIDIA MFT (`mlxlink`, proprietary, install manually). Both are validated on hardware and give identical verdicts; MFT also reports the PHY `Link Down Counter`. MFT's `install.sh --without-kernel` is enough: `mlxlink -d <BDF>` works without the MFT kernel module (no DKMS build), via the `mft-mlx5` package. Vendor tools are never bundled or downloaded.
 
 Check what is available, without root:

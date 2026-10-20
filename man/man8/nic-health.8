@@ -169,6 +169,25 @@ devlink health reporters, device level (target: PCI function) and port level
 (target: interface). State other than healthy \(-> CRIT; new errors in the
 window \(-> WARN. No reporters for the ASIC, or devlink not installed \(-> N/A.
 .TP
+.B generic.link.state
+A port without carrier that is in use \(-> WARN; CRIT when its bond is down
+too (all members lost); N/A when the operator downed the bond. In use means a
+bond, bridge, team or OVS master, an upper device (VLAN, macvlan), SR-IOV
+virtual functions, or a global IP address (needs
+.BR ip (8)).
+A spare port without link, or an administratively down port, is N/A: not a
+fault. Admin state alone cannot tell them apart, because provisioning usually
+brings every port up. The check never calls a port spare when it cannot be
+sure: if
+.BR ip (8)
+is missing or fails the result is UNKNOWN, and a port whose link came up more
+than once this boot (spare ports show a single up/down pair from driver
+start) is WARN. Carrier up with operstate dormant, lowerlayerdown or testing
+(for example 802.1X not yet authorized) \(-> WARN. Ports used only outside the
+host's view (DPDK, PCI passthrough without VFs) cannot be recognized; they are
+judged as spare unless they had link this boot. A team master that is down
+does not escalate to CRIT.
+.TP
 .B generic.link.flaps
 Carrier transitions in the window \(-> WARN.
 .TP
@@ -290,6 +309,19 @@ that the PCI address is well formed, and that no forbidden flag is present;
 refused calls are reported as UNKNOWN and never executed. Tools are executed by
 absolute path, and shell functions inherited from the environment are discarded
 at start-up.
+.PP
+On a port without carrier the tool can only report the missing link, so
+.BR mlx5.deep.troubleshooting ,
+.B mlx5.deep.fec
+and
+.B mlx5.deep.ber
+are N/A there (the link itself is judged by
+.BR generic.link.state ),
+and
+.B mlx5.deep.module
+shows Rx power, Rx LOS and Rx CDR LOL without judging them, since no light is
+expected; temperature, voltage, bias, Tx power and Tx fault flags are still
+judged.
 .PP
 Never run, at any level: eye scans, PRBS, link/FEC/speed changes, counter
 clears, error injection, register access

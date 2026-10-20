@@ -677,8 +677,35 @@ assert_eq "mlxlink BER value"                "effective 3E-9 raw 7E-7" "$(mlx5_r
 assert_eq "mlxlink BER evidence names tool counter" "yes" "$([[ "$(mlx5_rec REC_EVIDENCE mlx5.deep.ber eth0)" == *"Link Down Counter=331"* ]] && echo yes)"
 assert_eq "mlxlink module (Rx -8.069 in range) OK" "OK" "$(sev_of mlx5.deep.module eth0)"
 assert_eq "mlxlink troubleshooting evidence" "mlxlink: No issue was observed" "$(mlx5_rec REC_EVIDENCE mlx5.deep.troubleshooting eth0)"
-# No-link port: opcode 2 is reported; the N/A BER and -40 dBm rows are tracked in #12
-assert_eq "mlxlink no-link opcode WARN"      "WARN" "$(sev_of mlx5.deep.troubleshooting eth1)"
+# Kernel says the port has link, so the tool's opcode 2 is still reported
+assert_eq "mlxlink opcode WARN while kernel has carrier" "WARN" "$(sev_of mlx5.deep.troubleshooting eth1)"
+# Without carrier (#12): link-level deep rows are N/A, the module is judged without Rx power
+printf 'down\n' > "$SYSFS_NET/eth1/operstate"; printf '0\n' > "$SYSFS_NET/eth1/carrier"
+reset_results
+check_deep_port 1
+assert_eq "no-link deep troubleshooting N/A" "N/A" "$(sev_of mlx5.deep.troubleshooting eth1)"
+assert_eq "no-link deep FEC N/A"             "N/A" "$(sev_of mlx5.deep.fec eth1)"
+assert_eq "no-link deep BER N/A (not UNKNOWN)" "N/A" "$(sev_of mlx5.deep.ber eth1)"
+assert_eq "no-link deep evidence points to link.state" "no link (operstate=down): see generic.link.state" "$(mlx5_rec REC_EVIDENCE mlx5.deep.ber eth1)"
+assert_eq "no-link module: Rx -40 dBm not judged" "OK" "$(sev_of mlx5.deep.module eth1)"
+assert_eq "no-link module evidence says why" "yes" "$([[ "$(mlx5_rec REC_EVIDENCE mlx5.deep.module eth1)" == *"[dBm]=-40 [-11.308..3.398] (not judged: no link)"* ]] && echo yes)"
+# Dark optic: Rx LOS / Rx CDR LOL set are expected without link; a Tx fault is still a fault
+sed -E -e 's/^(Rx LOS \[per lane\] +: )0/\11/' -e 's/^(Rx CDR LOL \[per lane\] +: )0/\11/' \
+    "$FIXTURES/mlxlink-cx6lx-25g-sr-nolink.txt" > "$FIX/mlxlink-dark.txt"
+assert_eq "dark fixture has LOS set" "1" "$(grep -cE '^Rx LOS \[per lane\] +: 1' "$FIX/mlxlink-dark.txt")"
+# shellcheck disable=SC2329
+mlxlink() { cat "$FIX/mlxlink-dark.txt"; }
+DEEP_KV=(); DEEP_ERR=(); DEEP_TOOL_USED=()
+deep_query mlxlink eth1 0000:01:00.1
+reset_results; check_deep_port 1
+assert_eq "no-link: Rx LOS/CDR LOL not judged" "OK" "$(sev_of mlx5.deep.module eth1)"
+sed -i -E 's/^(Tx Fault \[per lane\] +: )0/\11/' "$FIX/mlxlink-dark.txt"
+DEEP_KV=(); DEEP_ERR=(); DEEP_TOOL_USED=()
+deep_query mlxlink eth1 0000:01:00.1
+reset_results; check_deep_port 1
+assert_eq "no-link: Tx fault still WARN" "WARN" "$(sev_of mlx5.deep.module eth1)"
+assert_eq "no-link: one row per deep check" "1 1 1 1" "$(count_of mlx5.deep.troubleshooting eth1) $(count_of mlx5.deep.fec eth1) $(count_of mlx5.deep.ber eth1) $(count_of mlx5.deep.module eth1)"
+printf 'up\n' > "$SYSFS_NET/eth1/operstate"; rm -f "$SYSFS_NET/eth1/carrier"
 TOOL_PATH[mlxlink]=""
 
 # Failures: timeout, tool error, tool missing; mlxlink preferred
@@ -740,6 +767,90 @@ OUT=$(env 'BASH_FUNC_ethtool%%=() { echo HIJACKED; }' bash -c 'type -t ethtool; 
 assert_eq "exported functions dropped at load" "function dropped" "$(tr '\n' ' ' <<< "$OUT" | sed 's/ $//')"
 # shellcheck disable=SC2329  # the function only has to exist while detect_tools runs
 assert_eq "detect_tools resolves files, not functions" "yes" "$(ethtool() { :; }; TOOL_PATH=(); detect_tools; [[ "${TOOL_PATH[ethtool]:-/}" == /* ]] && echo yes)"
+
+# --- Link state (#12): a port in use must have carrier; spare ports are not judged ---
+link_state() {  # link_state <iface>: severity, value and evidence of generic.link.state
+    local i
+    reset_results
+    check_link_state "${IFACE_PORT[$1]}"
+    for i in "${!REC_SEV[@]}"; do
+        printf '%s|%s|%s' "${REC_SEV[i]}" "${REC_VALUE[i]}" "${REC_EVIDENCE[i]}"
+    done
+}
+# shellcheck disable=SC2329  # reached through TOOL_PATH[ip]
+ip() { [[ "$5" == "eth3" && -e "$FIX/eth3_has_addr" ]] && echo "4: eth3    inet 192.0.2.10/24 brd 192.0.2.255 scope global eth3"; return 0; }
+TOOL_PATH[ip]=ip
+for P in eth0 eth1 eth2 eth3; do printf '0x1003\n' > "$SYSFS_NET/$P/flags"; done
+printf '1\n' > "$SYSFS_NET/eth0/carrier"
+assert_eq "link up OK" "OK|up" "$(link_state eth0 | cut -d'|' -f1,2)"
+# Carrier up but traffic blocked (802.1X not authorized)
+printf 'dormant\n' > "$SYSFS_NET/eth0/operstate"
+assert_eq "carrier but dormant WARN" "WARN|carrier, dormant" "$(link_state eth0 | cut -d'|' -f1,2)"
+printf 'up\n' > "$SYSFS_NET/eth0/operstate"
+# eth1: no carrier, nothing on top
+printf '0\n' > "$SYSFS_NET/eth1/carrier"; printf '1\n' > "$SYSFS_NET/eth1/carrier_up_count"; printf '1\n' > "$SYSFS_NET/eth1/carrier_down_count"
+assert_eq "spare port without link N/A" "N/A|no link (unused)" "$(link_state eth1 | cut -d'|' -f1,2)"
+assert_eq "spare port evidence" "yes" "$([[ "$(link_state eth1)" == *"carrier_up_count=1 carrier_down_count=1; no master, no upper device, no VFs, no global address" ]] && echo yes)"
+# eth1 as a bond member: bond up -> WARN (redundancy lost), bond down -> CRIT
+mkdir -p "$SYSFS_NET/bond0/bonding"; printf 'up\n' > "$SYSFS_NET/bond0/operstate"
+ln -s "$SYSFS_NET/bond0" "$SYSFS_NET/eth1/master"
+assert_eq "bond member without link WARN" "WARN|no link" "$(link_state eth1 | cut -d'|' -f1,2)"
+assert_eq "bond member evidence" "yes" "$([[ "$(link_state eth1)" == *"in use: master=bond0" ]] && echo yes)"
+printf 'down\n' > "$SYSFS_NET/bond0/operstate"
+assert_eq "bond down with member CRIT" "CRIT|no link" "$(link_state eth1 | cut -d'|' -f1,2)"
+# Operator downed the bond: not a fault
+printf '0x1002\n' > "$SYSFS_NET/bond0/flags"
+assert_eq "admin-down bond member N/A" "yes" "$([[ "$(link_state eth1)" == "N/A|no link|"*"bond0 flags=0x1002 (IFF_UP clear)" ]] && echo yes)"
+rm -f "$SYSFS_NET/bond0/flags"
+# Admin down wins over a master
+printf '0x1002\n' > "$SYSFS_NET/eth1/flags"
+assert_eq "admin-down member of a down bond N/A" "N/A|admin down" "$(link_state eth1 | cut -d'|' -f1,2)"
+printf '0x1003\n' > "$SYSFS_NET/eth1/flags"
+# Bond member down drives the verdict end to end
+reset_results; check_link_state "${IFACE_PORT[eth1]}"; compute_verdict
+assert_eq "bond down member: exit code" "CRIT 2" "$VERDICT $EXIT_CODE"
+# Bridge (not a bond) master that is down: WARN, never CRIT
+rm "$SYSFS_NET/eth1/master"; mkdir -p "$SYSFS_NET/br0"; printf 'down\n' > "$SYSFS_NET/br0/operstate"
+ln -s "$SYSFS_NET/br0" "$SYSFS_NET/eth1/master"
+assert_eq "bridge member without link WARN" "WARN|no link" "$(link_state eth1 | cut -d'|' -f1,2)"
+rm "$SYSFS_NET/eth1/master"
+# VLAN on top
+ln -s "$SYSFS_NET/eth0" "$SYSFS_NET/eth1/upper_eth1.100"
+assert_eq "port with VLAN upper in use" "yes" "$([[ "$(link_state eth1)" == "WARN|no link|"*"in use: upper=eth1.100" ]] && echo yes)"
+rm "$SYSFS_NET/eth1/upper_eth1.100"
+# Address only (no master/upper), from ip
+printf '0\n' > "$SYSFS_NET/eth3/carrier"; : > "$FIX/eth3_has_addr"
+assert_eq "port with global address in use" "yes" "$([[ "$(link_state eth3)" == "WARN|no link|"*"in use: address=192.0.2.10/24" ]] && echo yes)"
+rm -f "$FIX/eth3_has_addr"
+# ip failing or missing: never "spare" (the port may be used only through an address)
+# shellcheck disable=SC2329
+ip() { echo "Cannot open netlink socket"; return 2; }
+assert_eq "ip failure: use unknown, UNKNOWN" "yes" "$([[ "$(link_state eth3)" == "UNKNOWN|no link (use unknown)|"*"addresses not checked: ip exit 2: Cannot open netlink socket" ]] && echo yes)"
+TOOL_PATH[ip]=""
+assert_eq "without ip: UNKNOWN, not spare" "yes" "$([[ "$(link_state eth3)" == "UNKNOWN|no link (use unknown)|"*"addresses not checked: ip missing" ]] && echo yes)"
+# A port that had link more than the driver-init toggle is never silently spare
+printf '3\n' > "$SYSFS_NET/eth3/carrier_up_count"
+assert_eq "had link this boot, no use found: WARN" "WARN|no link (had link)" "$(link_state eth3 | cut -d'|' -f1,2)"
+rm -f "$SYSFS_NET/eth3/carrier_up_count"
+TOOL_PATH[ip]=ip
+# SR-IOV PF with VFs (e.g. passed to VMs) is in use
+printf '8\n' > "$FIX/bus/pci/devices/0000:03:00.0/sriov_numvfs"
+assert_eq "PF with VFs in use" "yes" "$([[ "$(link_state eth3)" == "WARN|no link|"*"in use: vfs=8" ]] && echo yes)"
+rm -f "$FIX/bus/pci/devices/0000:03:00.0/sriov_numvfs"
+# IPv6-only global address
+# shellcheck disable=SC2329
+ip() { [[ "$5" == "eth3" ]] && echo "4: eth3    inet6 2001:db8::1/64 scope global"; return 0; }
+assert_eq "IPv6-only address in use" "yes" "$([[ "$(link_state eth3)" == "WARN|no link|"*"in use: address=2001:db8::1/64" ]] && echo yes)"
+TOOL_PATH[ip]=""
+# Admin down is operator intent, not a fault
+printf '0x1002\n' > "$SYSFS_NET/eth1/flags"
+assert_eq "admin down N/A" "N/A|admin down" "$(link_state eth1 | cut -d'|' -f1,2)"
+# Carrier unreadable (admin down) falls back to operstate
+rm -f "$SYSFS_NET/eth0/carrier"
+assert_eq "no carrier file: operstate up is link" "OK" "$(link_state eth0 | cut -d'|' -f1)"
+for P in eth0 eth1 eth2 eth3; do rm -f "$SYSFS_NET/$P/flags" "$SYSFS_NET/$P/carrier" "$SYSFS_NET/$P/carrier_up_count" "$SYSFS_NET/$P/carrier_down_count"; done
+rm -rf "$SYSFS_NET/bond0" "$SYSFS_NET/br0"
+unset -f ip
 
 # --- Link-down look-back (-L/--lookback) ---
 # Real mlx5 and bond lines (Ubuntu 24.04), other driver spellings, and negative cases

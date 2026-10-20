@@ -28,6 +28,9 @@
 #   - 2026-10-20: Phase 5: -l/--level deep with allowlisted mlxlink/mstlink queries (design §7)
 #   - 2026-10-20: -L/--lookback: generic.link.lookback counts driver link-down messages in the
 #                 kernel journal over the last N minutes (#9), so past flaps are visible
+#   - 2026-10-20: generic.link.state: no carrier on a port in use (bond/bridge member, upper
+#                 devices or a global address) is WARN, CRIT when its bond is down too; deep
+#                 link checks skip ports without carrier instead of reporting noise (#12)
 #
 # Version: 2.11.1
 
@@ -97,6 +100,17 @@ LOOKBACK_OK="ok"
 LOOKBACK_NOTOOL="notool"
 LOOKBACK_ABSENT="absent"
 LOOKBACK_FAILED="failed"
+
+# Link state (generic.link.state, #12): IFF_UP bit of sysfs flags and the operstate that means
+# carrier
+IFF_UP=1
+OPER_UP="up"
+# Carrier up but no traffic: 802.1X not yet authorized, lower device down, test mode
+OPER_BLOCKED=("dormant" "lowerlayerdown" "testing")
+# Spare ports show one carrier up/down pair from driver init; more ups mean it really had link
+SPARE_MAX_CARRIER_UP=1
+# Deep module values expected to be "bad" on a dark port (no fiber or peer): shown, not judged
+DEEP_NOLINK_EXEMPT_KEYS=("Rx Power Current [dBm]" "Rx LOS [per lane]" "Rx CDR LOL [per lane]")
 
 # Temperature: WARN this many degrees C below the critical threshold
 TEMP_WARN_MARGIN_C=10
@@ -213,14 +227,15 @@ DEVLINK_HEALTHY="healthy"
 
 # Tool catalog for --check-tools and JSON capabilities (parallel arrays)
 REQUIRED_CMDS=("ethtool" "getopt" "readlink")
-TOOL_NAMES=("ethtool" "getopt" "readlink" "lspci" "devlink" "timeout" "journalctl" "mlxlink" "mstlink")
-TOOL_ROLES=("required" "required" "required" "optional" "optional" "optional" "optional" "optional" "optional")
+TOOL_NAMES=("ethtool" "getopt" "readlink" "lspci" "devlink" "ip" "timeout" "journalctl" "mlxlink" "mstlink")
+TOOL_ROLES=("required" "required" "required" "optional" "optional" "optional" "optional" "optional" "optional" "optional")
 TOOL_USES=(
     "Driver/firmware identification, mlx5 counters (ethtool -S)"
     "Command-line parsing"
     "sysfs path resolution"
     "NIC vendor/model names (falls back to PCI IDs)"
     "devlink health reporter checks"
+    "Global addresses for generic.link.state (port in use)"
     "Bounds deep-mode and journal queries (required for -l deep)"
     "Link-down look-back from the kernel journal (-L/--lookback)"
     "mlx5 deep mode (-l deep) via NVIDIA MFT (preferred)"
@@ -231,6 +246,7 @@ TOOL_PACKAGES=(
     "util-linux"
     "coreutils"
     "pciutils"
+    "iproute2 (iproute on RHEL)"
     "iproute2 (iproute on RHEL)"
     "coreutils"
     "systemd"
@@ -362,6 +378,10 @@ usage() {
     echo -e " generic.temperature    hwmon sensor within ${TEMP_WARN_MARGIN_C}C of critical or above max (WARN),"
     echo -e "                        at/over critical (CRIT)"
     echo -e " generic.devlink.health Reporter not healthy (CRIT), new errors in window (WARN)"
+    echo -e " generic.link.state     No link on a port in use: bond/bridge member, upper device, SR-IOV VFs"
+    echo -e "                        or global address (WARN; CRIT when its bond is down too). Spare ports:"
+    echo -e "                        N/A (WARN if link came up more than once this boot); use"
+    echo -e "                        undeterminable (ip missing/failed): UNKNOWN"
     echo -e " generic.link.flaps     Carrier transitions in window (WARN)"
     echo -e " generic.link.lookback  Link-down messages in the last -L minutes (WARN); $LOOKBACK_CRIT_DOWNS or more while"
     echo -e "                        still flapping in the window (CRIT)"
@@ -370,6 +390,7 @@ usage() {
     echo -e "                        congestion, pause storms, module faults, PHY link-down events"
     echo -e " mlx5.deep.*            -l deep: tool troubleshooting code, module/link FEC mismatch,"
     echo -e "                        effective BER since last clear, module ranges and lane fault flags"
+    echo -e "                        (ports without carrier: link checks N/A, Rx power/LOS/CDR LOL not judged)"
     echo -e ""
     echo -e "Exit status (Nagios-compatible):"
     echo -e " $EXIT_OK  All checks OK or N/A"
@@ -1310,9 +1331,22 @@ check_deep_port() {
         return 0
     fi
 
+    # Without carrier the link-level results are the tool reporting "no link" (opcode 2, BER N/A):
+    # generic.link.state judges that once, whether or not the port should be up (#12)
+    local LINK_UP=true NOLINK
+    if ! port_link_up "$IDX"; then
+        LINK_UP=false
+        NOLINK="no link (operstate=$(port_oper "$IDX")): see generic.link.state"
+        for K in mlx5.deep.troubleshooting mlx5.deep.fec mlx5.deep.ber; do
+            add_record "port" "$IFACE" "$K" "-" "" "-" "$SEV_NA" "$NOLINK" "" "$REF"
+        done
+    fi
+
     # Troubleshooting code computed by the tool from link state and counters
     K="${DEEP_KV["$IFACE|Status Opcode"]:-}"
-    if [[ -z "$K" ]]; then
+    if ! $LINK_UP; then
+        :
+    elif [[ -z "$K" ]]; then
         add_record "port" "$IFACE" "mlx5.deep.troubleshooting" "-" "" "-" "$SEV_NA" "$TOOL printed no Status Opcode" "" "$REF"
     elif [[ "$K" == "0" ]]; then
         add_record "port" "$IFACE" "mlx5.deep.troubleshooting" "opcode 0" "" "0" "$SEV_OK" \
@@ -1325,7 +1359,9 @@ check_deep_port() {
 
     # FEC: module requires it but the link runs without
     local FEC="${DEEP_KV["$IFACE|FEC"]:-}" COMP="${DEEP_KV["$IFACE|Compliance"]:-}"
-    if [[ -z "$FEC" ]]; then
+    if ! $LINK_UP; then
+        :
+    elif [[ -z "$FEC" ]]; then
         add_record "port" "$IFACE" "mlx5.deep.fec" "-" "" "-" "$SEV_NA" "$TOOL printed no FEC line" "" "$REF"
     elif [[ "$FEC" == "$DEEP_NO_FEC" && "$COMP" =~ $DEEP_MODULE_FEC_RE ]]; then
         add_record "port" "$IFACE" "mlx5.deep.fec" "link: $FEC" "" "module FEC = link FEC" "$SEV_WARN" \
@@ -1340,7 +1376,9 @@ check_deep_port() {
     RAW="${DEEP_KV["$IFACE|Effective Physical BER"]:-}"
     local SINCE="${DEEP_KV["$IFACE|Time Since Last Clear [Min]"]:-?}"
     EVIDENCE="Effective Physical BER=${RAW:-?} Raw Physical BER=${DEEP_KV["$IFACE|Raw Physical BER"]:-?} Effective Physical Errors=${DEEP_KV["$IFACE|Effective Physical Errors"]:-?} Link Down Counter=${DEEP_KV["$IFACE|Link Down Counter"]:-?} since ${SINCE} min"
-    if [[ -z "$RAW" ]]; then
+    if ! $LINK_UP; then
+        :
+    elif [[ -z "$RAW" ]]; then
         add_record "port" "$IFACE" "mlx5.deep.ber" "-" "" "-" "$SEV_NA" "$TOOL printed no Effective Physical BER" "" "$REF"
     elif ! K=$(ber_exponent "$RAW"); then
         add_record "port" "$IFACE" "mlx5.deep.ber" "$RAW" "" "-" "$SEV_UNKNOWN" "$EVIDENCE" "Unparseable BER value" "$REF"
@@ -1370,7 +1408,10 @@ check_deep_port() {
         fi
         EVIDENCE+="$KEY=$V; "
         VALUE+="${KEY%% *}=$RAW "
-        if (( M_V < M_LO || M_V > M_HI )); then
+        # No light is expected without a link: DEEP_NOLINK_EXEMPT_KEYS are shown, not judged
+        if ! $LINK_UP && [[ " ${DEEP_NOLINK_EXEMPT_KEYS[*]} " == *" $KEY "* ]]; then
+            EVIDENCE="${EVIDENCE%; } (not judged: no link); "
+        elif (( M_V < M_LO || M_V > M_HI )); then
             SEV="$SEV_WARN"
             HINT+="$KEY $RAW outside [$LO..$HI]; "
         fi
@@ -1379,7 +1420,9 @@ check_deep_port() {
         FLAG="${DEEP_KV["$IFACE|$KEY"]:-}"
         [[ "$FLAG" =~ ^[0-9]+$ ]] || continue
         EVIDENCE+="$KEY=$FLAG; "
-        if (( 10#$FLAG != 0 )); then
+        if ! $LINK_UP && [[ " ${DEEP_NOLINK_EXEMPT_KEYS[*]} " == *" $KEY "* ]]; then
+            (( 10#$FLAG != 0 )) && EVIDENCE="${EVIDENCE%; } (not judged: no link); "
+        elif (( 10#$FLAG != 0 )); then
             SEV="$SEV_WARN"
             HINT+="${KEY% \[per lane\]} set (lane mask $FLAG); "
         fi
@@ -1637,6 +1680,129 @@ check_link_flaps() {
     fi
 }
 
+# Live operstate of a port ("?" when unreadable)
+port_oper() {
+    read_attr "$SYSFS_NET/${PORT_IFACE[$1]}/operstate" || printf '?'
+}
+
+# True when the port has carrier: sysfs carrier=1, else operstate up (carrier is unreadable
+# while the interface is admin down). Read live, not from discovery
+port_link_up() {
+    local IFACE="${PORT_IFACE[$1]}" C
+    if C=$(read_attr "$SYSFS_NET/$IFACE/carrier") && [[ "$C" =~ ^[01]$ ]]; then
+        [[ "$C" == "1" ]]
+    else
+        [[ "$(port_oper "$1")" == "$OPER_UP" ]]
+    fi
+}
+
+# Why a port is in use, first reason found: "master=bond0", "upper=eth1.100", "vfs=8" (SR-IOV
+# VFs, e.g. passed to VMs) or "address=192.0.2.10/24"
+# Returns 0 in use, 1 not in use (spare), 2 undetermined (ip missing or failed: the reason is
+# printed), so a port with only an address is never mistaken for a spare
+# Args: iface
+port_in_use() {
+    local IFACE="$1" U OUT RC=0
+    local -a UPPERS
+    if [[ -e "$SYSFS_NET/$IFACE/master" ]]; then
+        U=$(readlink "$SYSFS_NET/$IFACE/master") && printf 'master=%s' "${U##*/}" && return 0
+    fi
+    UPPERS=("$SYSFS_NET/$IFACE"/upper_*)
+    if [[ -e "${UPPERS[0]}" ]]; then
+        printf 'upper=%s' "${UPPERS[0]##*/upper_}"
+        return 0
+    fi
+    if U=$(read_attr "$SYSFS_NET/$IFACE/device/sriov_numvfs") && [[ "$U" =~ ^[0-9]+$ ]] && (( 10#$U > 0 )); then
+        printf 'vfs=%d' "$(( 10#$U ))"
+        return 0
+    fi
+    if [[ -z "${TOOL_PATH[ip]:-}" ]]; then
+        printf 'addresses not checked: ip missing'
+        return 2
+    fi
+    OUT=$(LC_ALL=C "${TOOL_PATH[ip]}" -o addr show dev "$IFACE" scope global 2>&1) || RC=$?
+    if (( RC != 0 )); then
+        printf 'addresses not checked: ip exit %d: %s' "$RC" "${OUT%%$'\n'*}"
+        return 2
+    fi
+    if [[ -n "$OUT" ]]; then
+        read -r _ _ _ U _ <<< "$OUT"
+        printf 'address=%s' "$U"
+        return 0
+    fi
+    return 1
+}
+
+# True when sysfs flags show the interface administratively down (IFF_UP clear)
+# Args: interface name; prints the flags
+admin_down() {
+    local FLAGS
+    FLAGS=$(read_attr "$SYSFS_NET/$1/flags") && [[ "$FLAGS" =~ ^0x[0-9a-fA-F]+$ ]] || return 1
+    printf '%s' "$FLAGS"
+    (( (FLAGS & IFF_UP) == 0 ))
+}
+
+# generic.link.state: a port in use must have carrier; a spare port without link is not a fault.
+# Never N/A when the port might be in use: undetermined is UNKNOWN, a port that had link more than
+# once this boot (beyond the driver-init toggle seen on spare ports) is WARN
+check_link_state() {
+    local IDX="$1"
+    local IFACE="${PORT_IFACE[IDX]}" CHECK="generic.link.state" REF="$DESIGN_REF §6.1"
+    local FLAGS OPER USE RC UP_COUNT MASTER MASTER_OPER EVIDENCE COUNTS
+    local THRESH="carrier on ports in use"
+
+    UP_COUNT=$(read_attr "$SYSFS_NET/$IFACE/carrier_up_count") || UP_COUNT="n/a"
+    COUNTS="carrier_up_count=$UP_COUNT carrier_down_count=$(read_attr "$SYSFS_NET/$IFACE/carrier_down_count" || printf 'n/a')"
+    OPER=$(port_oper "$IDX")
+    if FLAGS=$(admin_down "$IFACE"); then
+        add_record "port" "$IFACE" "$CHECK" "admin down" "" "$THRESH" "$SEV_NA" "flags=$FLAGS (IFF_UP clear)" \
+            "Administratively down: not judged" "$REF"
+        return
+    fi
+    if port_link_up "$IDX"; then
+        if [[ " ${OPER_BLOCKED[*]} " == *" $OPER "* ]]; then
+            add_record "port" "$IFACE" "$CHECK" "carrier, $OPER" "" "$THRESH" "$SEV_WARN" "carrier=1 operstate=$OPER; $COUNTS" \
+                "Carrier is up but the port does not pass traffic (operstate $OPER: 802.1X authentication, lower device, or test mode)" "$REF"
+        else
+            add_record "port" "$IFACE" "$CHECK" "up" "" "$THRESH" "$SEV_OK" "operstate=$OPER; $COUNTS" "" "$REF"
+        fi
+        return
+    fi
+
+    EVIDENCE="operstate=$OPER; $COUNTS"
+    RC=0; USE=$(port_in_use "$IFACE") || RC=$?
+    if (( RC != 0 )); then
+        if [[ "$UP_COUNT" =~ ^[0-9]+$ ]] && (( UP_COUNT > SPARE_MAX_CARRIER_UP )); then
+            add_record "port" "$IFACE" "$CHECK" "no link (had link)" "" "$THRESH" "$SEV_WARN" "$EVIDENCE; ${USE:-no master, no upper device, no VFs, no global address}" \
+                "Link came up $UP_COUNT times this boot and is down now: if the port is used outside the host's view (DPDK, passthrough, L2-only), check cable/optic and peer port; if it is spare, ignore (clears at reboot)" "$REF"
+        elif (( RC == 2 )); then
+            add_record "port" "$IFACE" "$CHECK" "no link (use unknown)" "" "$THRESH" "$SEV_UNKNOWN" "$EVIDENCE; no master, no upper device, no VFs; $USE" \
+                "Cannot tell whether this port is a spare: install iproute2 (ip) so addresses can be checked" "$REF"
+        else
+            add_record "port" "$IFACE" "$CHECK" "no link (unused)" "" "$THRESH" "$SEV_NA" "$EVIDENCE; no master, no upper device, no VFs, no global address" \
+                "Spare port without link: not judged; cable it or ignore" "$REF"
+        fi
+        return
+    fi
+
+    EVIDENCE+="; in use: $USE"
+    MASTER="${USE#master=}"
+    if [[ "$USE" == master=* && -e "$SYSFS_NET/$MASTER/bonding" ]]; then
+        if FLAGS=$(admin_down "$MASTER"); then
+            add_record "port" "$IFACE" "$CHECK" "no link" "" "$THRESH" "$SEV_NA" "$EVIDENCE; $MASTER flags=$FLAGS (IFF_UP clear)" \
+                "Bond $MASTER is administratively down: not judged" "$REF"
+            return
+        fi
+        if MASTER_OPER=$(read_attr "$SYSFS_NET/$MASTER/operstate") && [[ "$MASTER_OPER" != "$OPER_UP" ]]; then
+            add_record "port" "$IFACE" "$CHECK" "no link" "" "$THRESH" "$SEV_CRIT" "$EVIDENCE; $MASTER operstate=$MASTER_OPER" \
+                "Bond $MASTER is down with this member: traffic on it is lost. Check cables/optics and the peer switch ports" "$REF"
+            return
+        fi
+    fi
+    add_record "port" "$IFACE" "$CHECK" "no link" "" "$THRESH" "$SEV_WARN" "$EVIDENCE" \
+        "Port in use has no link$([[ "$USE" == master=* ]] && printf ' (redundancy lost)'): check cable/optic, the peer port, and generic.link.lookback for when it dropped" "$REF"
+}
+
 # Count driver link-down messages per evaluated port in kernel log text on stdin (journalctl -o cat)
 # A line counts once, for the port named by a word equal to "IFACE:" or "IFACE" when the rest of
 # the line starts with a link-down phrase (LINK_DOWN_RE). Matching on whole words keeps eth1 apart
@@ -1880,6 +2046,7 @@ run_checks() {
     done
     for IDX in "${!PORT_IFACE[@]}"; do
         check_link_flaps "$IDX"
+        check_link_state "$IDX"
     done
     check_lookback
     check_devlink
