@@ -12,11 +12,17 @@ on:
         required: false
         default: true
         type: boolean
+      with_vendor_tools:
+        description: Include mstflint (open-source NIC vendor tool for nic-health deep mode)
+        required: false
+        default: false
+        type: boolean
   pull_request:
     paths:
       - .github/workflows/offline-isos.yml
       - ci/build-offline-iso.sh
       - nic-xray.sh
+      - nic-health.sh
   push:
     tags:
       - 'v*'
@@ -104,7 +110,8 @@ jobs:
             --package-manager '${{ matrix.distro.package_manager }}' \
             --arch '${{ matrix.arch }}' \
             --version '${{ steps.version.outputs.version }}' \
-            --with-graphviz '${{ github.event_name != 'workflow_dispatch' || inputs.with_graphviz }}'
+            --with-graphviz '${{ github.event_name != 'workflow_dispatch' || inputs.with_graphviz }}' \
+            --with-vendor-tools '${{ github.event_name == 'workflow_dispatch' && inputs.with_vendor_tools }}'
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4

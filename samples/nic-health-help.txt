@@ -1,0 +1,49 @@
+Usage: nic-health.sh [-i|--interface IFACE]... [-I|--interval SEC] [-O|--output table|csv|json]
+       [-l|--level basic|deep] [-a|--all] [-n|--no-color] [-t|--check-tools] [-v|--version] [-h|--help]
+
+Version: 2.10.3
+
+Description:
+ Evaluates physical NIC hardware and data-path health and reports a verdict
+ per check (OK, WARN, CRIT, UNKNOWN, N/A) with evidence and remediation hints.
+ Read-only: never changes NIC, driver, or firmware state.
+ Ports of the same physical card (ASIC) are grouped; card-level checks run once.
+
+Options:
+ -i, --interface IFACE  Evaluate only IFACE (repeatable; default: all physical NICs)
+ -I, --interval SEC     Counter sampling window in seconds (default: 5, max: 3600)
+                        Counters are read twice; only growth inside the window is judged.
+                        0 = single read of totals since boot/driver load (historical;
+                        severity capped at WARN)
+ -O, --output TYPE      Output format: table (default), csv, or json
+ -l, --level LEVEL      basic (default): passive sysfs/ethtool/devlink reads only
+                        deep: also query mlx5 ports with mlxlink or mstlink (-d BDF -m -c only,
+                        10s timeout each); never eye scans, PRBS, resets, writes or flashing
+ -a, --all              Table: also list OK and N/A rows (default: only WARN, CRIT, UNKNOWN;
+                        CSV and JSON always contain every row)
+ -n, --no-color         Disable color output (auto-disabled for non-terminal)
+ -t, --check-tools      List required/optional tools, what each enables, and exit
+                        (does not require root)
+ -v, --version          Display version information
+ -h, --help             Display this help message
+
+Checks:
+ generic.pcie.link      PCIe link trained below the card's capability (WARN)
+ generic.pcie.aer       New PCIe AER errors: fatal/nonfatal (CRIT), correctable (WARN)
+ generic.temperature    hwmon sensor within 10C of critical or above max (WARN),
+                        at/over critical (CRIT)
+ generic.devlink.health Reporter not healthy (CRIT), new errors in window (WARN)
+ generic.link.flaps     Carrier transitions in window (WARN)
+ mlx5.*                 ConnectX (mlx5_core) ethtool -S counters: RX starvation, NIC discards,
+                        PHY symbol errors / pre-FEC BER, frame errors, PCIe path, datapath faults,
+                        congestion, pause storms, module faults, PHY link-down events
+ mlx5.deep.*            -l deep: tool troubleshooting code, module/link FEC mismatch,
+                        effective BER since last clear, module ranges and lane fault flags
+
+Exit status (Nagios-compatible):
+ 0  All checks OK or N/A
+ 1  At least one WARN, no CRIT
+ 2  At least one CRIT
+ 3  UNKNOWN: usage error, not root, no eligible NIC, or only UNKNOWN results
+
+See also: nic-xray.sh(8) for inventory and topology.

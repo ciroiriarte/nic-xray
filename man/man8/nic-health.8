@@ -1,0 +1,390 @@
+.\" Man page for nic-health.sh
+.\" Written in classic troff/groff format
+.TH NIC-HEALTH 8 "2026-10-20" "nic-health 2.10.3" "System Administration Commands"
+.SH NAME
+nic-health \- physical NIC hardware and data-path health checks with a monitoring verdict
+.SH SYNOPSIS
+.B nic-health.sh
+.RI [ \-i | \-\-interface
+.IR IFACE ]...
+.RI [ \-I | \-\-interval
+.IR SEC ]
+.RI [ \-O | \-\-output
+.IR table | csv | json ]
+.RI [ \-l | \-\-level
+.IR basic | deep ]
+.RI [ \-a | \-\-all ]
+.RI [ \-n | \-\-no\-color ]
+.RI [ \-t | \-\-check\-tools ]
+.RI [ \-v | \-\-version ]
+.RI [ \-h | \-\-help ]
+.SH DESCRIPTION
+.B nic-health.sh
+is the companion of
+.BR nic-xray.sh (8).
+Where nic-xray answers "what is installed and how is it cabled",
+nic-health answers "is the NIC hardware and its data path healthy".
+It evaluates a set of checks and reports each result with a severity
+.RB ( OK ", " WARN ", " CRIT ", " UNKNOWN ", " N/A ),
+the measured value, the threshold, the evidence it was derived from, and a
+remediation hint. The overall verdict is returned as a Nagios-compatible exit
+code, so the script can be used directly as a monitoring plugin.
+.PP
+Ports of the same physical card (ASIC: PCI domain, bus and device) are grouped;
+card-level checks run once per ASIC, port-level checks once per interface.
+Non-PCI interfaces (for example a BMC USB network interface) are listed as
+.B N/A
+and not evaluated.
+.PP
+.B Read-only.
+The default
+.B basic
+level only reads sysfs, procfs,
+.BR ethtool (8)
+and
+.BR devlink (8)
+state. The
+.B deep
+level additionally runs one allowlisted query per port with a vendor tool (see
+.BR "DEEP MODE" ).
+No level ever changes NIC, driver, link or firmware state.
+.PP
+.B Counter windows.
+Cumulative counters are read twice,
+.I SEC
+seconds apart (default 5), and only growth inside that window is judged.
+Historical totals since boot are reported as context, never as a current fault.
+A counter that decreases (reset), appears or disappears during the window is
+reported as
+.BR UNKNOWN ,
+never as
+.BR OK .
+With
+.BR "\-I 0" ,
+a single read of totals since boot or driver load is evaluated instead; those
+results are historical, so severity is capped at
+.BR WARN .
+.SH OPTIONS
+.TP
+.BR \-i ", " \-\-interface " \fIIFACE\fP"
+Evaluate only
+.IR IFACE .
+Repeatable. Default: every physical NIC (loopback, bridges, bonds, tap/tun,
+VLAN sub-interfaces and similar virtual devices are skipped). An unknown or
+virtual interface exits with status 3.
+.TP
+.BR \-I ", " \-\-interval " \fISEC\fP"
+Counter sampling window in seconds (0\-3600, default 5).
+.B 0
+selects absolute mode (totals since boot or driver load, severity capped at
+.BR WARN ).
+In table output a progress bar is shown on standard error while sampling.
+.TP
+.BR \-O ", " \-\-output " \fIFORMAT\fP"
+Output format:
+.B table
+(default),
+.BR csv ,
+or
+.BR json .
+.TP
+.BR \-l ", " \-\-level " \fILEVEL\fP"
+.B basic
+(default): passive reads only.
+.BR deep :
+also query each mlx5 physical function with
+.BR mlxlink (1)
+or
+.BR mstlink (1).
+Requires
+.BR timeout (1).
+See
+.BR "DEEP MODE" .
+.TP
+.BR \-a ", " \-\-all
+Table output: also list
+.B OK
+and
+.B N/A
+rows. By default only
+.BR WARN ,
+.B CRIT
+and
+.B UNKNOWN
+rows are listed, followed by a count of hidden rows; a host without problems
+prints a single line. CSV and JSON always contain every result.
+.TP
+.BR \-n ", " \-\-no\-color
+Disable ANSI colors. Colors are disabled automatically when standard output is
+not a terminal.
+.TP
+.BR \-t ", " \-\-check\-tools
+List the required and optional tools, whether each was found, what it enables,
+and which package provides it, then exit. Does not require root.
+.TP
+.BR \-v ", " \-\-version
+Print
+.B nic-health.sh
+and the version, then exit.
+.TP
+.BR \-h ", " \-\-help
+Print usage, options, the check list and exit codes, then exit.
+.SH CHECKS
+Every result carries a check ID. Generic checks apply to all drivers; vendor
+checks only to the matching driver.
+.SS Generic (all drivers)
+.TP
+.B generic.pcie.link
+ASIC trained below its PCIe capability (speed or width) \(-> WARN.
+No PCIe link attributes (virtual function, chipset-integrated NIC) \(-> N/A.
+.TP
+.B generic.pcie.aer
+PCIe Advanced Error Reporting, summed over the ASIC's functions.
+New fatal or non-fatal errors in the window \(-> CRIT; new correctable errors \(-> WARN.
+.TP
+.B generic.temperature
+Each hwmon temperature sensor of the ASIC (deduplicated by label). At or above
+the critical threshold \(-> CRIT. Within 10 \(deC of critical, above a driver
+maximum that is lower than critical, or with the alarm flag set \(-> WARN.
+A sensor the firmware lists but cannot read (EBUSY) \(-> N/A.
+.TP
+.B generic.devlink.health.\fIREPORTER\fP
+devlink health reporters, device level (target: PCI function) and port level
+(target: interface). State other than healthy \(-> CRIT; new errors in the
+window \(-> WARN. No reporters for the ASIC, or devlink not installed \(-> N/A.
+.TP
+.B generic.link.flaps
+Carrier transitions in the window \(-> WARN.
+.SS mlx5_core (NVIDIA ConnectX), from ethtool \-S
+Evaluated on physical functions only. Each rule lists counters whose growth
+escalates to WARN or CRIT, and context counters that are only shown.
+.TP
+.B mlx5.rx.starvation
+rx_out_of_buffer, rx_buff_alloc_err \(-> WARN (host cannot drain RX rings).
+.TP
+.B mlx5.nic.discards
+rx_discards_phy, tx_discards_phy \(-> WARN (NIC buffer exhausted).
+.TP
+.B mlx5.phy.errors
+rx_symbol_err_phy, rx_pcs_symbol_err_phy \(-> CRIT (uncorrectable symbol errors,
+traffic is lost). Pre-FEC BER above 1E-06 \(-> WARN when the card exposes
+rx_bits_phy. Adds a lane-skew hint when one lane carries most corrected bits,
+and a FEC hint when the link runs at 25 Gb/s or more with FEC off.
+.TP
+.B mlx5.frame.errors
+CRC, fragment, jabber, undersize and oversize frames \(-> WARN.
+.TP
+.B mlx5.pcie.path
+PCIe signal-integrity recoveries and outbound stall events \(-> WARN; stall
+percentage gauges shown as context.
+.TP
+.B mlx5.datapath.faults
+tx_cqe_err, rx_wqe_err, tx_recover, rx_recover \(-> CRIT.
+.TP
+.B mlx5.congestion
+Per-priority buffer and congestion discards \(-> WARN. Pause frames and buffer
+threshold crossings are context only: congestion is not a NIC fault.
+.TP
+.B mlx5.pause.storm
+Pause-storm warning \(-> WARN, pause-storm error \(-> CRIT.
+.TP
+.B mlx5.module
+module_bus_stuck, module_bad_shorted \(-> CRIT; module_high_temp,
+module_unplug \(-> WARN.
+.TP
+.B mlx5.link.phy_down
+link_down_events_phy \(-> WARN.
+.TP
+.B mlx5.ethtool
+ethtool \-S failed for the port \(-> UNKNOWN.
+.SS Deep mode (\-l deep, mlx5_core)
+.TP
+.B mlx5.deep.troubleshooting
+The tool's Status Opcode is not 0 \(-> WARN, with the tool's recommendation.
+.TP
+.B mlx5.deep.fec
+The module is specified for operation with FEC but the link runs without FEC
+\(-> WARN.
+.TP
+.B mlx5.deep.ber
+Effective (post-FEC) BER of 1E-12 or more \(-> WARN. This is an average since the
+counters were last cleared, so it never escalates to CRIT.
+.TP
+.B mlx5.deep.module
+Module temperature, voltage, bias current or optical power outside the module's
+own range, or any lane with Tx fault, Rx LOS or CDR loss of lock \(-> WARN.
+.TP
+.B mlx5.deep
+The query failed or timed out \(-> UNKNOWN. No deep tool installed \(-> N/A.
+.SH SEVERITIES
+.TP
+.B OK
+Checked and within thresholds.
+.TP
+.B WARN
+Degraded, or a historical problem that should be looked at.
+.TP
+.B CRIT
+Active fault: traffic loss, uncorrectable errors, unhealthy firmware reporter.
+.TP
+.B UNKNOWN
+The check could not produce a trustworthy result (unreadable source, counter
+reset or disappearance during the window, tool failure). Never reported as OK.
+.TP
+.B N/A
+Not applicable to this hardware or driver, or the data source does not exist.
+.SH DEEP MODE
+Deep mode is an explicit consent boundary and only runs with
+.BR "\-l deep" .
+For each mlx5 physical function exactly one command is run:
+.PP
+.RS
+.B timeout \-k 2 10 mlxlink \-d
+.I BDF
+.B \-m \-c
+.RE
+.PP
+.BR mlxlink (1)
+(NVIDIA MFT) is preferred;
+.BR mstlink (1)
+(open-source mstflint package) is the fallback. Before every call an allowlist
+gate checks the tool name, that the argument list matches this template exactly,
+that the PCI address is well formed, and that no forbidden flag is present;
+refused calls are reported as UNKNOWN and never executed. Tools are executed by
+absolute path, and shell functions inherited from the environment are discarded
+at start-up.
+.PP
+Never run, at any level: eye scans, PRBS, link/FEC/speed changes, counter
+clears, error injection, register access
+.RB ( mlxreg ", " mstreg ),
+firmware operations
+.RB ( mlxfwmanager ", " mstflint ", " mstfwreset ),
+.BR "mst start" ,
+devlink health dump/recover/reload,
+.BR "ethtool \-t" / \-r ,
+and unbounded kernel log reads.
+.B mlxconfig
+and
+.B mstconfig
+queries are not used: they take several seconds of kernel time per device and
+report configuration rather than health.
+.SH OUTPUT FORMATS
+.SS Table (default)
+A header with host, collection time (UTC) and sampling window; a hardware
+summary (ASIC, model, driver, firmware, ports); the result rows (see
+.BR \-a );
+and a summary line with the count per severity and the verdict.
+.SS CSV
+One row per result with columns: severity, scope, target, check_id, value,
+unit, threshold, evidence, hint, ref. Fields are quoted (RFC 4180).
+.SS JSON
+An object with schema_version, tool, version, host, collected_at, level, mode
+.RB ( delta " or " absolute ),
+interval_s, elapsed_s (null if the clock was unreadable), capabilities (tool
+availability), summary (count per severity), verdict, exit_code, asics (model,
+driver, firmware, ports) and results (one object per result, same fields as
+CSV).
+.SH REQUIREMENTS
+.IP \(bu 2
+Bash 4.4 or newer.
+.IP \(bu 2
+Root privileges (except for
+.BR \-\-help ,
+.B \-\-version
+and
+.BR \-\-check\-tools ).
+.IP \(bu 2
+.BR ethtool (8),
+.BR getopt (1)
+(util-linux),
+.BR readlink (1)
+(coreutils).
+.SH RECOMMENDATIONS
+.IP \(bu 2
+.BR lspci (8)
+(pciutils): vendor and model names; without it raw PCI IDs are shown.
+.IP \(bu 2
+.BR devlink (8)
+(iproute2): devlink health reporter checks.
+.IP \(bu 2
+.BR timeout (1)
+(coreutils): required for
+.BR "\-l deep" .
+.IP \(bu 2
+mstflint (distribution package) or NVIDIA MFT: deep mode on ConnectX cards.
+MFT is proprietary and must be installed manually; it is never bundled or
+downloaded.
+.IP \(bu 2
+bash-completion: tab completion via
+.IR completions/nic\-health.bash .
+Install system-wide with
+.BR "make install\-completion" ,
+or load it in the current shell with
+.BR "source completions/nic\-health.bash" .
+.SH EXIT STATUS
+Nagios-compatible; precedence CRIT > WARN > UNKNOWN > OK.
+.TP
+.B 0
+All results OK or N/A.
+.TP
+.B 1
+At least one WARN and no CRIT.
+.TP
+.B 2
+At least one CRIT.
+.TP
+.B 3
+UNKNOWN: usage error, not run as root, missing required tool, no eligible NIC,
+or UNKNOWN results without any WARN or CRIT.
+.SH EXAMPLES
+Evaluate every physical NIC with a 5-second window, problems only:
+.PP
+.RS
+.B sudo nic-health.sh
+.RE
+.PP
+List every result, including OK and N/A:
+.PP
+.RS
+.B sudo nic-health.sh \-a
+.RE
+.PP
+Two interfaces, 30-second window:
+.PP
+.RS
+.B sudo nic-health.sh \-i ens1f0np0 \-i ens1f1np1 \-I 30
+.RE
+.PP
+Historical totals since boot (no waiting; severity capped at WARN):
+.PP
+.RS
+.B sudo nic-health.sh \-I 0
+.RE
+.PP
+Include allowlisted vendor tool queries on ConnectX cards:
+.PP
+.RS
+.B sudo nic-health.sh \-l deep
+.RE
+.PP
+JSON for a monitoring system or for later comparison:
+.PP
+.RS
+.B sudo nic-health.sh \-O json > nic-health.json
+.RE
+.PP
+Show which tools are present and what each enables:
+.PP
+.RS
+.B nic-health.sh \-\-check\-tools
+.RE
+.SH AUTHORS
+Ciro Iriarte <ciro.iriarte+software@gmail.com>
+.SH SEE ALSO
+.BR nic-xray.sh (8),
+.BR ethtool (8),
+.BR devlink (8),
+.BR lspci (8),
+.BR mlxlink (1),
+.BR mstlink (1),
+.BR timeout (1)

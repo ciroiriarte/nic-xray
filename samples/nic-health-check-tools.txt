@@ -1,0 +1,14 @@
+🧰 nic-health.sh 2.10.3: tool check
+
+TOOL       ROLE      STATUS    PATH                    USED FOR
+ethtool    required  found     /usr/sbin/ethtool       Driver/firmware identification, mlx5 counters (ethtool -S)
+getopt     required  found     /usr/bin/getopt         Command-line parsing
+readlink   required  found     /usr/bin/readlink       sysfs path resolution
+lspci      optional  found     /usr/bin/lspci          NIC vendor/model names (falls back to PCI IDs)
+devlink    optional  found     /usr/sbin/devlink       devlink health reporter checks
+timeout    optional  found     /usr/bin/timeout        Bounds deep-mode tool runs (required for -l deep)
+mlxlink    optional  missing   -                       mlx5 deep mode (-l deep) via NVIDIA MFT (preferred)
+                                                       ↳ package: NVIDIA MFT (proprietary, install manually)
+mstlink    optional  found     /usr/bin/mstlink        mlx5 deep mode (-l deep) via open-source mstflint
+
+✅ All required tools present. Missing optional tools only disable the checks listed.

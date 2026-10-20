@@ -294,6 +294,11 @@ Explicit consent boundary. Never runs unless requested.
 - **Offline ISO (`ci/build-offline-iso.sh`):** add `--with-vendor-tools true|false`, mirroring `--with-graphviz`. It pulls `mstflint` from the distro mirror into the ISO repo, which is allowed because mstflint is GPL/BSD.
 - **Proprietary tools** (MFT, Broadcom `niccli`, Marvell QConvergeConsole): documented in README and man page only. Detected if present.
 
+**Implementation (Phase 6).**
+- Shipped inside the existing `nic-xray` package as `/usr/bin/nic-health`, with `nic-health.8` and a bash completion. The completion registers both the packaged name and `nic-health.sh`.
+- The spec and `debian.control` gain `Recommends: pciutils, mstflint`. The patch is prepared, not committed: OBS builds from the release tag, so it has to land together with the release that first contains `nic-health.sh`. A local `rpmbuild` from the patched spec succeeds.
+- The ISO builder gains `--with-vendor-tools` (default `false`; deep mode is opt-in), which adds `mstflint` to the install set. `mstflint` is available in every ISO target: Debian 12 (4.21) and 13 (4.31), Ubuntu 22.04 (4.17/4.21) and 24.04 (4.26), Leap 15.6 (4.21), Tumbleweed and Slowroll (4.33), Rocky 9 and 10 (4.34, BaseOS). Only 4.31 output is validated; older `mstlink` output that lacks a key yields `N/A`.
+
 ### 8.3 Vendor coverage outlook
 
 | Vendor | Driver | Basic (no vendor tool) | Deep | Open-source path |
@@ -373,7 +378,7 @@ Explicit consent boundary. Never runs unless requested.
 | **3** | `mlx5_core` Ethernet checks (§6.2) + hints | Validated on ConnectX hardware (test host) ✅ |
 | **4** | RDMA `hw_counters` (§6.3) | Validated on a RoCE-enabled host |
 | **5** | Deep mode: `mstlink`/`mlxlink` allowlist (§7) | Forbidden-list unit test: argv never contains a denied flag ✅ |
-| **6** | Packaging: Makefile, OBS, offline ISO, man page, README, samples | Release with tandem version bump (on request) |
+| **6** | Packaging: Makefile, OBS, offline ISO, man page, README, samples | Release with tandem version bump (on request). In repo ✅; OBS patch pending the release |
 | **7+** | Second vendor (`ice` or `bnxt_en`), which triggers the module split (§9.2) | — |
 
 ---
