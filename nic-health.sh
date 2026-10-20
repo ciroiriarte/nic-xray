@@ -59,6 +59,10 @@ EXIT_WARN=1
 EXIT_CRIT=2
 EXIT_UNKNOWN=3
 
+# Glob matching one C0 control character (U+0001-U+001F) that JSON needs \u-escaped; kept in a
+# variable, unquoted where used, so it acts as a pattern (and shellcheck can parse the script)
+JSON_CTRL_CHAR=$'[\x01-\x1f]'
+
 # Severities
 SEV_OK="OK"
 SEV_WARN="WARN"
@@ -422,11 +426,12 @@ json_escape() {
     STR="${STR//$'\b'/\\b}"
     STR="${STR//$'\f'/\\f}"
     # Remaining C0 control characters (U+0001-U+001F) must be \u-escaped
-    if [[ "$STR" == *[$'\x01'-$'\x1f']* ]]; then
+    if [[ "$STR" == *$JSON_CTRL_CHAR* ]]; then
         local OUT="" CHAR CODE i
         for (( i = 0; i < ${#STR}; i++ )); do
             CHAR="${STR:i:1}"
-            if [[ "$CHAR" == [$'\x01'-$'\x1f'] ]]; then
+            # shellcheck disable=SC2053  # intentional pattern match
+            if [[ "$CHAR" == $JSON_CTRL_CHAR ]]; then
                 printf -v CODE '%d' "'$CHAR"
                 printf -v CHAR '\\u%04x' "$CODE"
             fi

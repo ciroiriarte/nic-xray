@@ -93,6 +93,10 @@ IFACE_SKIP_PATTERN='^(lo|vnet|virbr|br|bond|docker|tap|tun)'
 # Interface name pattern to skip when --virtual is active (only hard-skip these)
 VIRTUAL_SKIP_PATTERN='^(lo|ovs-system|bonding_masters)$'
 
+# Glob matching one C0 control character (U+0001-U+001F) that JSON needs \u-escaped; kept in a
+# variable, unquoted where used, so it acts as a pattern (and shellcheck can parse the script)
+JSON_CTRL_CHAR=$'[\x01-\x1f]'
+
 # LOCALE setup, we expect output in English for proper parsing
 LANG=en_US.UTF-8
 
@@ -455,11 +459,12 @@ json_escape() {
     STR="${STR//$'\b'/\\b}"
     STR="${STR//$'\f'/\\f}"
     # Remaining C0 control characters (U+0001-U+001F) must be \u-escaped
-    if [[ "$STR" == *[$'\x01'-$'\x1f']* ]]; then
+    if [[ "$STR" == *$JSON_CTRL_CHAR* ]]; then
         local OUT="" CHAR CODE i
         for (( i = 0; i < ${#STR}; i++ )); do
             CHAR="${STR:i:1}"
-            if [[ "$CHAR" == [$'\x01'-$'\x1f'] ]]; then
+            # shellcheck disable=SC2053  # intentional pattern match
+            if [[ "$CHAR" == $JSON_CTRL_CHAR ]]; then
                 printf -v CODE '%d' "'$CHAR"
                 printf -v CHAR '\\u%04x' "$CODE"
             fi
@@ -1063,7 +1068,6 @@ declare -a DATA_VIRT_TYPE
 declare -a DATA_VIRT_PARENT
 declare -a DATA_VIRT_ENCAP_OVERHEAD
 declare -a DATA_MTU_WARN
-declare -a DATA_VIRT_DEPTH
 declare -a DATA_IS_PHYSICAL
 
 declare -A IFACE_MTU_MAP
@@ -1318,7 +1322,7 @@ collect_data() {
     DATA_OPTICS_TX_LANES=(); DATA_OPTICS_RX_LANES=(); DATA_OPTICS_LANE_COUNT=()
     DATA_NUMA=(); DATA_PCI_SLOT=(); DATA_NIC_VENDOR=(); DATA_NIC_MODEL=()
     DATA_VIRT_TYPE=(); DATA_VIRT_PARENT=(); DATA_VIRT_ENCAP_OVERHEAD=()
-    DATA_MTU_WARN=(); DATA_VIRT_DEPTH=(); DATA_IS_PHYSICAL=()
+    DATA_MTU_WARN=(); DATA_IS_PHYSICAL=()
     IFACE_MTU_MAP=(); IFACE_OVERHEAD_MAP=(); IFACE_PARENT_MAP=(); IFACE_EFFECTIVE_MTU=()
     BOND_MODE_MAP=()
     DATA_SWITCH_DESCR=()
@@ -1336,6 +1340,7 @@ collect_data() {
     [[ -r /sys/devices/virtual/dmi/id/product_serial ]] && \
         SERVER_SERIAL=$(< /sys/devices/virtual/dmi/id/product_serial)
     if [[ -r /etc/os-release ]]; then
+        # shellcheck source=/dev/null  # host file, read for PRETTY_NAME only
         SERVER_OS=$(. /etc/os-release 2>/dev/null && printf '%s' "$PRETTY_NAME")
     fi
 
@@ -2412,15 +2417,11 @@ generate_dot() {
     # Virtual interface colors (Catppuccin Mocha)
     local VIRT_COLOR_VLAN="#fab387"      # Peach
     local VIRT_COLOR_BRIDGE="#cba6f7"    # Mauve
-    local VIRT_COLOR_OVS="#b4befe"       # Lavender
     local VIRT_COLOR_VXLAN="#74c7ec"     # Sapphire
-    local VIRT_COLOR_GENEVE="#89b4fa"    # Blue
-    local VIRT_COLOR_GRE="#f2cdcd"       # Flamingo
     local VIRT_COLOR_TAP="#94e2d5"       # Teal
     local VIRT_COLOR_TUN="#89dceb"       # Sky
     local VIRT_COLOR_VETH="#a6e3a1"      # Green
     local VIRT_COLOR_WG="#cdd6f4"        # Text
-    local VIRT_COLOR_VPN="#eba0ac"       # Maroon
     local VIRT_EDGE_COLOR="#585b70"      # Surface2
     local VIRT_WARN_COLOR="#f38ba8"      # Red
 
@@ -3370,8 +3371,8 @@ elif [[ "${OUTPUT_FORMAT}" == "csv" ]]; then
         fi
         if ${SHOW_METRICS}; then
             printf "${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
-                "$(csv_escape "$((DATA_MET_RX_BPS[$i] * 8))")" \
-                "$(csv_escape "$((DATA_MET_TX_BPS[$i] * 8))")" \
+                "$(csv_escape "$((DATA_MET_RX_BPS[i] * 8))")" \
+                "$(csv_escape "$((DATA_MET_TX_BPS[i] * 8))")" \
                 "$(csv_escape "${DATA_MET_RX_PPS[$i]}")" \
                 "$(csv_escape "${DATA_MET_TX_PPS[$i]}")" \
                 "$(csv_escape "${DATA_MET_RX_DROP[$i]}")" \
@@ -3490,8 +3491,8 @@ elif [[ "${OUTPUT_FORMAT}" == "json" ]]; then
         if ${SHOW_METRICS}; then
             printf ',\n    "metrics": {\n'
             printf '      "sample_duration_seconds": %s,\n' "$METRICS_ELAPSED"
-            printf '      "rx_bits_per_sec": %s,\n' "$((DATA_MET_RX_BPS[$i] * 8))"
-            printf '      "tx_bits_per_sec": %s,\n' "$((DATA_MET_TX_BPS[$i] * 8))"
+            printf '      "rx_bits_per_sec": %s,\n' "$((DATA_MET_RX_BPS[i] * 8))"
+            printf '      "tx_bits_per_sec": %s,\n' "$((DATA_MET_TX_BPS[i] * 8))"
             printf '      "rx_packets_per_sec": %s,\n' "${DATA_MET_RX_PPS[$i]}"
             printf '      "tx_packets_per_sec": %s,\n' "${DATA_MET_TX_PPS[$i]}"
             printf '      "rx_drops": %s,\n' "${DATA_MET_RX_DROP[$i]}"

@@ -932,6 +932,7 @@ assert_eq "lookback unknown port not added" "" "${LD[eth10]:-}"
 # Interface names may contain '$(' (only '/', ':' and spaces are forbidden): never evaluated
 SAVED_PORTS=("${PORT_IFACE[@]}")
 # (no literal space: the kernel forbids it; ${IFS} becomes one only if the name were evaluated)
+# shellcheck disable=SC2016  # the literal $( is the point of the test
 HOSTILE='x$(touch${IFS}'"$FIX"'/pwned)'
 PORT_IFACE=("$HOSTILE")
 count_link_downs LD <<< "drv 0000:01:00.0 $HOSTILE: Link down"

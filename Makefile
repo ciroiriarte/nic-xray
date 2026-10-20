@@ -5,7 +5,7 @@ COMPDIR     ?= /etc/bash_completion.d
 # Primary script and companions: each ships a man page (section 8) and a completion
 SCRIPTS     := nic-xray nic-health
 
-.PHONY: install-man uninstall-man install-completion uninstall-completion test
+.PHONY: install-man uninstall-man install-completion uninstall-completion test lint
 
 install-man:
 	install -d $(DESTDIR)$(MANDIR)/man8
@@ -23,3 +23,8 @@ uninstall-completion:
 
 test:
 	bash tests/nic-health-test.sh
+
+# Static analysis of the scripts and the test suite (needs shellcheck)
+lint:
+	shellcheck nic-xray.sh nic-health.sh
+	shellcheck -x tests/nic-health-test.sh
