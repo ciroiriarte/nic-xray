@@ -2,8 +2,9 @@
 # Source this file or place it in /etc/bash_completion.d/
 
 _nic_xray() {
-	local cur prev
-	_init_completion || return
+	local cur prev words cword split
+	# -s splits "--opt=value" so values complete in both forms
+	_init_completion -s || return
 
 	case "$prev" in
 		--output)
@@ -22,17 +23,15 @@ _nic_xray() {
 			_filedir
 			return
 			;;
-		--separator|-s)
-			# Optional value, no specific completions
-			return
-			;;
-		--metrics|-m|--watch|-w)
-			# Optional seconds value, no specific completions
-			return
+		--separator|--metrics|--watch)
+			# Optional values must be attached (--metrics=5); getopt never
+			# takes them from the next word, so only stop when split on "="
+			$split && return
 			;;
 	esac
 
-	if [[ "$cur" == -* ]]; then
+	# No positional arguments exist, so every other word is an option
+	if [[ -z "$cur" || "$cur" == -* ]]; then
 		local opts="
 			-h --help
 			-v --version
