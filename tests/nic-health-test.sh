@@ -184,7 +184,18 @@ EOF
 devlink_health_write 0 healthy
 
 # Command stubs (shell functions take precedence over PATH)
-ethtool() { printf 'driver: stub\nfirmware-version: 1.2.3 (STUB)\nbus-info: x\n'; }
+ethtool() {
+    if [[ "$1" == "--show-fec" ]]; then
+        [[ -e "$FIX/fec_$2" ]] && cat "$FIX/fec_$2"
+        return 0
+    fi
+    if [[ "$1" == "-S" ]]; then
+        [[ -e "$FIX/ets_$2" ]] || { echo "no stats available" >&2; return 1; }
+        cat "$FIX/ets_$2"
+        return 0
+    fi
+    printf 'driver: stub\nfirmware-version: 1.2.3 (STUB)\nbus-info: x\n'
+}
 devlink() {
     case "$1 $2" in
         "health show") cat "$FIX/devlink_health" ;;
@@ -347,6 +358,167 @@ CLOCK_OK=true
 printf 'garbage\n' > "$FIX/uptime"
 RC=0; uptime_cs >/dev/null || RC=$?
 assert_eq "uptime_cs malformed fails" "1" "$RC"
+
+# --- mlx5 rule engine ---
+assert_eq "fmt_sci 2000/1e9" "2.0e-06" "$(fmt_sci 2000 1000000000)"
+assert_eq "fmt_sci 1/3"      "3.3e-01" "$(fmt_sci 1 3)"
+assert_eq "fmt_sci zero"     "0"       "$(fmt_sci 0 5)"
+assert_eq "rule severities mixed" "CRIT/WARN" "$(mlx5_rule_severities 8)"
+assert_eq "wanted set expands digit ranges" "1 1 1" "${MLX5_WANTED[rx_prio0_buf_discard]} ${MLX5_WANTED[rx_prio7_cong_discard]} ${MLX5_WANTED[rx_err_lane_9_phy]}"
+assert_eq "wanted set drops per-channel" "" "${MLX5_WANTED[rx3_wqe_err]:-}"
+printf '     rx_out_of_buffer: 7\n     rx_out_of_buffer: 9\n' > "$FIX/ets_dup"
+declare -A DUPSNAP=()
+mlx5_snapshot DUPSNAP dup
+assert_eq "duplicate ethtool name: first wins, listed once" "7 rx_out_of_buffer" "${DUPSNAP[ets|dup|rx_out_of_buffer]} ${DUPSNAP[ets_names|dup]}"
+
+# Real ConnectX-6 Lx counter set (pve-01), all zero, plus one irrelevant counter
+MLX5_BASE="tx_recover tx_cqe_err rx_wqe_err rx_buff_alloc_err rx_recover rx_out_of_buffer rx_crc_errors_phy
+rx_bytes_phy rx_oversize_pkts_phy rx_symbol_err_phy rx_pause_ctrl_phy tx_pause_ctrl_phy rx_discards_phy
+tx_discards_phy rx_undersize_pkts_phy rx_fragments_phy rx_jabbers_phy link_down_events_phy rx_pcs_symbol_err_phy
+rx_corrected_bits_phy rx_err_lane_0_phy rx_err_lane_1_phy rx_err_lane_2_phy rx_err_lane_3_phy
+rx_buffer_passed_thres_phy rx_pci_signal_integrity tx_pci_signal_integrity outbound_pci_stalled_rd
+outbound_pci_stalled_wr outbound_pci_stalled_rd_events outbound_pci_stalled_wr_events rx_global_pause
+tx_global_pause tx_pause_storm_warning_events tx_pause_storm_error_events module_unplug module_bus_stuck
+module_high_temp module_bad_shorted rx_prio0_buf_discard rx_prio3_buf_discard rx_prio3_cong_discard rx3_wqe_err"
+ets_write() {  # ets_write <iface> [name=value ...] (unlisted base counters are 0)
+    local IFACE="$1" N KV
+    shift
+    local -A V=()
+    for KV in "$@"; do V["${KV%%=*}"]="${KV#*=}"; done
+    {
+        echo "NIC statistics:"
+        for N in $MLX5_BASE; do printf '     %s: %s\n' "$N" "${V[$N]:-0}"; done
+        for N in "${!V[@]}"; do [[ " ${MLX5_BASE//$'\n'/ } " == *" $N "* ]] || printf '     %s: %s\n' "$N" "${V[$N]}"; done
+    } > "$FIX/ets_$IFACE"
+}
+mlx5_rec() {  # mlx5_rec <field> <check> <iface>: print one field of the matching record
+    local i
+    local -n _F="$1"
+    for i in "${!REC_SEV[@]}"; do
+        [[ "${REC_CHECK[i]}" == "$2" && "${REC_TARGET[i]}" == "$3" ]] && { printf '%s' "${_F[i]}"; return; }
+    done
+}
+
+INTERVAL=5
+reset_results
+ets_write eth0
+rm -f "$FIX/ets_eth1"     # eth1: ethtool -S fails
+grow0() { ets_write eth0 rx_out_of_buffer=5 tx_cqe_err=1 rx_pause_ctrl_phy=100 rx_err_lane_2_phy=1000 rx_corrected_bits_phy=1000 module_high_temp=0; }
+snap_pair grow0
+for i in "${!PORT_IFACE[@]}"; do mlx5_port_eligible "$i" && check_mlx5_port "$i"; done
+assert_eq "mlx5 eligible only mlx5 PFs" "0 1" "$(for i in "${!PORT_IFACE[@]}"; do mlx5_port_eligible "$i" && printf '%s ' "$i"; done | sed 's/ $//')"
+assert_eq "mlx5 starvation WARN"          "WARN"    "$(sev_of mlx5.rx.starvation eth0)"
+assert_eq "mlx5 starvation value"         "rx_out_of_buffer=+5" "$(mlx5_rec REC_VALUE mlx5.rx.starvation eth0)"
+assert_eq "mlx5 datapath CRIT"            "CRIT"    "$(sev_of mlx5.datapath.faults eth0)"
+assert_eq "mlx5 congestion INFO-only OK"  "OK"      "$(sev_of mlx5.congestion eth0)"
+assert_eq "mlx5 congestion context hint"  "Context only: rx_pause_ctrl_phy +100" "$(mlx5_rec REC_HINT mlx5.congestion eth0)"
+assert_eq "mlx5 unchanged rule OK"        "OK"      "$(sev_of mlx5.module eth0)"
+assert_eq "mlx5 threshold compact"        ">0 CRIT/WARN" "$(mlx5_rec REC_THRESHOLD mlx5.module eth0)"
+assert_eq "mlx5 PHY no rx_bits_phy OK"    "OK"      "$(sev_of mlx5.phy.errors eth0)"
+assert_eq "mlx5 lane skew hint" "Context only: rx_corrected_bits_phy +1000, rx_err_lane_2_phy +1000. Corrected bits concentrated on rx_err_lane_2_phy: suspect that lane/fiber of the optic or cable" "$(mlx5_rec REC_HINT mlx5.phy.errors eth0)"
+assert_eq "mlx5 BER not computed note" "yes" "$([[ "$(mlx5_rec REC_EVIDENCE mlx5.phy.errors eth0)" == *"rx_bits_phy not exposed"* ]] && echo yes)"
+assert_eq "mlx5 ethtool -S failure UNKNOWN" "UNKNOWN" "$(sev_of mlx5.ethtool eth1)"
+assert_eq "mlx5 not run on other drivers" "MISSING" "$(sev_of mlx5.rx.starvation eth2)"
+PORT_VF[1]=true
+RC=0; mlx5_port_eligible 1 || RC=$?
+assert_eq "mlx5 skips virtual functions" "1" "$RC"
+PORT_VF[1]=false
+
+# Pre-FEC BER with rx_bits_phy; post-FEC CRIT; PFC discard WARN; counter reset UNKNOWN; absent counters N/A
+reset_results
+ets_write eth0 rx_bits_phy=0 rx_prio3_cong_discard=0 rx_symbol_err_phy=50
+ets_write eth1
+grow1() {
+    ets_write eth0 rx_bits_phy=1000000000 rx_corrected_bits_phy=2000 rx_prio3_cong_discard=4 rx_symbol_err_phy=10
+    grep -v module_ "$FIX/ets_eth1" > "$FIX/ets_eth1.new"; mv "$FIX/ets_eth1.new" "$FIX/ets_eth1"
+}
+ets_write eth1
+grep -v module_ "$FIX/ets_eth1" > "$FIX/ets_eth1.new"; mv "$FIX/ets_eth1.new" "$FIX/ets_eth1"
+snap_pair grow1
+check_mlx5_port 0
+check_mlx5_port 1
+assert_eq "mlx5 counter reset UNKNOWN"   "UNKNOWN" "$(sev_of mlx5.phy.errors eth0)"
+assert_eq "mlx5 PFC discard WARN"        "WARN"    "$(sev_of mlx5.congestion eth0)"
+assert_eq "mlx5 absent counters N/A"     "N/A"     "$(sev_of mlx5.module eth1)"
+reset_results
+ets_write eth0 rx_bits_phy=0
+grow2() { ets_write eth0 rx_bits_phy=1000000000 rx_corrected_bits_phy=2000; }
+snap_pair grow2
+check_mlx5_port 0
+assert_eq "mlx5 pre-FEC BER>1e-6 WARN"   "WARN"    "$(sev_of mlx5.phy.errors eth0)"
+assert_eq "mlx5 BER value"               "pre-FEC BER=2.0e-06" "$(mlx5_rec REC_VALUE mlx5.phy.errors eth0)"
+reset_results
+ets_write eth0 rx_bits_phy=0
+grow3() { ets_write eth0 rx_bits_phy=1000000000 rx_corrected_bits_phy=20 rx_symbol_err_phy=1; }
+snap_pair grow3
+check_mlx5_port 0
+assert_eq "mlx5 post-FEC errors CRIT"    "CRIT"    "$(sev_of mlx5.phy.errors eth0)"
+assert_eq "mlx5 low BER + post-FEC value" "rx_symbol_err_phy=+1 pre-FEC BER=2.0e-08" "$(mlx5_rec REC_VALUE mlx5.phy.errors eth0)"
+assert_eq "no FEC hint without speed/fec data" "Uncorrectable" "$(mlx5_rec REC_HINT mlx5.phy.errors eth0 | cut -d' ' -f1)"
+printf '25000\n' > "$SYSFS_NET/eth0/speed"
+printf 'FEC parameters for eth0:\nSupported/Configured FEC encodings: Auto\nActive FEC encoding: Off\n' > "$FIX/fec_eth0"
+reset_results
+ets_write eth0 rx_bits_phy=0
+snap_pair grow3
+check_mlx5_port 0
+assert_eq "FEC Off at 25G hint" "Active FEC is Off at 25000 Mb/s:" "$(mlx5_rec REC_HINT mlx5.phy.errors eth0 | cut -d' ' -f1-7)"
+printf 'FEC parameters for eth0:\nActive FEC encoding: RS\n' > "$FIX/fec_eth0"
+reset_results
+ets_write eth0 rx_bits_phy=0
+snap_pair grow3
+check_mlx5_port 0
+assert_eq "no FEC hint when RS active" "Uncorrectable" "$(mlx5_rec REC_HINT mlx5.phy.errors eth0 | cut -d' ' -f1)"
+
+# Absolute mode: historical CRIT capped at WARN; under strict shell
+reset_results
+INTERVAL=0
+ets_write eth0 tx_cqe_err=3
+DL_ORDER=()
+snapshot SNAP1 DL_ORDER
+( set -euo pipefail; check_mlx5_port 0; sev_of mlx5.datapath.faults eth0; echo; sev_of mlx5.rx.starvation eth0; echo; mlx5_rec REC_VALUE mlx5.datapath.faults eth0; echo; mlx5_rec REC_VALUE mlx5.rx.starvation eth0 ) > "$FIX/out" 2>&1
+assert_eq "mlx5 absolute capped WARN, others OK, unsigned values (strict)" "WARN OK tx_cqe_err=3 0" "$(tr '\n' ' ' < "$FIX/out" | sed 's/ $//')"
+INTERVAL=5
+
+# --- Review regressions (Phase 3) ---
+# Unsigned 64-bit counters beyond bash's signed range
+SNAP0=(["a"]=18446744073709551000 ["b"]=999999999999999999 ["c"]=18446744073709551615 ["d"]=000123)
+SNAP1=(["a"]=18446744073709551615 ["b"]=1000000000000000005 ["c"]=5 ["d"]=130)
+RC=0; delta a || RC=$?; assert_eq "delta 20-digit growth" "0 615" "$RC $DELTA"
+RC=0; delta b || RC=$?; assert_eq "delta crossing 18->19 digits" "0 6" "$RC $DELTA"
+RC=0; delta c || RC=$?; assert_eq "delta 20-digit reset" "2" "$RC"
+RC=0; delta d || RC=$?; assert_eq "delta leading zeros not octal" "0 7" "$RC $DELTA"
+SNAP0["e"]=0; SNAP1["e"]=18446744073709551615
+RC=0; delta e || RC=$?; assert_eq "delta too large for bash is rejected" "1" "$RC"
+assert_eq "fmt_sci huge denominator" "1.0e-05" "$(fmt_sci 10000000000000 1000000000000000000)"
+
+INTERVAL=5
+# Gauges are T1-only context: a falling gauge is not a reset, a rising one is not a delta
+reset_results
+ets_write eth0 outbound_pci_stalled_rd=80 outbound_pci_buffer_overflow=0
+gauge() { ets_write eth0 outbound_pci_stalled_rd=0 outbound_pci_buffer_overflow=12; }
+snap_pair gauge
+check_mlx5_port 0
+assert_eq "falling gauge not UNKNOWN" "OK" "$(sev_of mlx5.pcie.path eth0)"
+assert_eq "gauge context at T1" "yes" "$([[ "$(mlx5_rec REC_EVIDENCE mlx5.pcie.path eth0)" == *"outbound_pci_stalled_rd=0% (gauge); outbound_pci_stalled_wr=0% (gauge); outbound_pci_buffer_overflow=12% (gauge)" ]] && echo yes)"
+
+# rx_bits_phy reset with corrected-bit growth must be UNKNOWN, not OK
+reset_results
+ets_write eth0 rx_bits_phy=1000000000
+bits_reset() { ets_write eth0 rx_bits_phy=1 rx_corrected_bits_phy=2000; }
+snap_pair bits_reset
+check_mlx5_port 0
+assert_eq "rx_bits_phy reset UNKNOWN" "UNKNOWN" "$(sev_of mlx5.phy.errors eth0)"
+
+# BER 1e-5 with counters whose product would overflow
+reset_results
+ets_write eth0 rx_bits_phy=0
+huge() { ets_write eth0 rx_bits_phy=1000000000000000000 rx_corrected_bits_phy=10000000000000 rx_err_lane_1_phy=5000000000000000000; }
+snap_pair huge
+check_mlx5_port 0
+assert_eq "overflow-safe BER WARN" "WARN" "$(sev_of mlx5.phy.errors eth0)"
+assert_eq "overflow-safe BER value" "pre-FEC BER=1.0e-05" "$(mlx5_rec REC_VALUE mlx5.phy.errors eth0)"
+assert_eq "overflow-safe lane hint" "yes" "$([[ "$(mlx5_rec REC_HINT mlx5.phy.errors eth0)" == *"concentrated on rx_err_lane_1_phy"* ]] && echo yes)"
+assert_eq "bits counter not listed as context" "no" "$([[ "$(mlx5_rec REC_HINT mlx5.phy.errors eth0)" == *rx_bits_phy* ]] && echo yes || echo no)"
 
 # --- Verdict precedence ---
 for CASE in "OK N/A:OK 0" "OK UNKNOWN:UNKNOWN 3" "WARN UNKNOWN:WARN 1" "WARN CRIT UNKNOWN:CRIT 2"; do

@@ -180,6 +180,27 @@ Most mlx5 counters are cumulative since driver load, so absolute values alone ar
 | Module | `module_unplug`, `module_bus_stuck`, `module_high_temp`, `module_bad_shorted` | cumulative | bus_stuck/bad_shorted → `CRIT`; high_temp → `WARN` |
 | Steering | `rx_steer_missed_packets` | cumulative | informational; flags flow-steering misconfiguration |
 
+**Implementation (Phase 3).** The table above is a data table in the script (`MLX5_RULE_ID`, `MLX5_RULE_COUNTERS`, `MLX5_RULE_HINT`). There is one record per port per rule:
+
+| Check ID | Escalating counters | Context only (`INFO`) |
+|---|---|---|
+| `mlx5.rx.starvation` | `rx_out_of_buffer`, `rx_buff_alloc_err` → `WARN` | |
+| `mlx5.nic.discards` | `rx_discards_phy`, `tx_discards_phy` → `WARN` | |
+| `mlx5.phy.errors` | `rx_symbol_err_phy`, `rx_pcs_symbol_err_phy` → `CRIT`; pre-FEC BER > 1e-06 → `WARN` (only with `rx_bits_phy`) | `rx_corrected_bits_phy`, `rx_err_lane_N_phy` (lane dominance ≥90% → hint) |
+| `mlx5.frame.errors` | CRC, fragments, jabbers, undersize, oversize → `WARN` | |
+| `mlx5.pcie.path` | `rx/tx_pci_signal_integrity`, `outbound_pci_stalled_rd/wr_events` → `WARN` | stall gauges (% at T1, never deltaed) |
+| `mlx5.datapath.faults` | `tx_cqe_err`, `rx_wqe_err`, `tx_recover`, `rx_recover` → `CRIT` | |
+| `mlx5.congestion` | `rx_prioN_buf_discard`, `rx_prioN_cong_discard` → `WARN` | pause frames, global pause, `rx_buffer_passed_thres_phy` |
+| `mlx5.pause.storm` | warning → `WARN`, error → `CRIT` | |
+| `mlx5.module` | `module_bus_stuck`, `module_bad_shorted` → `CRIT`; `module_high_temp`, `module_unplug` → `WARN` | |
+| `mlx5.link.phy_down` | `link_down_events_phy` → `WARN` | |
+
+- Only aggregate counters are used. Per-channel `rxN_*`/`txN_*` are skipped: a 64-CPU host prints about 7,000 `ethtool -S` lines per port. Lines are parsed with parameter expansion and an exact-name lookup. A per-line regex made a 5 s run take 23 s on an 8-port host.
+- When `mlx5.phy.errors` fires on a link at ≥25 Gb/s, `ethtool --show-fec` is read. If active FEC is `Off`/`None`, the hint says so.
+- None of the counters listed → `N/A`. `ethtool -S` failure → one `mlx5.ethtool` `UNKNOWN` record. VFs are skipped (no `_phy` counters).
+- Steering (`rx_steer_missed_packets`) is not evaluated: it is informational and grows legitimately.
+- ConnectX-6 Lx observation: `tx_pci_signal_integrity` = 1 on every port after boot (link-training artifact). Absolute mode (`-I 0`) therefore WARNs on it. Delta mode does not.
+
 ### 6.3 `mlx5_core` — RDMA / RoCE (`/sys/class/infiniband/<dev>/ports/<p>/hw_counters/`)
 
 Collected only when an IB device is bound to the netdev. These are kernel-bypass counters that `ethtool -S` does **not** show.
@@ -333,7 +354,7 @@ Explicit consent boundary. Never runs unless requested.
 | **0** | This design approved; `CLAUDE.md` updated | Doc merged |
 | **1** | Skeleton: CLI, preflight, discovery + ASIC grouping, record model, exit codes, table/JSON/CSV, `--check-tools`. Verify the mlx5 counter catalog against the kernel doc for supported kernels | Runs on test host; exit code 3 paths covered ✅ |
 | **2** | Generic checks (§6.1) + delta engine with reset detection | Fixtures for reset/wrap/gauge cases pass ✅ (FEC deferred, see §6.1) |
-| **3** | `mlx5_core` Ethernet checks (§6.2) + hints | Validated on ConnectX hardware (test host) |
+| **3** | `mlx5_core` Ethernet checks (§6.2) + hints | Validated on ConnectX hardware (test host) ✅ |
 | **4** | RDMA `hw_counters` (§6.3) | Validated on a RoCE-enabled host |
 | **5** | Deep mode: `mstlink`/`mlxlink` allowlist (§7) | Forbidden-list unit test: argv never contains a denied flag |
 | **6** | Packaging: Makefile, OBS, offline ISO, man page, README, samples | Release with tandem version bump (on request) |
@@ -349,6 +370,7 @@ Explicit consent boundary. Never runs unless requested.
 | 2026-10-20 | Intel E810-XXV (`ice`), 1 host | 4.81 0x80020b48 1.3818.0 / SLES 15 SP6 6.4.0-150600.21 | Baseline recorded in §6.4. nic-xray itself also tested here (bash 4.4, SLES, USB `cdc_ether` interface) |
 | 2026-10-20 | Phase 1 `nic-health.sh` on 5 hosts: ConnectX-6 Lx (`mlx5_core`), E810-XXV (`ice`), 82599ES (`ixgbe`), SFC9120 (`sfc`), 82574L/82579LM (`e1000e`) | Debian 12/13 (PVE/PBS), SLES 15 SP6 (bash 4.4), Unraid 7.3 | Discovery, ASIC grouping, PCIe link check, table/JSON/CSV and exit codes verified. Chipset-integrated 82579LM has no PCIe link attributes → `N/A`; USB BMC NIC → `N/A`, USB-only selection → `UNKNOWN` (exit 3) |
 | 2026-10-20 | Phase 2 on the same 5 hosts | same | Delta (`-I 5`) and absolute (`-I 0`) modes; AER, temperature, devlink (device + port reporters via `devlink port show`), link flaps. sfc lists a sensor that returns `EBUSY` → `N/A`. ixgbe hwmon `_max` > `_crit`. `make test`: 77 unit tests (incl. `set -euo pipefail` sourcing) on bash 5.3 and 4.4. Codex review: 8 findings, 7 fixed (per-function AER reset detection, alarm-only sensors, `devlink port show` failure → `UNKNOWN`, vanished sources → `UNKNOWN`, bad clock → `elapsed_s: null`, `set -e`/`set -u` safety), `link_down_events_phy` moved to Phase 3 |
+| 2026-10-20 | Phase 3 on pve-01..04, pbs-01 (+ non-mlx5 hosts) | CX-6 Lx fw 26.47.1026 | All 25G AOC ports (SFP-25G-AO03) run with FEC Off. pve-01 has four ports with growing `rx_symbol_err_phy`/`rx_crc_errors_phy` (up to ~15/s; 61M since boot on `ens1f0np0`) at healthy RX power → `CRIT` + FEC hint. pve-02..04 clean. Non-mlx5 hosts get no `mlx5.*` records. `make test`: 122 tests (bash 5.3 and 4.4). Codex review: 4 findings, 3 fixed (`rx_bits_phy` reset/vanish now `UNKNOWN`; overflow-safe BER, lane and `fmt_sci` math; `outbound_pci_buffer_overflow` gauge added). The gauge-delta finding was disproved by test. 20-digit (unsigned 64-bit) counters are handled in `delta()` by splitting at 18 digits (400G `rx_bits_phy` passes 2⁶³ after ~266 days) |
 | — | Broadcom `bnxt_en` | — | ⏳ Pending: no host with a Broadcom NIC identified |
 
 ## 14. ❓ Open questions

@@ -23,6 +23,7 @@
 #                 detection, monotonic time), generic checks for PCIe AER,
 #                 temperature (hwmon), devlink health reporters, link flaps.
 #                 Script is now sourceable for unit tests (tests/)
+#   - 2026-10-20: Phase 3: mlx5_core ethtool -S rule table (design §6.2)
 #
 # Version: 2.10.3
 
@@ -70,6 +71,70 @@ TEMP_WARN_MARGIN_C=10
 # (e.g. sfc MC_CMD_SENSOR_STATE_NO_READING); treated as N/A, other read errors as UNKNOWN
 READ_EBUSY_MSG="Device or resource busy"
 
+# --- mlx5_core (NVIDIA ConnectX) ethtool -S rules (design §6.2) ---
+# Each rule: check id, counters as NAME:SEV, and a hint. SEV is CRIT or WARN (growth escalates)
+# or INFO (shown as context, never escalates). NAME may contain one [d-d] digit range, which is
+# expanded once into the exact-name lookup used while parsing ethtool -S.
+MLX5_DRIVER="mlx5_core"
+SEV_INFO="INFO"
+MLX5_RULE_ID=(
+    "mlx5.rx.starvation"
+    "mlx5.nic.discards"
+    "mlx5.phy.errors"
+    "mlx5.frame.errors"
+    "mlx5.pcie.path"
+    "mlx5.datapath.faults"
+    "mlx5.congestion"
+    "mlx5.pause.storm"
+    "mlx5.module"
+    "mlx5.link.phy_down"
+)
+MLX5_RULE_COUNTERS=(
+    "rx_out_of_buffer:WARN rx_buff_alloc_err:WARN"
+    "rx_discards_phy:WARN tx_discards_phy:WARN"
+    "rx_symbol_err_phy:CRIT rx_pcs_symbol_err_phy:CRIT rx_corrected_bits_phy:INFO rx_err_lane_[0-9]_phy:INFO rx_bits_phy:INFO"
+    "rx_crc_errors_phy:WARN rx_fragments_phy:WARN rx_jabbers_phy:WARN rx_undersize_pkts_phy:WARN rx_oversize_pkts_phy:WARN"
+    "rx_pci_signal_integrity:WARN tx_pci_signal_integrity:WARN outbound_pci_stalled_rd_events:WARN outbound_pci_stalled_wr_events:WARN"
+    "tx_cqe_err:CRIT rx_wqe_err:CRIT tx_recover:CRIT rx_recover:CRIT"
+    "rx_prio[0-7]_buf_discard:WARN rx_prio[0-7]_cong_discard:WARN rx_pause_ctrl_phy:INFO tx_pause_ctrl_phy:INFO rx_global_pause:INFO tx_global_pause:INFO rx_buffer_passed_thres_phy:INFO"
+    "tx_pause_storm_warning_events:WARN tx_pause_storm_error_events:CRIT"
+    "module_bus_stuck:CRIT module_bad_shorted:CRIT module_high_temp:WARN module_unplug:WARN"
+    "link_down_events_phy:WARN"
+)
+MLX5_RULE_HINT=(
+    "Host cannot drain RX rings: raise ring size (ethtool -G IFACE rx <max>), check IRQ affinity and CPU load"
+    "NIC buffer exhausted: usually PCIe or host backpressure; correlate with mlx5.pcie.path and CPU load"
+    "Uncorrectable symbol errors: traffic is being lost; clean/replace the optic or cable, check peer port and FEC mode"
+    "Frame errors: CRC/fragments/jabbers point to cabling or optics; oversize frames to an MTU mismatch with the peer"
+    "PCIe recovery or outbound stalls: check slot, riser, BIOS PCIe settings and host root-complex load"
+    "Driver/firmware datapath fault (CQE/WQE error or queue recovery): check kernel log, update driver and firmware"
+    "Congestion evidence, not a NIC fault: CPU, PCIe, application load or PFC/pause configuration"
+    "Pause storm: the NIC stopped sending pause frames because the host stopped draining a queue; check for a stuck host or driver"
+    "Transceiver module fault: reseat or replace the module; high_temp means airflow or module overheating"
+    "Physical link went down: check cable/transceiver, peer port, and autonegotiation/FEC settings"
+)
+# Gauges (instantaneous %, never deltaed): reported as context in the PCIe path rule
+MLX5_GAUGES=("outbound_pci_stalled_rd" "outbound_pci_stalled_wr" "outbound_pci_buffer_overflow")
+MLX5_GAUGE_RULE="mlx5.pcie.path"
+# Pre-FEC BER: needs rx_bits_phy (absent on ConnectX-6 Lx). WARN when BER > 10^-MLX5_PRE_FEC_BER_WARN_EXP
+MLX5_BER_RULE="mlx5.phy.errors"
+MLX5_BITS_COUNTER="rx_bits_phy"
+MLX5_CORRECTED_COUNTER="rx_corrected_bits_phy"
+MLX5_LANE_COUNTER_GLOB="rx_err_lane_[0-9]_phy"
+MLX5_PRE_FEC_BER_WARN_EXP=6
+# Big-counter arithmetic: digits that always fit a signed 64-bit integer, and its base
+BIG_DIGITS=18
+BIG_BASE=1000000000000000000
+BIG_MAX_HI=8
+# Largest denominator fmt_sci handles without overflow (larger ones are scaled down)
+SCI_MAX_DEN=90000000000000000
+# Link speed (Mb/s) from which running without FEC is called out when PHY errors grow
+FEC_EXPECTED_MIN_SPEED=25000
+FEC_OFF_MODES=("Off" "None")
+# Lane skew hint: one lane carries at least this % of corrected bits (and at least the minimum)
+LANE_DOMINANCE_PCT=90
+LANE_MIN_ERRORS=100
+
 # PCIe AER sysfs files and their total-counter keys
 AER_KINDS=("cor" "nonfatal" "fatal")
 declare -A AER_FILE=([cor]="aer_dev_correctable" [nonfatal]="aer_dev_nonfatal" [fatal]="aer_dev_fatal")
@@ -83,7 +148,7 @@ REQUIRED_CMDS=("ethtool" "getopt" "readlink")
 TOOL_NAMES=("ethtool" "getopt" "readlink" "lspci" "devlink" "mlxlink" "mstlink")
 TOOL_ROLES=("required" "required" "required" "optional" "optional" "optional" "optional")
 TOOL_USES=(
-    "Driver and firmware identification"
+    "Driver/firmware identification, mlx5 counters (ethtool -S)"
     "Command-line parsing"
     "sysfs path resolution"
     "NIC vendor/model names (falls back to PCI IDs)"
@@ -152,6 +217,27 @@ REC_HINT=()
 REC_REF=()
 declare -A SEV_COUNT=()
 
+# Exact names of every ethtool -S counter the mlx5 rules need (rule counters, gauges, BER
+# denominator). A lookup table, not a regex: mlx5 prints thousands of per-channel lines per port
+declare -A MLX5_WANTED=()
+build_mlx5_wanted() {
+    local SPEC ITEM NAME d
+    local -a NAMES=("${MLX5_GAUGES[@]}" "$MLX5_BITS_COUNTER")
+    for SPEC in "${MLX5_RULE_COUNTERS[@]}"; do
+        for ITEM in $SPEC; do NAMES+=("${ITEM%:*}"); done
+    done
+    for NAME in "${NAMES[@]}"; do
+        if [[ "$NAME" =~ ^(.*)\[([0-9])-([0-9])\](.*)$ ]]; then
+            for (( d = BASH_REMATCH[2]; d <= BASH_REMATCH[3]; d++ )); do
+                MLX5_WANTED["${BASH_REMATCH[1]}$d${BASH_REMATCH[4]}"]=1
+            done
+        else
+            MLX5_WANTED["$NAME"]=1
+        fi
+    done
+}
+build_mlx5_wanted
+
 # --- Helpers ---
 
 usage() {
@@ -186,6 +272,9 @@ usage() {
     echo -e "                        at/over critical (CRIT)"
     echo -e " generic.devlink.health Reporter not healthy (CRIT), new errors in window (WARN)"
     echo -e " generic.link.flaps     Carrier transitions in window (WARN)"
+    echo -e " mlx5.*                 ConnectX (mlx5_core) ethtool -S counters: RX starvation, NIC discards,"
+    echo -e "                        PHY symbol errors / pre-FEC BER, frame errors, PCIe path, datapath faults,"
+    echo -e "                        congestion, pause storms, module faults, PHY link-down events"
     echo -e ""
     echo -e "Exit status (Nagios-compatible):"
     echo -e " $EXIT_OK  All checks OK or N/A"
@@ -636,6 +725,10 @@ snapshot() {
         _S["carrier|$IFACE"]=$(read_attr "$FILE" || printf '?')
     done
 
+    for IDX in "${!PORT_IFACE[@]}"; do
+        mlx5_port_eligible "$IDX" && mlx5_snapshot "$1" "${PORT_IFACE[IDX]}"
+    done
+
     if [[ -n "${TOOL_PATH[devlink]}" ]]; then
         if OUT=$(LC_ALL=C devlink health show 2>&1); then
             parse_devlink_health "$1" "$ORDER_NAME" <<< "$OUT"
@@ -664,11 +757,29 @@ sample_wait() {
 
 # Set DELTA to SNAP1[key] - SNAP0[key]
 # Returns 1 if either value is missing or non-numeric, 2 on a counter reset (T1 < T0)
+# Counters are unsigned 64-bit (up to 20 digits) but bash integers are signed 64-bit:
+# values beyond 18 digits are split into a high part and the low 18 digits
 delta() {
     local A="${SNAP0[$1]:-}" B="${SNAP1[$1]:-}"
     [[ "$A" =~ ^[0-9]+$ && "$B" =~ ^[0-9]+$ ]] || return 1
-    (( B < A )) && return 2
-    DELTA=$(( B - A ))
+    A="${A#"${A%%[!0]*}"}"; A="${A:-0}"
+    B="${B#"${B%%[!0]*}"}"; B="${B:-0}"
+    if (( ${#A} <= BIG_DIGITS && ${#B} <= BIG_DIGITS )); then
+        (( B < A )) && return 2
+        DELTA=$(( B - A ))
+        return 0
+    fi
+    # Order by length, then lexically (equal length, no leading zeros)
+    if (( ${#B} < ${#A} )) || { (( ${#B} == ${#A} )) && [[ "$B" < "$A" ]]; }; then
+        return 2
+    fi
+    local AH=0 AL="$A" BH=0 BL="$B"
+    if (( ${#A} > BIG_DIGITS )); then AH="${A:0:${#A}-BIG_DIGITS}"; AL="${A: -BIG_DIGITS}"; fi
+    if (( ${#B} > BIG_DIGITS )); then BH="${B:0:${#B}-BIG_DIGITS}"; BL="${B: -BIG_DIGITS}"; fi
+    local HI=$(( 10#$BH - 10#$AH ))
+    # HI*10^18 plus the low part must stay below 2^63
+    (( HI <= BIG_MAX_HI )) || return 1
+    DELTA=$(( HI * BIG_BASE + 10#$BL - 10#$AL ))
     return 0
 }
 
@@ -684,6 +795,247 @@ elapsed_str() {
     else
         printf '?'
     fi
+}
+
+# --- Vendor: mlx5_core ---
+
+# mlx5 rules apply to physical functions bound to mlx5_core (VFs have no _phy counters)
+mlx5_port_eligible() {
+    [[ "${PORT_DRIVER[$1]}" == "$MLX5_DRIVER" ]] && ! ${PORT_VF[$1]}
+}
+
+# Store the wanted ethtool -S counters of IFACE into the snapshot as ets|IFACE|NAME,
+# the kept names as ets_names|IFACE, or the failure as ets_err|IFACE
+# Args: snapshot-array-name iface
+mlx5_snapshot() {
+    local -n _M="$1"
+    local IFACE="$2" OUT LINE NAME VAL KEPT=""
+    if ! OUT=$(LC_ALL=C ethtool -S "$IFACE" 2>&1); then
+        _M["ets_err|$IFACE"]="${OUT//$'\n'/ }"
+        return 0
+    fi
+    local -a LINES
+    mapfile -t LINES <<< "$OUT"
+    # Lines are "     name: value"; parameter expansion only, no per-line regex or subshell
+    for LINE in "${LINES[@]}"; do
+        LINE="${LINE#"${LINE%%[![:space:]]*}"}"
+        NAME="${LINE%%:*}"
+        [[ -n "${MLX5_WANTED[$NAME]:-}" ]] || continue
+        # First occurrence wins if a driver ever prints a name twice
+        [[ -n "${_M["ets|$IFACE|$NAME"]+x}" ]] && continue
+        VAL="${LINE#*:}"
+        VAL="${VAL//[[:space:]]/}"
+        _M["ets|$IFACE|$NAME"]="$VAL"
+        KEPT+="$NAME "
+    done
+    _M["ets_names|$IFACE"]="${KEPT% }"
+}
+
+# Format NUM/DEN in scientific notation with one decimal (e.g. 3.2e-07); NUM <= DEN
+fmt_sci() {
+    local N="$1" D="$2" E=0 M
+    # Keep N*10 and N*100 inside signed 64-bit range (precision loss only affects display)
+    while (( D > SCI_MAX_DEN )); do N=$(( N / 10 )); D=$(( D / 10 )); done
+    if (( N == 0 )); then printf '0'; return; fi
+    while (( N < D )); do N=$(( N * 10 )); E=$(( E + 1 )); done
+    M=$(( N * 10 / D ))
+    printf '%d.%de-%02d' $(( M / 10 )) $(( M % 10 )) "$E"
+}
+
+# Evaluate one mlx5 rule for a port
+# Args: port-index rule-index
+check_mlx5_rule() {
+    local IDX="$1" R="$2"
+    local IFACE="${PORT_IFACE[$1]}"
+    local CHECK="${MLX5_RULE_ID[R]}" HINT_TXT="${MLX5_RULE_HINT[R]}" REF="$DESIGN_REF §6.2"
+    local ITEM GLOB CSEV NAME KEY RC SEV="$SEV_OK" HINT="" UNIT
+    local VALUE_PARTS="" CONTEXT="" EVIDENCE="" MATCHED=0 THRESH SHOWN
+    # Set by mlx5_ber_eval through dynamic scoping
+    local LANE_HINT="" BER_VALUE=""
+    local -a NAMES1 NAMES0
+    read -ra NAMES1 <<< "${SNAP1["ets_names|$IFACE"]:-}"
+    read -ra NAMES0 <<< "${SNAP0["ets_names|$IFACE"]:-}"
+    # Candidate names in ethtool order: T1 names, then names only seen at T0 (vanished)
+    local -A IN1=()
+    local -a CAND=("${NAMES1[@]}")
+    for NAME in "${NAMES1[@]}"; do IN1["$NAME"]=1; done
+    for NAME in "${NAMES0[@]}"; do [[ -n "${IN1[$NAME]:-}" ]] || CAND+=("$NAME"); done
+
+    for ITEM in ${MLX5_RULE_COUNTERS[R]}; do
+        GLOB="${ITEM%:*}"
+        CSEV="${ITEM##*:}"
+        for NAME in "${CAND[@]}"; do
+            # shellcheck disable=SC2053  # GLOB is intentionally a pattern
+            [[ "$NAME" == $GLOB ]] || continue
+            KEY="ets|$IFACE|$NAME"
+            (( ++MATCHED ))
+            if vanished "$KEY"; then
+                add_record "port" "$IFACE" "$CHECK" "-" "" "-" "$SEV_UNKNOWN" "$NAME present at T0, gone at T1" \
+                    "Driver reloaded or interface re-created during the window; re-run" "$REF"
+                return
+            fi
+            if [[ ! "${SNAP1[$KEY]:-}" =~ ^[0-9]+$ ]]; then
+                add_record "port" "$IFACE" "$CHECK" "-" "" "-" "$SEV_UNKNOWN" "$NAME=${SNAP1[$KEY]:-?} (not a counter)" \
+                    "Unparseable ethtool -S value" "$REF"
+                return
+            fi
+            if (( INTERVAL > 0 )); then
+                RC=0; delta "$KEY" || RC=$?
+                if (( RC == 2 )); then
+                    add_record "port" "$IFACE" "$CHECK" "-" "" "-" "$SEV_UNKNOWN" \
+                        "$NAME decreased (T0=${SNAP0[$KEY]} T1=${SNAP1[$KEY]})" "Counter reset (driver reload or ethtool -S reset?); re-run" "$REF"
+                    return
+                elif (( RC != 0 )); then
+                    add_record "port" "$IFACE" "$CHECK" "-" "" "-" "$SEV_UNKNOWN" "$NAME missing from first snapshot" \
+                        "Counter appeared during the window; re-run" "$REF"
+                    return
+                fi
+            else
+                DELTA="${SNAP1[$KEY]}"
+            fi
+            # String tests: 20-digit counters would wrap in arithmetic
+            if [[ "${SNAP1[$KEY]}" =~ [1-9] && "$NAME" != "$MLX5_BITS_COUNTER" ]]; then
+                EVIDENCE+="$NAME=${SNAP1[$KEY]}"
+                (( INTERVAL > 0 )) && EVIDENCE+=" (+$DELTA)"
+                EVIDENCE+=" "
+            fi
+            [[ "$DELTA" =~ [1-9] ]] || continue
+            # The BER denominator is only lifecycle-checked here; it is not an event
+            [[ "$NAME" == "$MLX5_BITS_COUNTER" ]] && continue
+            # Growth is signed (+N); absolute totals are not
+            SHOWN="$DELTA"
+            (( INTERVAL > 0 )) && SHOWN="+$DELTA"
+            if [[ "$CSEV" == "$SEV_INFO" ]]; then
+                CONTEXT+="$NAME $SHOWN, "
+                continue
+            fi
+            VALUE_PARTS+="$NAME=$SHOWN "
+            if [[ "$CSEV" == "$SEV_CRIT" ]]; then
+                SEV="$SEV_CRIT"
+            elif [[ "$SEV" != "$SEV_CRIT" ]]; then
+                SEV="$SEV_WARN"
+            fi
+        done
+    done
+
+    if (( MATCHED == 0 )); then
+        add_record "port" "$IFACE" "$CHECK" "-" "" "-" "$SEV_NA" "none of: ${MLX5_RULE_COUNTERS[R]}" \
+            "Counters not exposed by this ConnectX model or firmware" "$REF"
+        return
+    fi
+
+    [[ -z "$EVIDENCE" ]] && EVIDENCE="all $MATCHED counters are 0 "
+    EVIDENCE="${EVIDENCE% }"
+    [[ "$CHECK" == "$MLX5_GAUGE_RULE" ]] && EVIDENCE+="$(mlx5_gauge_context "$IFACE")"
+    [[ "$CHECK" == "$MLX5_BER_RULE" ]] && mlx5_ber_eval "$IFACE"
+
+    if (( INTERVAL > 0 )); then
+        UNIT="per window"
+    else
+        UNIT="since driver load"
+        SEV=$(historical_cap "$SEV")
+    fi
+    if [[ "$SEV" != "$SEV_OK" ]]; then
+        HINT="$HINT_TXT"
+        [[ "$CHECK" == "$MLX5_BER_RULE" ]] && HINT="$(fec_off_hint "$IFACE")$HINT"
+        (( INTERVAL == 0 )) && HINT="Historical totals, re-run with -I to see if they grow. $HINT"
+    elif [[ -n "$CONTEXT" ]]; then
+        HINT="Context only: ${CONTEXT%, }"
+    fi
+    [[ -n "${LANE_HINT:-}" ]] && HINT="${HINT:+$HINT. }$LANE_HINT"
+    VALUE_PARTS="${VALUE_PARTS% }"
+    [[ -n "${BER_VALUE:-}" ]] && VALUE_PARTS="${VALUE_PARTS:+$VALUE_PARTS }$BER_VALUE"
+    THRESH=">0 $(mlx5_rule_severities "$R")"
+    [[ "$CHECK" == "$MLX5_BER_RULE" ]] && THRESH+=", pre-FEC BER>1e-$(printf '%02d' "$MLX5_PRE_FEC_BER_WARN_EXP") $SEV_WARN"
+    if [[ -z "$VALUE_PARTS" ]]; then
+        VALUE_PARTS="0"
+        (( INTERVAL > 0 )) && VALUE_PARTS="+0"
+    fi
+    add_record "port" "$IFACE" "$CHECK" "$VALUE_PARTS" "$UNIT" "$THRESH" "$SEV" "$EVIDENCE" "$HINT" "$REF"
+}
+
+# Distinct escalating severities of a rule: CRIT, WARN, or CRIT/WARN
+mlx5_rule_severities() {
+    local SPEC="${MLX5_RULE_COUNTERS[$1]}" OUT=""
+    [[ " $SPEC" == *":$SEV_CRIT"* ]] && OUT="$SEV_CRIT"
+    [[ " $SPEC" == *":$SEV_WARN"* ]] && OUT="${OUT:+$OUT/}$SEV_WARN"
+    printf '%s' "$OUT"
+}
+
+# Hint prefix when PHY errors grow on a fast link running without FEC (read only on a finding)
+fec_off_hint() {
+    local IFACE="$1" SPEED OUT MODE OFF
+    SPEED=$(read_attr "$SYSFS_NET/$IFACE/speed") || SPEED=""
+    [[ "$SPEED" =~ ^[0-9]+$ ]] || return 0
+    (( SPEED >= FEC_EXPECTED_MIN_SPEED )) || return 0
+    OUT=$(LC_ALL=C ethtool --show-fec "$IFACE" 2>/dev/null) || return 0
+    [[ "$OUT" =~ Active\ FEC\ encoding:[[:space:]]*([^$'\n']*) ]] || return 0
+    MODE="${BASH_REMATCH[1]%"${BASH_REMATCH[1]##*[![:space:]]}"}"
+    for OFF in "${FEC_OFF_MODES[@]}"; do
+        if [[ "$MODE" == "$OFF" ]]; then
+            printf 'Active FEC is %s at %d Mb/s: links at 25G and above normally rely on RS-FEC to correct routine bit errors; check that FEC matches on both ends. ' "$MODE" "$SPEED"
+            return 0
+        fi
+    done
+}
+
+# Instantaneous PCIe stall gauges at T1, as evidence text
+mlx5_gauge_context() {
+    local G OUT=""
+    for G in "${MLX5_GAUGES[@]}"; do
+        [[ -n "${SNAP1["ets|$1|$G"]+x}" ]] && OUT+="; $G=${SNAP1["ets|$1|$G"]}% (gauge)"
+    done
+    printf '%s' "$OUT"
+}
+
+# Pre-FEC BER and lane skew for the PHY rule. Sets BER_VALUE, LANE_HINT and may raise SEV to WARN
+# (uses the caller's SEV and EVIDENCE through dynamic scoping)
+mlx5_ber_eval() {
+    local IFACE="$1" CORR BITS NAME TOTAL=0 MAX=0 MAX_LANE="" LANES=0 RC
+    local BKEY="ets|$IFACE|$MLX5_BITS_COUNTER" CKEY="ets|$IFACE|$MLX5_CORRECTED_COUNTER"
+    (( INTERVAL > 0 )) || return 0
+
+    if [[ -z "${SNAP1[$BKEY]+x}" ]]; then
+        EVIDENCE+="; $MLX5_BITS_COUNTER not exposed: pre-FEC BER not computed (deep mode mlxlink reports it)"
+    else
+        RC=0; delta "$CKEY" || RC=$?; (( RC == 0 )) && CORR=$DELTA || CORR=""
+        RC=0; delta "$BKEY" || RC=$?; (( RC == 0 )) && BITS=$DELTA || BITS=""
+        if [[ -n "$CORR" && -n "$BITS" ]] && (( BITS > 0 )); then
+            BER_VALUE="pre-FEC BER=$(fmt_sci "$CORR" "$BITS")"
+            # CORR/BITS > 10^-EXP without multiplying large counters
+            if (( CORR > 0 && CORR > BITS / 10 ** MLX5_PRE_FEC_BER_WARN_EXP )) && [[ "$SEV" == "$SEV_OK" ]]; then
+                SEV="$SEV_WARN"
+            fi
+        fi
+    fi
+
+    for NAME in "${!SNAP1[@]}"; do
+        # shellcheck disable=SC2053
+        [[ "$NAME" == "ets|$IFACE|"$MLX5_LANE_COUNTER_GLOB ]] || continue
+        RC=0; delta "$NAME" || RC=$?
+        (( RC == 0 )) || continue
+        (( ++LANES ))
+        TOTAL=$(( TOTAL + DELTA ))
+        if (( DELTA > MAX )); then MAX=$DELTA; MAX_LANE="${NAME##*|}"; fi
+    done
+    # Divide first: TOTAL*PCT could overflow; the precision loss is irrelevant for a hint
+    # shellcheck disable=SC2017
+    if (( LANES > 1 && TOTAL >= LANE_MIN_ERRORS && MAX >= TOTAL / 100 * LANE_DOMINANCE_PCT )); then
+        LANE_HINT="Corrected bits concentrated on $MAX_LANE: suspect that lane/fiber of the optic or cable"
+    fi
+}
+
+check_mlx5_port() {
+    local IDX="$1" R IFACE="${PORT_IFACE[$1]}"
+    local ERR="${SNAP1["ets_err|$IFACE"]:-${SNAP0["ets_err|$IFACE"]:-}}"
+    if [[ -n "$ERR" ]]; then
+        add_record "port" "$IFACE" "mlx5.ethtool" "-" "" "-" "$SEV_UNKNOWN" "ethtool -S failed: $ERR" \
+            "mlx5 counters unavailable for this port" "$DESIGN_REF §6.2"
+        return
+    fi
+    for R in "${!MLX5_RULE_ID[@]}"; do
+        check_mlx5_rule "$IDX" "$R"
+    done
 }
 
 # --- Checks ---
@@ -1040,6 +1392,10 @@ run_checks() {
         check_link_flaps "$IDX"
     done
     check_devlink
+    for IDX in "${!PORT_IFACE[@]}"; do
+        mlx5_port_eligible "$IDX" && check_mlx5_port "$IDX"
+    done
+    return 0
 }
 
 # --- Verdict ---
