@@ -28,6 +28,8 @@
 #   - 2026-10-20: Phase 5: -l/--level deep with allowlisted mlxlink/mstlink queries (design §7)
 #   - 2026-10-20: -L/--lookback: generic.link.lookback counts driver link-down messages in the
 #                 kernel journal over the last N minutes (#9), so past flaps are visible
+#   - 2026-10-20: generic.pcie.link compares against what both ends of the link support: a card
+#                 in a narrower or slower slot is OK (slot-limited), not WARN (#14)
 #   - 2026-10-20: generic.link.state: no carrier on a port in use (bond/bridge member, upper
 #                 devices or a global address) is WARN, CRIT when its bond is down too; deep
 #                 link checks skip ports without carrier instead of reporting noise (#12)
@@ -373,7 +375,8 @@ usage() {
     echo -e " -h, --help             Display this help message"
     echo -e ""
     echo -e "Checks:"
-    echo -e " generic.pcie.link      PCIe link trained below the card's capability (WARN)"
+    echo -e " generic.pcie.link      PCIe link trained below what both the card and its slot support (WARN);"
+    echo -e "                        a slot narrower or slower than the card is OK (slot-limited)"
     echo -e " generic.pcie.aer       New PCIe AER errors: fatal/nonfatal (CRIT), correctable (WARN)"
     echo -e " generic.temperature    hwmon sensor within ${TEMP_WARN_MARGIN_C}C of critical or above max (WARN),"
     echo -e "                        at/over critical (CRIT)"
@@ -1450,13 +1453,24 @@ check_deep() {
 
 # --- Checks ---
 
-# generic.pcie.link: compare trained PCIe link speed/width with the device maximum
+# Physical sysfs directory of the PCIe port above a device (the slot or bridge it trains with),
+# or nothing when the device sits directly on a root bus. Bash-native: cd -P resolves symlinks
+# Args: device sysfs dir
+upstream_port_dir() {
+    local UP
+    UP=$(cd -P -- "$1/.." 2>/dev/null && pwd) || return 1
+    [[ -e "$UP/max_link_width" || -e "$UP/max_link_speed" ]] || return 1
+    printf '%s' "$UP"
+}
+
+# generic.pcie.link: compare the trained PCIe link with what both ends support. The device
+# maximum alone over-reports: an x2-capable chip wired to an x1 port trains at x1 by design (#14)
 check_pcie_link() {
     local ASIC="$1"
     local BDF="${ASIC_BDF[$ASIC]}"
     local DIR="$SYSFS_PCI/$BDF"
     local CHECK="generic.pcie.link" UNIT="" REF="$DESIGN_REF §6.1"
-    local CUR_S MAX_S CUR_W MAX_W CUR_T MAX_T
+    local CUR_S MAX_S CUR_W MAX_W CUR_T MAX_T UP UP_S UP_W UP_T CAP_T CAP_W CAP_S LIMIT=""
 
     if [[ ! -e "$DIR/current_link_speed" && ! -e "$DIR/max_link_speed" ]]; then
         add_record "asic" "$ASIC" "$CHECK" "-" "$UNIT" "-" "$SEV_NA" \
@@ -1470,15 +1484,45 @@ check_pcie_link() {
     MAX_W=$(read_attr "$DIR/max_link_width") || MAX_W=""
     CUR_T=$(pcie_speed_tenths "$CUR_S")
     MAX_T=$(pcie_speed_tenths "$MAX_S")
-    local VALUE="${CUR_S%% PCIe*} x${CUR_W}" THRESH="${MAX_S%% PCIe*} x${MAX_W}"
+    local VALUE="${CUR_S%% PCIe*} x${CUR_W}" THRESH
     local EVIDENCE="current_link_speed=$CUR_S current_link_width=$CUR_W max_link_speed=$MAX_S max_link_width=$MAX_W"
 
     if [[ -z "$CUR_T" || -z "$MAX_T" || ! "$CUR_W" =~ ^[0-9]+$ || ! "$MAX_W" =~ ^[0-9]+$ ]]; then
+        THRESH="${MAX_S%% PCIe*} x${MAX_W}"
         add_record "asic" "$ASIC" "$CHECK" "$VALUE" "$UNIT" "$THRESH" "$SEV_UNKNOWN" \
             "$EVIDENCE" "Link attributes unreadable or unknown (link down or device in low-power state?)" "$REF"
-    elif (( CUR_T < MAX_T || CUR_W < MAX_W )); then
+        return
+    fi
+
+    # Expected link: the lower of the device and upstream port maxima, per dimension
+    CAP_T=$MAX_T CAP_W=$MAX_W CAP_S="$MAX_S"
+    if UP=$(upstream_port_dir "$DIR"); then
+        UP_S=$(read_attr "$UP/max_link_speed") || UP_S=""
+        UP_W=$(read_attr "$UP/max_link_width") || UP_W=""
+        UP_T=$(pcie_speed_tenths "$UP_S")
+        EVIDENCE+="; upstream ${UP##*/} max_link_speed=${UP_S:-?} max_link_width=${UP_W:-?}"
+        if [[ -n "$UP_T" ]] && (( UP_T < CAP_T )); then
+            CAP_T=$UP_T CAP_S="$UP_S"
+            LIMIT+="speed "
+        fi
+        # 0 is not a width (zero LNKCAP from an emulated bridge): never lower the expectation to it
+        if [[ "$UP_W" =~ ^[0-9]+$ ]] && (( 10#$UP_W > 0 && 10#$UP_W < CAP_W )); then
+            CAP_W=$(( 10#$UP_W ))
+            LIMIT+="width "
+        fi
+    else
+        EVIDENCE+="; no upstream port link attributes: card maxima used"
+    fi
+    THRESH="${CAP_S%% PCIe*} x${CAP_W}"
+    [[ -n "$LIMIT" ]] && THRESH+=" (slot)"
+
+    if (( CUR_T < CAP_T || CUR_W < CAP_W )); then
         add_record "asic" "$ASIC" "$CHECK" "$VALUE" "$UNIT" "$THRESH" "$SEV_WARN" \
-            "$EVIDENCE" "Card trained below its capability: check slot width/generation, BIOS PCIe settings, riser; reseat. A slot narrower than the card is permanent" "$REF"
+            "$EVIDENCE" "Link trained below what the card and its slot support: check BIOS PCIe settings, riser and seating; reseat$([[ -z "${UP:-}" ]] && printf '. Slot limits unknown: a slot narrower than the card is permanent')" "$REF"
+    elif [[ -n "$LIMIT" ]]; then
+        add_record "asic" "$ASIC" "$CHECK" "$VALUE" "$UNIT" "$THRESH" "$SEV_OK" \
+            "$EVIDENCE; slot-limited ${LIMIT% }: card max ${MAX_S%% PCIe*} x${MAX_W}" \
+            "Slot narrower or slower than the card (board wiring, or BIOS bifurcation/link-speed setting): move the card or check the BIOS for full bandwidth" "$REF"
     else
         add_record "asic" "$ASIC" "$CHECK" "$VALUE" "$UNIT" "$THRESH" "$SEV_OK" "$EVIDENCE" "" "$REF"
     fi

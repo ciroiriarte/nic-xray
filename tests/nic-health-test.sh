@@ -768,6 +768,58 @@ assert_eq "exported functions dropped at load" "function dropped" "$(tr '\n' ' '
 # shellcheck disable=SC2329  # the function only has to exist while detect_tools runs
 assert_eq "detect_tools resolves files, not functions" "yes" "$(ethtool() { :; }; TOOL_PATH=(); detect_tools; [[ "${TOOL_PATH[ethtool]:-/}" == /* ]] && echo yes)"
 
+# --- PCIe link vs upstream port (#14) ---
+# As on real systems, bus/pci/devices/<BDF> links to devices/pci0000:00/<port>/<BDF>; the
+# port directory above the device holds the slot's own maxima
+pcie_link() {  # pcie_link <asic>: severity|value|threshold|evidence
+    local i
+    reset_results; check_pcie_link "$1"
+    for i in "${!REC_SEV[@]}"; do printf '%s|%s|%s|%s' "${REC_SEV[i]}" "${REC_VALUE[i]}" "${REC_THRESHOLD[i]}" "${REC_EVIDENCE[i]}"; done
+}
+PORT_DIR="$FIX/devices/pci0000:00/0000:00:01.1"
+mkdir -p "$PORT_DIR"
+mv "$SYSFS_PCI/0000:02:00.0" "$PORT_DIR/"
+ln -s "$PORT_DIR/0000:02:00.0" "$SYSFS_PCI/0000:02:00.0"
+# eth2 trains x4 of an x8 card: an x4 slot is by design (BCM5720 x1-of-x2 case)
+printf '8.0 GT/s PCIe\n' > "$PORT_DIR/max_link_speed"; printf '4\n' > "$PORT_DIR/max_link_width"
+assert_eq "slot narrower than card: OK" "OK|8.0 GT/s x4|8.0 GT/s x4 (slot)" "$(pcie_link 0000:02:00 | cut -d'|' -f1-3)"
+assert_eq "slot-limited evidence" "yes" "$([[ "$(pcie_link 0000:02:00)" == *"upstream 0000:00:01.1 max_link_speed=8.0 GT/s PCIe max_link_width=4; slot-limited width: card max 8.0 GT/s x8" ]] && echo yes)"
+# Slot is x8: training at x4 is a real degradation
+printf '8\n' > "$PORT_DIR/max_link_width"
+assert_eq "slot as wide as card, trained narrower: WARN" "WARN|8.0 GT/s x4|8.0 GT/s x8" "$(pcie_link 0000:02:00 | cut -d'|' -f1-3)"
+# Slower slot: Gen2 port under a Gen3 card trained at 5.0 GT/s
+printf '5.0 GT/s PCIe\n' > "$SYSFS_PCI/0000:02:00.0/current_link_speed"
+printf '5.0 GT/s PCIe\n' > "$PORT_DIR/max_link_speed"; printf '4\n' > "$PORT_DIR/max_link_width"
+assert_eq "slot slower and narrower: OK" "OK|5.0 GT/s x4|5.0 GT/s x4 (slot)" "$(pcie_link 0000:02:00 | cut -d'|' -f1-3)"
+assert_eq "slot-limited names both" "yes" "$([[ "$(pcie_link 0000:02:00)" == *"slot-limited speed width:"* ]] && echo yes)"
+# Trained below even the slot: WARN against the slot's maxima
+printf '2.5 GT/s PCIe\n' > "$SYSFS_PCI/0000:02:00.0/current_link_speed"
+assert_eq "below the slot too: WARN" "WARN|2.5 GT/s x4|5.0 GT/s x4 (slot)" "$(pcie_link 0000:02:00 | cut -d'|' -f1-3)"
+# Upstream port without readable maxima: device maxima only (previous behaviour)
+rm -f "$PORT_DIR/max_link_speed" "$PORT_DIR/max_link_width"
+printf '8.0 GT/s PCIe\n' > "$SYSFS_PCI/0000:02:00.0/current_link_speed"
+assert_eq "no upstream attributes: device maxima" "WARN|8.0 GT/s x4|8.0 GT/s x8" "$(pcie_link 0000:02:00 | cut -d'|' -f1-3)"
+assert_eq "no upstream evidence" "yes" "$([[ "$(pcie_link 0000:02:00)" == *"no upstream port link attributes: card maxima used" ]] && echo yes)"
+# Malformed or zero upstream width is ignored (0 would hide any width degradation)
+printf 'garbage\n' > "$PORT_DIR/max_link_width"
+assert_eq "malformed upstream width ignored" "WARN|8.0 GT/s x4|8.0 GT/s x8" "$(pcie_link 0000:02:00 | cut -d'|' -f1-3)"
+printf '0\n' > "$PORT_DIR/max_link_width"
+assert_eq "upstream width 0 ignored" "WARN|8.0 GT/s x4|8.0 GT/s x8" "$(pcie_link 0000:02:00 | cut -d'|' -f1-3)"
+# Only the speed is readable on the port, and it is "Unknown": ignored too
+rm -f "$PORT_DIR/max_link_width"; printf 'Unknown\n' > "$PORT_DIR/max_link_speed"
+assert_eq "upstream speed Unknown ignored" "WARN|8.0 GT/s x4|8.0 GT/s x8" "$(pcie_link 0000:02:00 | cut -d'|' -f1-3)"
+# Speed-limited only: Gen6-class card (64.0 GT/s) in a Gen5 slot, full width, no "PCIe" suffix
+printf '64.0 GT/s\n' > "$SYSFS_PCI/0000:02:00.0/max_link_speed"; printf '32.0 GT/s\n' > "$SYSFS_PCI/0000:02:00.0/current_link_speed"
+printf '8\n' > "$SYSFS_PCI/0000:02:00.0/current_link_width"
+printf '32.0 GT/s PCIe\n' > "$PORT_DIR/max_link_speed"; printf '16\n' > "$PORT_DIR/max_link_width"
+assert_eq "speed-limited only: OK" "OK|32.0 GT/s x8|32.0 GT/s x8 (slot)" "$(pcie_link 0000:02:00 | cut -d'|' -f1-3)"
+assert_eq "speed-limited evidence" "yes" "$([[ "$(pcie_link 0000:02:00)" == *"slot-limited speed: card max 64.0 GT/s x8" ]] && echo yes)"
+printf '8.0 GT/s PCIe\n' > "$SYSFS_PCI/0000:02:00.0/max_link_speed"; printf '8.0 GT/s PCIe\n' > "$SYSFS_PCI/0000:02:00.0/current_link_speed"
+printf '4\n' > "$SYSFS_PCI/0000:02:00.0/current_link_width"
+rm "$SYSFS_PCI/0000:02:00.0"
+mv "$PORT_DIR/0000:02:00.0" "$SYSFS_PCI/"
+rm -rf "$FIX/devices"
+
 # --- Link state (#12): a port in use must have carrier; spare ports are not judged ---
 link_state() {  # link_state <iface>: severity, value and evidence of generic.link.state
     local i

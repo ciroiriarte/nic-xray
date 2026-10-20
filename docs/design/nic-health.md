@@ -155,7 +155,7 @@ Most mlx5 counters are cumulative since driver load, so absolute values alone ar
 
 | Scope | Check | Source | Severity guidance |
 |---|---|---|---|
-| ASIC | PCIe link degraded | sysfs `current_link_{speed,width}` vs `max_link_{speed,width}` | `WARN` (could be slot-limited; overridable). Never `CRIT` alone |
+| ASIC | PCIe link degraded | sysfs `current_link_{speed,width}` vs the lower of the device `max_link_{speed,width}` and the upstream port's (parent directory of the resolved device path) | Below that → `WARN`. Equal to it but below the device maxima → `OK`, "slot-limited" in evidence (#14: on-board BCM5720, x2-capable, wired to an x1 root port on every Dell EPYC node). No upstream attributes → device maxima. Never `CRIT` alone |
 | ASIC | PCIe AER | sysfs `aer_dev_{correctable,nonfatal,fatal}` | fatal or nonfatal Δ>0 → `CRIT`; correctable Δ>0 → `WARN` |
 | ASIC | devlink health reporters (device) | `devlink health show pci/<BDF>` (mlx5: `fw`, `fw_fatal`, `vnic`; discover, don't assume) | state ≠ healthy → `CRIT`; error count Δ>0 → `WARN` |
 | Port | devlink health reporters (port) | `devlink health show` on the `auxiliary/mlx5_core.eth.N` instance (mlx5: `tx`, `rx`), mapped to the netdev via `devlink port show` | same as above |

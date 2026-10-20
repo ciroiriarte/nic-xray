@@ -31,7 +31,8 @@ Options:
  -h, --help             Display this help message
 
 Checks:
- generic.pcie.link      PCIe link trained below the card's capability (WARN)
+ generic.pcie.link      PCIe link trained below what both the card and its slot support (WARN);
+                        a slot narrower or slower than the card is OK (slot-limited)
  generic.pcie.aer       New PCIe AER errors: fatal/nonfatal (CRIT), correctable (WARN)
  generic.temperature    hwmon sensor within 10C of critical or above max (WARN),
                         at/over critical (CRIT)

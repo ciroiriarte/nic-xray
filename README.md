@@ -771,7 +771,7 @@ Design and rationale: [`docs/design/nic-health.md`](docs/design/nic-health.md). 
 
 | Area | Check IDs | Data source |
 |---|---|---|
-| PCIe link | `generic.pcie.link` | sysfs link speed/width vs. capability |
+| PCIe link | `generic.pcie.link` | sysfs link speed/width vs. the lower of the card's and its slot's maxima (a narrower slot by design is OK) |
 | PCIe errors | `generic.pcie.aer` | sysfs AER counters (fatal/non-fatal → CRIT, correctable → WARN) |
 | Temperature | `generic.temperature` | hwmon sensors (critical → CRIT, within 10 °C → WARN) |
 | Firmware/driver health | `generic.devlink.health.*` | `devlink health` reporters (device and port) |

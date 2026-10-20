@@ -151,7 +151,14 @@ checks only to the matching driver.
 .SS Generic (all drivers)
 .TP
 .B generic.pcie.link
-ASIC trained below its PCIe capability (speed or width) \(-> WARN.
+ASIC trained below what both ends of the link support (speed or width) \(-> WARN.
+The expected link is the lower of the card's maxima and those of the PCIe port
+above it (slot or bridge), so a card wired to a narrower or slower slot by
+design (for example an on-board x2 chip on an x1 port) is OK, with the slot
+limit in the evidence and a "(slot)" threshold. A slot reduced by a BIOS
+bifurcation or link-speed setting looks the same and is also OK; the hint
+says to check the BIOS. Without upstream port link attributes the card's
+maxima are used.
 No PCIe link attributes (virtual function, chipset-integrated NIC) \(-> N/A.
 .TP
 .B generic.pcie.aer
