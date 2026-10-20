@@ -5,7 +5,7 @@
 | **Status** | 📝 Draft — approved direction, no code yet |
 | **Author** | Ciro Iriarte |
 | **Created** | 2026-10-19 |
-| **Updated** | 2026-10-19 |
+| **Updated** | 2026-10-20 |
 | **Reviewers** | Claude (author of first draft), Codex, Antigravity (advisor reviews in `.omc/artifacts/ask/`) |
 
 ---
@@ -138,7 +138,7 @@ Most mlx5 counters are cumulative since driver load, so absolute values alone ar
 3. **Reset and wrap detection.** If any T1 < T0, or the driver load moment changed, the check is `UNKNOWN (counter reset)` for that interval. **Never clamp negatives to zero.** (`nic-xray --metrics` clamps today; do not copy that.)
 4. **Gauges are not deltas.** `outbound_pci_stalled_rd`, `outbound_pci_stalled_wr` and `outbound_pci_buffer_overflow` are *last-second percentage* gauges. Evaluate the T1 value directly. Their `*_events` siblings are cumulative.
 5. **Denominators.** Error rates are normalised by traffic: BER uses `rx_bits_phy`; drop ratios use packet counters. A thousand drops in a terabit is not the same as a thousand drops in a megabit.
-6. **RDMA `hw_counters` lifespan.** `/sys/class/infiniband/*/ports/*/hw_counters/lifespan` caches values (ms). The interval must exceed the lifespan, or the check is `UNKNOWN`.
+6. **RDMA `hw_counters` lifespan.** `/sys/class/infiniband/*/ports/*/hw_counters/lifespan` caches values (ms; 10 ms on the validation hosts). The interval must exceed the lifespan, or the check is `UNKNOWN`.
 7. **Absolute-only mode** (`--interval 0`) reports totals since driver load, labelled as *historical*, with severity capped at `WARN`.
 
 ---
@@ -153,9 +153,10 @@ Most mlx5 counters are cumulative since driver load, so absolute values alone ar
 |---|---|---|---|
 | ASIC | PCIe link degraded | sysfs `current_link_{speed,width}` vs `max_link_{speed,width}` | `WARN` (could be slot-limited; overridable). Never `CRIT` alone |
 | ASIC | PCIe AER | sysfs `aer_dev_{correctable,nonfatal,fatal}` | fatal or nonfatal Δ>0 → `CRIT`; correctable Δ>0 → `WARN` |
-| ASIC | devlink health reporters | `devlink health show pci/<BDF>` (discover reporters; don't assume a fixed list) | state ≠ healthy → `CRIT`; error count Δ>0 → `WARN` |
+| ASIC | devlink health reporters (device) | `devlink health show pci/<BDF>` (mlx5: `fw`, `fw_fatal`, `vnic`; discover, don't assume) | state ≠ healthy → `CRIT`; error count Δ>0 → `WARN` |
+| Port | devlink health reporters (port) | `devlink health show` on the `auxiliary/mlx5_core.eth.N` instance (mlx5: `tx`, `rx`), mapped to the netdev via `devlink port show` | same as above |
 | ASIC | Firmware / PSID | `devlink dev info pci/<BDF>`, fallback `ethtool -i` | informational |
-| ASIC | Temperature | `device/hwmon/hwmon*/temp*_{input,max,crit}` | ≥max → `WARN`; ≥crit → `CRIT` |
+| ASIC | Temperature | `device/hwmon/hwmon*/temp*_{input,crit,highest,label}` (mlx5 has no `_max`) | within 10 °C of crit → `WARN`; ≥crit → `CRIT`; `_highest` reported as historical peak |
 | Port | Link flaps | `carrier_changes` (sysfs), driver `link_down_events_phy` | Δ>0 → `WARN`. Historical totals are informational only |
 | Port | FEC mode/stats | `ethtool --show-fec` (where supported) | mode mismatch vs speed expectation → `WARN` |
 | Port | Ring sizing context | `ethtool -g` | feeds hints only |
@@ -166,12 +167,13 @@ Most mlx5 counters are cumulative since driver load, so absolute values alone ar
 |---|---|---|---|
 | Host RX starvation | `rx_out_of_buffer`, `rx_buff_alloc_err` | cumulative | Host can't drain rings → hint `ethtool -G … rx <max>`, IRQ affinity, CPU |
 | NIC buffer drops | `rx_discards_phy`, `tx_discards_phy` | cumulative | NIC buffer exhausted, often PCIe or host backpressure |
-| PHY / signal | `rx_bits_phy` (denominator), `rx_corrected_bits_phy` (pre-FEC), `rx_pcs_symbol_err_phy`, `rx_symbol_err_phy` (post-FEC), `rx_err_lane_N_phy` | cumulative | Compute pre/post-FEC BER. Post-FEC errors > 0 → `CRIT`. Per-lane skew → optic/cable suspect |
+| PHY / signal | `rx_bits_phy` (denominator, **absent on ConnectX-6 Lx**), `rx_corrected_bits_phy` (pre-FEC), `rx_pcs_symbol_err_phy`, `rx_symbol_err_phy` (post-FEC), `rx_err_lane_N_phy` | cumulative | Compute pre/post-FEC BER. Without `rx_bits_phy`, fall back to `rx_bytes_phy`×8 (approximate; mark it in evidence) or deep-mode `mlxlink` BER. Post-FEC errors > 0 → `CRIT`. Per-lane skew → optic/cable suspect |
 | Frame errors | `rx_crc_errors_phy`, `rx_oversize_pkts_phy`, `rx_undersize_pkts_phy`, `rx_fragments_phy`, `rx_jabbers_phy` | cumulative | CRC → cabling/optic; oversize → MTU mismatch with peer |
 | PCIe path | `rx_pci_signal_integrity`, `tx_pci_signal_integrity` | cumulative | PCIe link recovery from framing/CRC faults → `WARN`, `CRIT` if sustained |
-| PCIe path | `outbound_pci_stalled_rd`, `outbound_pci_stalled_wr`, `outbound_pci_buffer_overflow` | **gauge (%)** | Host root-complex/credit starvation. Do not delta |
+| PCIe path | `outbound_pci_stalled_rd`, `outbound_pci_stalled_wr`, `outbound_pci_buffer_overflow` (**absent on ConnectX-6 Lx**) | **gauge (%)** | Host root-complex/credit starvation. Do not delta |
+| PCIe path | `outbound_pci_stalled_rd_events`, `outbound_pci_stalled_wr_events` | cumulative | Count of stall periods; Δ>0 → `WARN` |
 | Datapath faults | `tx_cqe_err`, `rx_wqe_err`, `tx_recover` / RX recover counters | cumulative | Δ>0 → `CRIT` (driver/FW/DMA fault) |
-| Congestion / PFC | `rx_prioN_buf_discard`, `rx_prioN_cong_discard`, `rx/tx_pause_ctrl_phy`, `rx_prioN_pause_duration`, `rx_buffer_passed_thres_phy` | cumulative | **Congestion evidence, not a NIC fault.** `WARN` at most, with a note listing CPU/PCIe/app/PFC-config causes |
+| Congestion / PFC | `rx_prioN_buf_discard`, `rx_prioN_cong_discard`, `rx/tx_pause_ctrl_phy`, `rx_prioN_pause_duration` (PFC only), `rx/tx_global_pause`, `rx/tx_global_pause_duration` (global pause), `rx_buffer_passed_thres_phy` | cumulative | **Congestion evidence, not a NIC fault.** `WARN` at most, with a note listing CPU/PCIe/app/PFC-config causes |
 | Pause storms | `tx_pause_storm_warning_events`, `tx_pause_storm_error_events` | cumulative | error Δ>0 → `CRIT` |
 | Module | `module_unplug`, `module_bus_stuck`, `module_high_temp`, `module_bad_shorted` | cumulative | bus_stuck/bad_shorted → `CRIT`; high_temp → `WARN` |
 | Steering | `rx_steer_missed_packets` | cumulative | informational; flags flow-steering misconfiguration |
@@ -182,7 +184,7 @@ Collected only when an IB device is bound to the netdev. These are kernel-bypass
 
 | Area | Counters | Interpretation |
 |---|---|---|
-| Transport | `local_ack_timeout_err`, `packet_seq_err`, `out_of_sequence`, `rnr_nak_retry_err`, `implied_nak_seq_err` | Loss / retransmission on the RoCE fabric |
+| Transport | `local_ack_timeout_err`, `packet_seq_err`, `out_of_sequence`, `rnr_nak_retry_err`, `implied_nak_seq_err`, `req_transport_retries_exceeded`, `req_rnr_retries_exceeded` | Loss / retransmission on the RoCE fabric |
 | Resources | `out_of_buffer`, `out_of_sequence` | Receiver can't keep up |
 | Integrity | `rx_icrc_encapsulated` (ICRC errors), `req_cqe_error`, `resp_cqe_error` | Corruption or QP errors |
 | Congestion | `np_ecn_marked_roce_packets`, `np_cnp_sent`, `rp_cnp_handled` | **Context only** (ECN/CNP is normal under DCQCN) |
@@ -324,7 +326,14 @@ Explicit consent boundary. Never runs unless requested.
 
 ---
 
-## 13. ❓ Open questions
+## 13. 🧪 Validation log
+
+| Date | Hardware | Firmware / kernel | Result |
+|---|---|---|---|
+| 2026-10-20 | NVIDIA ConnectX-6 Lx (MT2894), 2 hosts | 26.47.1026 (LNV0000000037) / 7.0.14-11-pve, 7.0.0-3-pve | Catalog checked against live `ethtool -S`, devlink, sysfs, hwmon and `hw_counters`. Corrections applied in §6 (`rx_bits_phy`, `outbound_pci_buffer_overflow`, `rx_prioN_pause_duration` absent; port reporters on the auxiliary devlink instance; no hwmon `_max`) |
+| — | Broadcom `bnxt_en` | — | ⏳ Pending: no reachable host yet |
+
+## 14. ❓ Open questions
 
 1. **Default `--interval`.** 5 s is a balance between signal and run time. Should monitoring mode default lower?
 2. **Threshold source of truth.** Ship defaults per driver only, or per device ID / firmware range from the start?
@@ -333,7 +342,7 @@ Explicit consent boundary. Never runs unless requested.
 
 ---
 
-## 14. 🔗 References
+## 15. 🔗 References
 
 - Linux kernel docs: *mlx5 counters* (NVIDIA-authored), `Documentation/networking/device_drivers/ethernet/mellanox/mlx5/counters.rst`: https://docs.kernel.org/networking/device_drivers/ethernet/mellanox/mlx5/counters.html
 - NVIDIA KB: *Understanding mlx5 ethtool counters*: https://enterprise-support.nvidia.com/s/article/understanding-mlx5-ethtool-counters
