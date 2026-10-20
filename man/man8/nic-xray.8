@@ -1,6 +1,6 @@
 .\" Man page for nic-xray.sh
 .\" Written in classic troff/groff format
-.TH NIC-XRAY 8 "2026-04-14" "nic-xray 2.10.3" "System Administration Commands"
+.TH NIC-XRAY 8 "2026-10-20" "nic-xray 2.10.3" "System Administration Commands"
 .SH NAME
 nic-xray \- detailed physical network interface diagnostics
 .SH SYNOPSIS
@@ -825,6 +825,12 @@ service is running to retrieve LLDP information:
 .PP
 A bash completion script is provided under
 .IR completions/nic\-xray.bash .
+It requires the
+.B bash\-completion
+package, which provides
+.B _init_completion
+and
+.BR _filedir .
 To enable tab-completion in the current session:
 .PP
 .RS
@@ -837,6 +843,44 @@ To install system-wide (into
 .RS
 .B sudo make install\-completion
 .RE
+.PP
+Verify that it is active with
+.BR "complete \-p nic\-xray.sh" .
+The script completes:
+.TP
+.B nic\-xray.sh \fR<TAB>\fP, \-\fR<TAB>\fP, \-\-\fR<TAB>\fP
+All options (long options only after
+.BR \-\- ).
+.TP
+.B \-\-output \fR<TAB>\fP
+.BR table ", " csv ", " json ", " dot ", " svg ", " png .
+.TP
+.B \-\-filter\-link \fR<TAB>\fP
+.BR up ", " down .
+.TP
+.B \-\-cluster \fR<TAB>\fP
+.BR bond ", " nic .
+.TP
+.B \-\-diagram\-out \fR<TAB>\fP
+Files and directories.
+.PP
+Options that take a value also complete in the
+.BI \-\-option= value
+form, for example
+.B \-\-output=j\fR<TAB>\fP
+completes to
+.BR \-\-output=json .
+.PP
+The optional values of
+.BR \-\-metrics ,
+.B \-\-watch
+and
+.B \-\-separator
+must be attached
+.RB ( \-\-metrics=5 ", " \-m5 ", " \-s\(aq|\(aq );
+a space-separated value is not read as the option's value.
+Completion therefore offers the option list, not a value, after
+.BR "\-\-metrics " <TAB>.
 .SH EXIT STATUS
 .TP
 .B 0

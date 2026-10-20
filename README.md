@@ -330,7 +330,15 @@ sudo make uninstall-man
 
 #### Bash completion
 
-A bash completion script is provided for tab-completion of all options.
+A bash completion script (`completions/nic-xray.bash`) completes every option and the values of options that take a fixed set of values.
+
+**📋 Requirements:** the `bash-completion` package (it provides `_init_completion` and `_filedir`). It is installed by default on most desktop distributions, but often missing on minimal server installs:
+
+| Distribution | Package install |
+|---|---|
+| Debian / Ubuntu / Proxmox | `sudo apt install bash-completion` |
+| RHEL / Rocky / Alma / Fedora | `sudo dnf install bash-completion` |
+| openSUSE / SLES | `sudo zypper install bash-completion` |
 
 **Source in current session:**
 
@@ -338,10 +346,19 @@ A bash completion script is provided for tab-completion of all options.
 source completions/nic-xray.bash
 ```
 
-**Install system-wide:**
+**Install system-wide** (into `/etc/bash_completion.d/`, loaded by every new interactive shell):
 
 ```bash
 sudo make install-completion
+```
+
+The OBS packages install it automatically.
+
+**Verify it is active:**
+
+```bash
+$ complete -p nic-xray.sh
+complete -F _nic_xray nic-xray.sh
 ```
 
 **Uninstall:**
@@ -349,6 +366,47 @@ sudo make install-completion
 ```bash
 sudo make uninstall-completion
 ```
+
+**🔤 What gets completed**
+
+| You type | `<TAB>` offers |
+|---|---|
+| `nic-xray.sh <TAB>` or `nic-xray.sh -<TAB>` | All short and long options |
+| `nic-xray.sh --<TAB>` | All long options |
+| `--output <TAB>` / `--output=<TAB>` | `table` `csv` `json` `dot` `svg` `png` |
+| `--filter-link <TAB>` / `--filter-link=<TAB>` | `up` `down` |
+| `--cluster <TAB>` / `--cluster=<TAB>` | `bond` `nic` |
+| `--diagram-out <TAB>` / `--diagram-out=<TAB>` | Files and directories |
+| `--metrics=` / `--watch=` / `--separator=` | Nothing (type the seconds or separator yourself) |
+
+**🖥️ Examples** (captured output; `⇥` = TAB key):
+
+```text
+$ nic-xray.sh --⇥
+--all          --diagram-out  --help         --no-color     --physical     --virtual
+--bmac         --filter-link  --lacp         --optics       --separator    --vlan
+--cluster      --group-bond   --metrics      --output       --version      --watch
+
+$ nic-xray.sh --ph⇥
+$ nic-xray.sh --physical
+
+$ nic-xray.sh --output ⇥
+csv    dot    json   png    svg    table
+
+$ nic-xray.sh --output=j⇥
+$ nic-xray.sh --output=json
+
+$ nic-xray.sh --filter-link ⇥
+down  up
+
+$ nic-xray.sh --cluster ⇥
+bond  nic
+
+$ nic-xray.sh --output svg --diagram-out topo⇥
+topology.png  topology.svg
+```
+
+> ⚠️ **Optional values must be attached.** `--metrics`, `--watch` and `--separator` take an *optional* value, which must be written as `--metrics=5`, `-m5`, `--separator='|'` or `-s'|'`. A space-separated value (`--metrics 5`) is **not** read as the interval; it is treated as a separate, ignored argument. For that reason, after `--metrics ⇥` completion offers the option list again rather than a value.
 
 #### lldpd service
 
@@ -703,4 +761,4 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for gui
 **Ciro Iriarte**
 
 - **Created**: 2025-06-05
-- **Updated**: 2026-04-01
+- **Updated**: 2026-10-20
