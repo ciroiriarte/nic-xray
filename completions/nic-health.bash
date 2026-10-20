@@ -26,6 +26,11 @@ _nic_health() {
 			# Free-form number of seconds: nothing to offer
 			return
 			;;
+		-L|--lookback)
+			# Free-form minutes; offer the common windows (0 = off, 1 h, 24 h)
+			COMPREPLY=($(compgen -W "0 60 1440" -- "$cur"))
+			return
+			;;
 	esac
 
 	# No positional arguments exist, so every other word is an option
@@ -35,6 +40,7 @@ _nic_health() {
 			-v --version
 			-i --interface
 			-I --interval
+			-L --lookback
 			-O --output
 			-l --level
 			-a --all

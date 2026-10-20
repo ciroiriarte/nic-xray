@@ -1,5 +1,6 @@
-Usage: nic-health.sh [-i|--interface IFACE]... [-I|--interval SEC] [-O|--output table|csv|json]
-       [-l|--level basic|deep] [-a|--all] [-n|--no-color] [-t|--check-tools] [-v|--version] [-h|--help]
+Usage: nic-health.sh [-i|--interface IFACE]... [-I|--interval SEC] [-L|--lookback MIN]
+       [-O|--output table|csv|json] [-l|--level basic|deep] [-a|--all] [-n|--no-color]
+       [-t|--check-tools] [-v|--version] [-h|--help]
 
 Version: 2.11.1
 
@@ -15,6 +16,8 @@ Options:
                         Counters are read twice; only growth inside the window is judged.
                         0 = single read of totals since boot/driver load (historical;
                         severity capped at WARN)
+ -L, --lookback MIN     Count driver link-down messages in the kernel journal over the last
+                        MIN minutes, current boot only (default: 60, max: 1440, 0 = off)
  -O, --output TYPE      Output format: table (default), csv, or json
  -l, --level LEVEL      basic (default): passive sysfs/ethtool/devlink reads only
                         deep: also query mlx5 ports with mlxlink or mstlink (-d BDF -m -c only,
@@ -34,6 +37,8 @@ Checks:
                         at/over critical (CRIT)
  generic.devlink.health Reporter not healthy (CRIT), new errors in window (WARN)
  generic.link.flaps     Carrier transitions in window (WARN)
+ generic.link.lookback  Link-down messages in the last -L minutes (WARN); 3 or more while
+                        still flapping in the window (CRIT)
  mlx5.*                 ConnectX (mlx5_core) ethtool -S counters: RX starvation, NIC discards,
                         PHY symbol errors / pre-FEC BER, frame errors, PCIe path, datapath faults,
                         congestion, pause storms, module faults, PHY link-down events

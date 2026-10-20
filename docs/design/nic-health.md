@@ -119,6 +119,7 @@ Each check emits exactly one record:
 |---|---|
 | `-i`, `--interface IFACE` | Limit to one or more interfaces (repeatable) |
 | `-I`, `--interval SEC` | Delta window (default 5; `0` means absolute-only snapshot) — *Phase 2* |
+| `-L`, `--lookback MIN` | Link-down look-back in the kernel journal (default 60, max 1440, `0` = off; current boot only) — #9 |
 | `-O`, `--output table\|json\|csv` | Output format (default `table`) |
 | `-t`, `--check-tools` | Report available, missing, and disabled capabilities, then exit |
 | `-a`, `--all` | Table also lists OK and N/A rows (default: WARN/CRIT/UNKNOWN only, plus a hidden-row count). CSV/JSON always contain every row |
@@ -161,6 +162,7 @@ Most mlx5 counters are cumulative since driver load, so absolute values alone ar
 | ASIC | Firmware / PSID | `devlink dev info pci/<BDF>`, fallback `ethtool -i` | informational |
 | ASIC | Temperature | `device/hwmon/hwmon*/temp*_{input,crit,max,highest,alarm,label}` on every PCI function, deduplicated by label | within 10 °C of crit, or ≥`_max` when `_max` < crit → `WARN`; ≥crit → `CRIT`; `_alarm`=1 → `WARN`. A `_max` above crit is ignored (ixgbe reports 105 > 95). Read error `EBUSY` (firmware lists the sensor but has no reading, e.g. sfc) → `N/A`; other read errors → `UNKNOWN`. `_highest` shown as peak since driver load |
 | Port | Link flaps | `carrier_changes` (sysfs) | Δ>0 → `WARN`. Historical totals are informational only. A counter present at T0 but gone at T1 → `UNKNOWN`. Driver `link_down_events_phy` (mlx5 `ethtool -S`) moves to the mlx5 module (Phase 3) since it is not generic |
+| Port | Link-down look-back | `journalctl -k --since -<MIN>min` (one query per run, bounded by `timeout`); driver lines whose interface word is followed by a link-down phrase (mlx5 `Link down`, ice/i40e/ixgbe/igb/bnxt_en `NIC Link is Down`, tg3 `Link is down.`); `carrier_down_count` as context | ≥1 → `WARN`; ≥3 while `carrier_changes` also grows in the window → `CRIT`. History alone never exceeds `WARN`. Bond/bridge lines (`(slave IFACE):`, `port N(IFACE)`) are not counted. Link-up lines are ignored (kernel rate-limiting makes downs the reliable floor). `journalctl` missing or no kernel journal for this boot → one host `N/A` row; failed or timed-out query → host `UNKNOWN`; never `0` on failure (#9) |
 | Port | FEC mode/stats | `ethtool --show-fec` (where supported) | mode mismatch vs speed expectation → `WARN`. ⏳ **Deferred**: no validation host exposes FEC statistics (mlx5, ice, ixgbe, sfc, e1000e all checked) |
 | Port | Ring sizing context | `ethtool -g` | feeds hints only |
 
@@ -339,6 +341,7 @@ Explicit consent boundary. Never runs unless requested.
   "collected_at": "2026-10-19T12:00:00Z",
   "interval_s": 5.01,
   "level": "basic",
+  "lookback_min": 60,
   "capabilities": { "devlink": true, "mstlink": false, "mlxlink": false },
   "summary": { "ok": 41, "warn": 2, "crit": 0, "unknown": 1, "na": 6 },
   "exit_code": 1,

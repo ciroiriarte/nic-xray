@@ -775,14 +775,14 @@ Design and rationale: [`docs/design/nic-health.md`](docs/design/nic-health.md). 
 | PCIe errors | `generic.pcie.aer` | sysfs AER counters (fatal/non-fatal → CRIT, correctable → WARN) |
 | Temperature | `generic.temperature` | hwmon sensors (critical → CRIT, within 10 °C → WARN) |
 | Firmware/driver health | `generic.devlink.health.*` | `devlink health` reporters (device and port) |
-| Link stability | `generic.link.flaps` | sysfs `carrier_changes` |
+| Link stability | `generic.link.flaps`, `generic.link.lookback` | sysfs `carrier_changes` (in the window); driver link-down messages in the kernel journal over the last `-L` minutes |
 | NVIDIA ConnectX (`mlx5_core`) | `mlx5.rx.starvation`, `mlx5.nic.discards`, `mlx5.phy.errors`, `mlx5.frame.errors`, `mlx5.pcie.path`, `mlx5.datapath.faults`, `mlx5.congestion`, `mlx5.pause.storm`, `mlx5.module`, `mlx5.link.phy_down` | `ethtool -S` (aggregate counters) |
 | Deep mode (`-l deep`) | `mlx5.deep.troubleshooting`, `mlx5.deep.fec`, `mlx5.deep.ber`, `mlx5.deep.module` | `mlxlink` / `mstlink -d <BDF> -m -c` |
 
 ### 🧰 Requirements and optional tools
 
 - **Required:** Bash ≥ 4.4, root, `ethtool`, `getopt` (util-linux), `readlink` (coreutils).
-- **Optional:** `lspci` (pciutils, model names), `devlink` (iproute2, health reporters), `timeout` (coreutils, required for `-l deep`).
+- **Optional:** `lspci` (pciutils, model names), `devlink` (iproute2, health reporters), `timeout` (coreutils, required for `-l deep`), `journalctl` (systemd, link-down look-back).
 - **Deep mode on ConnectX:** `mstflint` (distribution package, provides `mstlink`) or NVIDIA MFT (`mlxlink`, proprietary, install manually). Vendor tools are never bundled or downloaded.
 
 Check what is available, without root:
@@ -798,6 +798,7 @@ sudo nic-health.sh                         # all physical NICs, 5 s window, prob
 sudo nic-health.sh -a                      # also list OK and N/A rows
 sudo nic-health.sh -i ens1f0np0 -I 30      # one interface, 30 s window
 sudo nic-health.sh -I 0                    # totals since boot, no wait (severity capped at WARN)
+sudo nic-health.sh -L 1440                 # link-downs over the last 24 h (default look-back: 60 min)
 sudo nic-health.sh -l deep                 # add allowlisted mlxlink/mstlink queries
 sudo nic-health.sh -O json > health.json   # for monitoring or later comparison
 ```
@@ -806,6 +807,7 @@ sudo nic-health.sh -O json > health.json   # for monitoring or later comparison
 |---|---|
 | `-i`, `--interface IFACE` | Evaluate only IFACE (repeatable) |
 | `-I`, `--interval SEC` | Sampling window, 0–3600 s (default 5). `0` = totals since boot |
+| `-L`, `--lookback MIN` | Link-down look-back in the kernel journal, 0–1440 min (default 60, current boot only). `0` = off |
 | `-O`, `--output FORMAT` | `table` (default), `csv`, `json` |
 | `-l`, `--level LEVEL` | `basic` (default, passive) or `deep` (vendor tool queries) |
 | `-a`, `--all` | Table: also list OK and N/A rows (CSV/JSON always contain every row) |

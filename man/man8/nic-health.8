@@ -9,6 +9,8 @@ nic-health \- physical NIC hardware and data-path health checks with a monitorin
 .IR IFACE ]...
 .RI [ \-I | \-\-interval
 .IR SEC ]
+.RI [ \-L | \-\-lookback
+.IR MIN ]
 .RI [ \-O | \-\-output
 .IR table | csv | json ]
 .RI [ \-l | \-\-level
@@ -79,6 +81,20 @@ Counter sampling window in seconds (0\-3600, default 5).
 selects absolute mode (totals since boot or driver load, severity capped at
 .BR WARN ).
 In table output a progress bar is shown on standard error while sampling.
+.TP
+.BR \-L ", " \-\-lookback " \fIMIN\fP"
+Count driver link-down messages in the kernel journal over the last
+.I MIN
+minutes (0\-1440, default 60;
+.B 0
+turns the look-back off). One read-only
+.B "journalctl \-k"
+query per run, bounded by
+.BR timeout (1)
+when available. Only the current boot is searched, the same lifetime as the
+.I carrier_down_count
+shown as context. See
+.BR generic.link.lookback .
 .TP
 .BR \-O ", " \-\-output " \fIFORMAT\fP"
 Output format:
@@ -155,6 +171,27 @@ window \(-> WARN. No reporters for the ASIC, or devlink not installed \(-> N/A.
 .TP
 .B generic.link.flaps
 Carrier transitions in the window \(-> WARN.
+.TP
+.B generic.link.lookback
+Driver link-down messages for the port in the kernel journal over the last
+.B \-L
+minutes. One or more \(-> WARN; 3 or more while the port is also flapping in
+the counter window \(-> CRIT. History alone never goes beyond WARN.
+A line counts when the interface name is a word of its own followed by a
+link-down phrase (mlx5 "Link down", ice/i40e/ixgbe/igb/bnxt_en "NIC Link is
+Down", tg3 "Link is down."), so bond and bridge messages about the same event
+are not counted twice. The kernel rate-limits repeated messages, so the count
+is a lower bound. Lines logged before an interface was renamed carry the old
+name: they are not counted, or are attributed to whichever port now has that
+name. A journal that keeps less than the window (small or volatile journal,
+.I ReadKMSG=no
+in
+.BR journald.conf (5))
+yields a lower count, not an error. Without
+.BR journalctl (1),
+or with no kernel journal for the current boot (containers, journald
+disabled), a single host row reports N/A; a failed or timed-out query reports
+UNKNOWN. Never reported as 0 when the journal could not be read.
 .SS mlx5_core (NVIDIA ConnectX), from ethtool \-S
 Evaluated on physical functions only. Each rule lists counters whose growth
 escalates to WARN or CRIT, and context counters that are only shown.
@@ -270,7 +307,7 @@ queries are not used: they take several seconds of kernel time per device and
 report configuration rather than health.
 .SH OUTPUT FORMATS
 .SS Table (default)
-A header with host, collection time (UTC) and sampling window; a hardware
+A header with host, collection time (UTC), sampling window and look-back; a hardware
 summary (ASIC, model, driver, firmware, ports); the result rows (see
 .BR \-a );
 and a summary line with the count per severity and the verdict.
@@ -278,7 +315,8 @@ and a summary line with the count per severity and the verdict.
 One row per result with columns: severity, scope, target, check_id, value,
 unit, threshold, evidence, hint, ref. Fields are quoted (RFC 4180).
 .SS JSON
-An object with schema_version, tool, version, host, collected_at, level, mode
+An object with schema_version, tool, version, host, collected_at, level,
+lookback_min (0 when the look-back is off), mode
 .RB ( delta " or " absolute ),
 interval_s, elapsed_s (null if the clock was unreadable), capabilities (tool
 availability), summary (count per severity), verdict, exit_code, asics (model,
@@ -361,6 +399,12 @@ Historical totals since boot (no waiting; severity capped at WARN):
 .B sudo nic-health.sh \-I 0
 .RE
 .PP
+Link-downs over the last 24 hours (for example after an overnight incident):
+.PP
+.RS
+.B sudo nic-health.sh \-L 1440
+.RE
+.PP
 Include allowlisted vendor tool queries on ConnectX cards:
 .PP
 .RS
@@ -384,6 +428,7 @@ Ciro Iriarte <ciro.iriarte+software@gmail.com>
 .BR nic-xray.sh (8),
 .BR ethtool (8),
 .BR devlink (8),
+.BR journalctl (1),
 .BR lspci (8),
 .BR mlxlink (1),
 .BR mstlink (1),

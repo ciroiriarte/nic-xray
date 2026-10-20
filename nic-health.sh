@@ -26,6 +26,8 @@
 #   - 2026-10-20: Phase 3: mlx5_core ethtool -S rule table (design §6.2)
 #   - 2026-10-20: Table lists only WARN/CRIT/UNKNOWN rows unless -a/--all
 #   - 2026-10-20: Phase 5: -l/--level deep with allowlisted mlxlink/mstlink queries (design §7)
+#   - 2026-10-20: -L/--lookback: generic.link.lookback counts driver link-down messages in the
+#                 kernel journal over the last N minutes (#9), so past flaps are visible
 #
 # Version: 2.11.1
 
@@ -72,6 +74,29 @@ PROC_UPTIME="/proc/uptime"
 DEFAULT_INTERVAL=5
 MAX_INTERVAL=3600
 PROGRESS_WIDTH=30
+
+# Link-down look-back (kernel journal, current boot only), in minutes; 0 = off
+DEFAULT_LOOKBACK=60
+MAX_LOOKBACK=1440
+# Look-back link-downs at or above this count, on a port still flapping in the window, are CRIT
+LOOKBACK_CRIT_DOWNS=3
+# journalctl: query time limit (s), seconds before SIGKILL, and the read-only argv after --since
+JOURNAL_TIMEOUT=30
+JOURNAL_KILL_AFTER=2
+JOURNAL_ARGS=("-k" "-q" "--no-pager" "-o" "cat")
+CS_PER_MIN=6000
+# Driver message that follows "IFACE:" (or a bare "IFACE"), matched lowercased: mlx5 "Link down",
+# ice/i40e/ixgbe/igb/bnxt_en "NIC Link is Down", tg3 "Link is down.". Bond and bridge lines name
+# the port as "(slave IFACE):" or "port 1(IFACE)", never as a word of their own, so they do not count
+LINK_DOWN_RE='^(nic )?link (is )?down([^[:alnum:]_]|$)'
+# journalctl's own error (stderr, first line) when there is no kernel journal for this boot
+# (container, journald off): N/A. Anchored, and never matched against journal content
+JOURNAL_ABSENT_RE='^(No journal files were found|Data from the specified boot .* is not available)'
+# LOOKBACK_STATE values set by collect_lookback
+LOOKBACK_OK="ok"
+LOOKBACK_NOTOOL="notool"
+LOOKBACK_ABSENT="absent"
+LOOKBACK_FAILED="failed"
 
 # Temperature: WARN this many degrees C below the critical threshold
 TEMP_WARN_MARGIN_C=10
@@ -188,15 +213,16 @@ DEVLINK_HEALTHY="healthy"
 
 # Tool catalog for --check-tools and JSON capabilities (parallel arrays)
 REQUIRED_CMDS=("ethtool" "getopt" "readlink")
-TOOL_NAMES=("ethtool" "getopt" "readlink" "lspci" "devlink" "timeout" "mlxlink" "mstlink")
-TOOL_ROLES=("required" "required" "required" "optional" "optional" "optional" "optional" "optional")
+TOOL_NAMES=("ethtool" "getopt" "readlink" "lspci" "devlink" "timeout" "journalctl" "mlxlink" "mstlink")
+TOOL_ROLES=("required" "required" "required" "optional" "optional" "optional" "optional" "optional" "optional")
 TOOL_USES=(
     "Driver/firmware identification, mlx5 counters (ethtool -S)"
     "Command-line parsing"
     "sysfs path resolution"
     "NIC vendor/model names (falls back to PCI IDs)"
     "devlink health reporter checks"
-    "Bounds deep-mode tool runs (required for -l deep)"
+    "Bounds deep-mode and journal queries (required for -l deep)"
+    "Link-down look-back from the kernel journal (-L/--lookback)"
     "mlx5 deep mode (-l deep) via NVIDIA MFT (preferred)"
     "mlx5 deep mode (-l deep) via open-source mstflint"
 )
@@ -207,6 +233,7 @@ TOOL_PACKAGES=(
     "pciutils"
     "iproute2 (iproute on RHEL)"
     "coreutils"
+    "systemd"
     "NVIDIA MFT (proprietary, install manually)"
     "mstflint"
 )
@@ -218,6 +245,7 @@ CHECK_TOOLS=false
 SHOW_ALL=false
 LEVEL="$LEVEL_BASIC"
 INTERVAL="$DEFAULT_INTERVAL"
+LOOKBACK="$DEFAULT_LOOKBACK"
 IFACE_FILTER=()
 
 # --- Data ---
@@ -248,6 +276,10 @@ declare -A DEEP_KV=()
 declare -A DEEP_ERR=()
 declare -A DEEP_TOOL_USED=()
 DEEP_ARGV=()
+# Look-back results: LOOKBACK_DOWNS[IFACE]=link-down messages; state is empty until collected
+declare -A LOOKBACK_DOWNS=()
+LOOKBACK_STATE=""
+LOOKBACK_ERR=""
 # Error from 'devlink port show' (port reporters cannot be mapped to netdevs)
 DL_PORT_ERROR=""
 # false when /proc/uptime could not be read for either snapshot
@@ -293,8 +325,9 @@ build_mlx5_wanted
 # --- Helpers ---
 
 usage() {
-    echo -e "Usage: $SCRIPT_NAME [-i|--interface IFACE]... [-I|--interval SEC] [-O|--output table|csv|json]"
-    echo -e "       [-l|--level basic|deep] [-a|--all] [-n|--no-color] [-t|--check-tools] [-v|--version] [-h|--help]"
+    echo -e "Usage: $SCRIPT_NAME [-i|--interface IFACE]... [-I|--interval SEC] [-L|--lookback MIN]"
+    echo -e "       [-O|--output table|csv|json] [-l|--level basic|deep] [-a|--all] [-n|--no-color]"
+    echo -e "       [-t|--check-tools] [-v|--version] [-h|--help]"
     echo -e ""
     echo -e "Version: $SCRIPT_VERSION"
     echo -e ""
@@ -310,6 +343,8 @@ usage() {
     echo -e "                        Counters are read twice; only growth inside the window is judged."
     echo -e "                        0 = single read of totals since boot/driver load (historical;"
     echo -e "                        severity capped at WARN)"
+    echo -e " -L, --lookback MIN     Count driver link-down messages in the kernel journal over the last"
+    echo -e "                        MIN minutes, current boot only (default: $DEFAULT_LOOKBACK, max: $MAX_LOOKBACK, 0 = off)"
     echo -e " -O, --output TYPE      Output format: table (default), csv, or json"
     echo -e " -l, --level LEVEL      basic (default): passive sysfs/ethtool/devlink reads only"
     echo -e "                        deep: also query mlx5 ports with mlxlink or mstlink (-d BDF -m -c only,"
@@ -328,6 +363,8 @@ usage() {
     echo -e "                        at/over critical (CRIT)"
     echo -e " generic.devlink.health Reporter not healthy (CRIT), new errors in window (WARN)"
     echo -e " generic.link.flaps     Carrier transitions in window (WARN)"
+    echo -e " generic.link.lookback  Link-down messages in the last -L minutes (WARN); $LOOKBACK_CRIT_DOWNS or more while"
+    echo -e "                        still flapping in the window (CRIT)"
     echo -e " mlx5.*                 ConnectX (mlx5_core) ethtool -S counters: RX starvation, NIC discards,"
     echo -e "                        PHY symbol errors / pre-FEC BER, frame errors, PCIe path, datapath faults,"
     echo -e "                        congestion, pause storms, module faults, PHY link-down events"
@@ -465,6 +502,18 @@ add_record() {
     REC_REF+=("${10}")
 }
 
+# Print VALUE as a plain integer when it is all digits and at most MAX (leading zeros allowed);
+# fail otherwise. Digits are counted before any arithmetic, so huge values cannot wrap around
+# Args: value max
+bounded_uint() {
+    local V="$1"
+    [[ "$V" =~ ^[0-9]+$ ]] || return 1
+    V="${V#"${V%%[!0]*}"}"
+    V="${V:-0}"
+    (( ${#V} <= ${#2} && V <= $2 )) || return 1
+    printf '%d' "$V"
+}
+
 # --- Setup ---
 
 parse_args() {
@@ -473,7 +522,7 @@ parse_args() {
         die_unknown "Required command 'getopt' is not installed or not in PATH."
     fi
 
-    if ! OPTIONS=$(getopt -o hvi:I:O:l:ant --long help,version,interface:,interval:,output:,level:,all,no-color,check-tools -n "$SCRIPT_NAME" -- "$@"); then
+    if ! OPTIONS=$(getopt -o hvi:I:L:O:l:ant --long help,version,interface:,interval:,lookback:,output:,level:,all,no-color,check-tools -n "$SCRIPT_NAME" -- "$@"); then
         die_unknown "Failed to parse options." usage
     fi
 
@@ -487,10 +536,13 @@ parse_args() {
                 shift 2
                 ;;
             -I|--interval)
-                if [[ ! "$2" =~ ^[0-9]+$ ]] || (( 10#$2 > MAX_INTERVAL )); then
-                    die_unknown "Invalid --interval value '$2' (expected 0-$MAX_INTERVAL seconds)." usage
-                fi
-                INTERVAL=$(( 10#$2 ))
+                INTERVAL=$(bounded_uint "$2" "$MAX_INTERVAL") \
+                    || die_unknown "Invalid --interval value '$2' (expected 0-$MAX_INTERVAL seconds)." usage
+                shift 2
+                ;;
+            -L|--lookback)
+                LOOKBACK=$(bounded_uint "$2" "$MAX_LOOKBACK") \
+                    || die_unknown "Invalid --lookback value '$2' (expected 0-$MAX_LOOKBACK minutes)." usage
                 shift 2
                 ;;
             -O|--output)
@@ -574,9 +626,10 @@ detect_tools() {
 
 # Print the tool catalog; returns EXIT_UNKNOWN if a required tool is missing
 check_tools_report() {
-    local MISSING=0 i NAME STATUS COLOR
+    local MISSING=0 i NAME STATUS COLOR W=0
+    for NAME in "${TOOL_NAMES[@]}"; do (( ${#NAME} > W )) && W=${#NAME}; done
     printf '%b🧰 %s %s: tool check%b\n\n' "$BOLD" "$SCRIPT_NAME" "$SCRIPT_VERSION" "$RESET_COLOR"
-    printf '%-9s  %-8s  %-8s  %-22s  %s\n' "TOOL" "ROLE" "STATUS" "PATH" "USED FOR"
+    printf "%-${W}s  %-8s  %-8s  %-22s  %s\n" "TOOL" "ROLE" "STATUS" "PATH" "USED FOR"
     for i in "${!TOOL_NAMES[@]}"; do
         NAME="${TOOL_NAMES[i]}"
         if [[ -n "${TOOL_PATH[$NAME]}" ]]; then
@@ -589,9 +642,9 @@ check_tools_report() {
                 COLOR="$YELLOW"
             fi
         fi
-        printf '%-9s  %-8s  %b%-8s%b  %-22s  %s\n' "$NAME" "${TOOL_ROLES[i]}" \
+        printf "%-${W}s  %-8s  %b%-8s%b  %-22s  %s\n" "$NAME" "${TOOL_ROLES[i]}" \
             "$COLOR" "$STATUS" "$RESET_COLOR" "${TOOL_PATH[$NAME]:--}" "${TOOL_USES[i]}"
-        [[ "$STATUS" == "missing" ]] && printf '%-9s  %-8s  %-8s  %-22s  ↳ package: %s\n' "" "" "" "" "${TOOL_PACKAGES[i]}"
+        [[ "$STATUS" == "missing" ]] && printf "%-${W}s  %-8s  %-8s  %-22s  ↳ package: %s\n" "" "" "" "" "${TOOL_PACKAGES[i]}"
     done
     echo
     if (( MISSING > 0 )); then
@@ -1584,6 +1637,129 @@ check_link_flaps() {
     fi
 }
 
+# Count driver link-down messages per evaluated port in kernel log text on stdin (journalctl -o cat)
+# A line counts once, for the port named by a word equal to "IFACE:" or "IFACE" when the rest of
+# the line starts with a link-down phrase (LINK_DOWN_RE). Matching on whole words keeps eth1 apart
+# from eth10. Link-up lines are not counted: the kernel rate-limits repeats, so downs are the floor
+# Args: name of the associative array to fill (every port gets an entry, 0 when none)
+count_link_downs() {
+    local -n _C="$1"
+    local LINE WORD REST IFACE N i
+    local -a WORDS
+    _C=()
+    for IFACE in "${PORT_IFACE[@]}"; do _C["$IFACE"]=0; done
+    while IFS= read -r LINE; do
+        [[ "${LINE,,}" == *link* ]] || continue
+        read -r -a WORDS <<< "$LINE"
+        for (( i = 0; i < ${#WORDS[@]} - 1; i++ )); do
+            WORD="${WORDS[i]%:}"
+            [[ -n "$WORD" && -n "${_C[$WORD]+x}" ]] || continue
+            REST="${WORDS[*]:i+1}"
+            if [[ "${REST,,}" =~ $LINK_DOWN_RE ]]; then
+                # Read first: an array subscript inside $(( )) would be evaluated again, and
+                # interface names may contain '$(' (the kernel only forbids '/', ':' and spaces)
+                N="${_C[$WORD]}"
+                _C["$WORD"]=$(( N + 1 ))
+                break
+            fi
+        done
+    done
+}
+
+# Query the kernel journal once for the look-back window and count link-downs per port
+# Sets LOOKBACK_STATE (LOOKBACK_OK/NOTOOL/ABSENT/FAILED), LOOKBACK_ERR and LOOKBACK_DOWNS
+collect_lookback() {
+    local OUT ERR RC=0
+    local -a CMD=()
+    (( LOOKBACK > 0 )) || return 0
+    if [[ -z "${TOOL_PATH[journalctl]:-}" ]]; then
+        LOOKBACK_STATE="$LOOKBACK_NOTOOL"
+        return 0
+    fi
+    [[ "$OUTPUT_FORMAT" == "table" && -t 2 ]] && printf '📜 Reading kernel journal (last %d min)...' "$LOOKBACK" >&2
+    # -k implies the current boot, which is also the lifetime of carrier_down_count
+    [[ -n "${TOOL_PATH[timeout]:-}" ]] && CMD=("${TOOL_PATH[timeout]}" -k "$JOURNAL_KILL_AFTER" "$JOURNAL_TIMEOUT")
+    CMD+=("${TOOL_PATH[journalctl]}" "${JOURNAL_ARGS[@]}" "--since" "-${LOOKBACK}min")
+    # stdout only: journal content must never be mistaken for a journalctl error
+    OUT=$(LC_ALL=C "${CMD[@]}" 2>/dev/null) || RC=$?
+    if (( RC == 0 )); then
+        count_link_downs LOOKBACK_DOWNS <<< "$OUT"
+        LOOKBACK_STATE="$LOOKBACK_OK"
+    elif [[ -n "${TOOL_PATH[timeout]:-}" ]] && (( RC == DEEP_TIMEOUT_RC || RC == DEEP_KILLED_RC )); then
+        # timeout(1) exit codes, shared with deep mode; checked first, partial output is ignored
+        LOOKBACK_STATE="$LOOKBACK_FAILED"
+        LOOKBACK_ERR="journalctl timed out after ${JOURNAL_TIMEOUT}s"
+    else
+        # Error path only: run again for journalctl's own message (stderr), discarding content
+        ERR=$(LC_ALL=C "${CMD[@]}" 2>&1 >/dev/null) || true
+        ERR="${ERR%%$'\n'*}"
+        if [[ "$ERR" =~ $JOURNAL_ABSENT_RE ]]; then
+            LOOKBACK_STATE="$LOOKBACK_ABSENT"
+        else
+            LOOKBACK_STATE="$LOOKBACK_FAILED"
+            ERR="journalctl exit $RC: ${ERR:-no error message}"
+        fi
+        LOOKBACK_ERR="$ERR"
+    fi
+    [[ "$OUTPUT_FORMAT" == "table" && -t 2 ]] && printf '\r%*s\r' 60 '' >&2
+    return 0
+}
+
+# generic.link.lookback: driver link-down messages in the kernel journal over the last LOOKBACK
+# minutes. Shows flaps that ended before the run, which the counter window cannot see
+check_link_lookback() {
+    local IDX="$1"
+    local IFACE="${PORT_IFACE[IDX]}" KEY="carrier|${PORT_IFACE[IDX]}"
+    local CHECK="generic.link.lookback" REF="$DESIGN_REF §6.1"
+    local N TOTAL UP_CS SEV HINT EVIDENCE RC
+    local THRESH=">=1 WARN, >=$LOOKBACK_CRIT_DOWNS and flapping in window CRIT"
+
+    N="${LOOKBACK_DOWNS[$IFACE]:-0}"
+    TOTAL=$(read_attr "$SYSFS_NET/$IFACE/carrier_down_count") || TOTAL="n/a"
+    EVIDENCE="$N driver link-down message(s) in the kernel journal, last $LOOKBACK min (current boot); carrier_down_count=$TOTAL"
+    # Window reaches back before boot: say so, the journal query stops at boot
+    if UP_CS=$(uptime_cs) && [[ "$UP_CS" =~ ^[0-9]+$ ]] && (( UP_CS / CS_PER_MIN < LOOKBACK )); then
+        EVIDENCE+="; boot was $(( UP_CS / CS_PER_MIN )) min ago"
+    fi
+
+    if (( N == 0 )); then
+        add_record "port" "$IFACE" "$CHECK" "0" "link-down/${LOOKBACK}m" "$THRESH" "$SEV_OK" "$EVIDENCE" "" "$REF"
+        return
+    fi
+    SEV="$SEV_WARN"
+    HINT="Link went down recently: check cable/transceiver and the peer port; 'journalctl -k --since -${LOOKBACK}min' shows when"
+    RC=0; delta "$KEY" || RC=$?
+    if (( INTERVAL > 0 && RC == 0 && DELTA > 0 && N >= LOOKBACK_CRIT_DOWNS )); then
+        SEV="$SEV_CRIT"
+        EVIDENCE+="; carrier_changes +$DELTA in window"
+        HINT="Repeated link-downs and still flapping: check cable/transceiver, peer port, and autonegotiation/FEC settings"
+    fi
+    add_record "port" "$IFACE" "$CHECK" "$N" "link-down/${LOOKBACK}m" "$THRESH" "$SEV" "$EVIDENCE" "$HINT" "$REF"
+}
+
+# Look-back for every port, or one host record when the journal could not be read
+check_lookback() {
+    local IDX CHECK="generic.link.lookback" REF="$DESIGN_REF §6.1"
+    case "$LOOKBACK_STATE" in
+        "$LOOKBACK_OK")
+            for IDX in "${!PORT_IFACE[@]}"; do check_link_lookback "$IDX"; done
+            ;;
+        "$LOOKBACK_NOTOOL")
+            add_record "host" "$HOSTNAME" "$CHECK" "-" "" "-" "$SEV_NA" "journalctl not found" \
+                "Look-back needs the systemd journal; -L 0 skips it" "$REF"
+            ;;
+        "$LOOKBACK_ABSENT")
+            add_record "host" "$HOSTNAME" "$CHECK" "-" "" "-" "$SEV_NA" "no kernel journal for the current boot: $LOOKBACK_ERR" \
+                "Look-back needs journald to keep kernel messages (container or journald disabled?); -L 0 skips it" "$REF"
+            ;;
+        "$LOOKBACK_FAILED")
+            add_record "host" "$HOSTNAME" "$CHECK" "-" "" "-" "$SEV_UNKNOWN" "$LOOKBACK_ERR" \
+                "Look-back count unavailable; the counter window checks are unaffected" "$REF"
+            ;;
+    esac
+    return 0
+}
+
 # generic.devlink.health: device-level (pci/BDF) and port-level reporters
 check_devlink() {
     local CHECK="generic.devlink.health" REF="$DESIGN_REF §6.1"
@@ -1705,6 +1881,7 @@ run_checks() {
     for IDX in "${!PORT_IFACE[@]}"; do
         check_link_flaps "$IDX"
     done
+    check_lookback
     check_devlink
     for IDX in "${!PORT_IFACE[@]}"; do
         mlx5_port_eligible "$IDX" && check_mlx5_port "$IDX"
@@ -1753,6 +1930,7 @@ render_table() {
         MODE="absolute (totals since boot/driver load)"
     fi
     [[ "$LEVEL" == "$LEVEL_DEEP" ]] && MODE+="  level $LEVEL_DEEP"
+    (( LOOKBACK > 0 )) && MODE+="  lookback ${LOOKBACK}m"
     printf '%b🩺 %s %s%b  host %s  %s  %s\n\n' "$BOLD" "$SCRIPT_NAME" "$SCRIPT_VERSION" "$RESET_COLOR" "$HOSTNAME" "$COLLECTED_AT" "$MODE"
 
     printf '%bHardware%b\n' "$BOLD" "$RESET_COLOR"
@@ -1829,6 +2007,7 @@ render_json() {
     printf '  "host": "%s",\n' "$(json_escape "$HOSTNAME")"
     printf '  "collected_at": "%s",\n' "$COLLECTED_AT"
     printf '  "level": "%s",\n' "$LEVEL"
+    printf '  "lookback_min": %d,\n' "$LOOKBACK"
     if (( INTERVAL > 0 )); then
         printf '  "mode": "delta",\n'
         printf '  "interval_s": %d,\n' "$INTERVAL"
@@ -1937,6 +2116,8 @@ main() {
             sample_wait
         fi
         snapshot SNAP1 DL_ORDER
+        # After the window, so the look-back also covers flaps that happened while sampling
+        collect_lookback
         [[ "$LEVEL" == "$LEVEL_DEEP" ]] && deep_collect
         T0="${SNAP0[time]:-}"
         T1="${SNAP1[time]:-}"

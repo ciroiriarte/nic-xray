@@ -48,6 +48,13 @@ reset_results() {
 
 # --- Pure helpers ---
 
+assert_eq "bounded_uint leading zeros" "60" "$(bounded_uint 0060 1440)"
+assert_eq "bounded_uint zero" "0" "$(bounded_uint 000 1440)"
+assert_eq "bounded_uint at max" "1440" "$(bounded_uint 1440 1440)"
+assert_eq "bounded_uint over max" "fail" "$(bounded_uint 1441 1440 || echo fail)"
+assert_eq "bounded_uint huge (no wrap)" "fail" "$(bounded_uint 18446744073709551621 3600 || echo fail)"
+assert_eq "bounded_uint non-digit" "fail" "$(bounded_uint -5 3600 || echo fail)"
+
 assert_eq "pcie speed 16.0" "160" "$(pcie_speed_tenths "16.0 GT/s PCIe")"
 assert_eq "pcie speed 2.5"  "25"  "$(pcie_speed_tenths "2.5 GT/s PCIe")"
 assert_eq "pcie speed 8 (no decimal)" "80" "$(pcie_speed_tenths "8 GT/s")"
@@ -702,6 +709,162 @@ assert_eq "exported functions dropped at load" "function dropped" "$(tr '\n' ' '
 # shellcheck disable=SC2329  # the function only has to exist while detect_tools runs
 assert_eq "detect_tools resolves files, not functions" "yes" "$(ethtool() { :; }; TOOL_PATH=(); detect_tools; [[ "${TOOL_PATH[ethtool]:-/}" == /* ]] && echo yes)"
 
+# --- Link-down look-back (-L/--lookback) ---
+# Real mlx5 and bond lines (Ubuntu 24.04), other driver spellings, and negative cases
+cat > "$FIX/kernel_log" <<'EOF'
+mlx5_core 0000:01:00.0 eth0: Link down
+bond0: (slave eth0): speed changed to 0 on port 1
+bond0: (slave eth0): link status definitely down, disabling slave
+mlx5_core 0000:01:00.0 eth0: Link up
+bond0: (slave eth0): link status definitely up, 25000 Mbps full duplex
+mlx5_core 0000:01:00.0 eth0: Link down
+ixgbe 0000:03:00.0 eth3: NIC Link is Down
+igb 0000:05:00.0 eth2: igb: eth2 NIC Link is Down
+tg3 0000:c3:00.0 eth2: Link is down.
+br0: port 1(eth1) entered disabled state
+ice 0000:3b:00.0 eth10: NIC Link is Down
+eth1: Link downshift occurred
+mlx5_core 0000:01:00.1 eth1: Link up
+EOF
+declare -A LD=()
+count_link_downs LD < "$FIX/kernel_log"
+assert_eq "lookback mlx5 downs (bond lines not counted)" "2" "${LD[eth0]}"
+assert_eq "lookback igb + tg3 spellings" "2" "${LD[eth2]}"
+assert_eq "lookback ixgbe NIC Link is Down" "1" "${LD[eth3]}"
+assert_eq "lookback eth1: bridge, eth10, downshift and up ignored" "0" "${LD[eth1]}"
+assert_eq "lookback unknown port not added" "" "${LD[eth10]:-}"
+
+# Interface names may contain '$(' (only '/', ':' and spaces are forbidden): never evaluated
+SAVED_PORTS=("${PORT_IFACE[@]}")
+# (no literal space: the kernel forbids it; ${IFS} becomes one only if the name were evaluated)
+HOSTILE='x$(touch${IFS}'"$FIX"'/pwned)'
+PORT_IFACE=("$HOSTILE")
+count_link_downs LD <<< "drv 0000:01:00.0 $HOSTILE: Link down"
+assert_eq "lookback hostile ifname counted, not executed" "1 no" "${LD[$HOSTILE]} $([[ -e "$FIX/pwned" ]] && echo yes || echo no)"
+PORT_IFACE=("${SAVED_PORTS[@]}")
+
+# collect_lookback runs journalctl read-only with the window in minutes
+mkdir -p "$FIX/bin"
+JOURNAL_STUB="$FIX/bin/journalctl"
+journal_stub() {  # journal_stub <exit code> [message instead of the kernel log]
+    if [[ -n "${2:-}" ]]; then
+        printf '#!/bin/bash\nprintf "%%s\\n" "$*" > "%s/journal_argv"\necho "%s" >&2\nexit %s\n' "$FIX" "$2" "$1" > "$JOURNAL_STUB"
+    else
+        printf '#!/bin/bash\nprintf "%%s\\n" "$*" > "%s/journal_argv"\ncat "%s/kernel_log"\nexit %s\n' "$FIX" "$FIX" "$1" > "$JOURNAL_STUB"
+    fi
+    chmod +x "$JOURNAL_STUB"
+}
+lookback_run() {  # reset and collect
+    LOOKBACK_STATE=""; LOOKBACK_ERR=""; LOOKBACK_DOWNS=()
+    collect_lookback
+}
+SAVED_TIMEOUT="${TOOL_PATH[timeout]:-}"
+TOOL_PATH[timeout]=""
+TOOL_PATH[journalctl]="$JOURNAL_STUB"
+LOOKBACK=60
+journal_stub 0
+lookback_run
+assert_eq "lookback state ok" "$LOOKBACK_OK" "$LOOKBACK_STATE"
+assert_eq "lookback journalctl argv" "-k -q --no-pager -o cat --since -60min" "$(< "$FIX/journal_argv")"
+assert_eq "lookback collected eth0" "2" "${LOOKBACK_DOWNS[eth0]}"
+
+journal_stub 1 "No journal files were found."
+lookback_run
+assert_eq "lookback no journal files: absent" "$LOOKBACK_ABSENT" "$LOOKBACK_STATE"
+reset_results; check_lookback
+assert_eq "lookback absent journal host N/A" "N/A" "$(sev_of generic.link.lookback "$HOSTNAME")"
+assert_eq "lookback absent: no port rows" "MISSING" "$(sev_of generic.link.lookback eth0)"
+
+journal_stub 1 "Data from the specified boot (+0) is not available: No such boot ID in journal"
+lookback_run
+assert_eq "lookback no current boot: absent" "$LOOKBACK_ABSENT" "$LOOKBACK_STATE"
+
+journal_stub 1 "Failed to open journal: Permission denied"
+lookback_run
+reset_results; check_lookback
+assert_eq "lookback journalctl failure UNKNOWN" "UNKNOWN" "$(sev_of generic.link.lookback "$HOSTNAME")"
+assert_eq "lookback failure evidence" "journalctl exit 1: Failed to open journal: Permission denied" "$LOOKBACK_ERR"
+
+# Journal content is never read as a journalctl error, even when it says "is not available"
+printf '#!/bin/bash\necho "platform foo: firmware feature is not available"\necho "Journal file /var/log/journal/x.journal is truncated, ignoring file." >&2\nexit 1\n' > "$JOURNAL_STUB"
+lookback_run
+assert_eq "lookback content not taken as absent journal" "$LOOKBACK_FAILED" "$LOOKBACK_STATE"
+assert_eq "lookback error from stderr only" "journalctl exit 1: Journal file /var/log/journal/x.journal is truncated, ignoring file." "$LOOKBACK_ERR"
+
+TOOL_PATH[journalctl]=""
+lookback_run
+reset_results; check_lookback
+assert_eq "lookback without journalctl N/A" "N/A" "$(sev_of generic.link.lookback "$HOSTNAME")"
+
+LOOKBACK=0
+TOOL_PATH[journalctl]="$JOURNAL_STUB"
+journal_stub 0
+lookback_run
+reset_results; check_lookback
+assert_eq "lookback 0: nothing collected" "" "$LOOKBACK_STATE"
+assert_eq "lookback 0: no rows" "0" "${#REC_SEV[@]}"
+LOOKBACK=60
+
+# Severity: history alone WARN; CRIT only with repeated downs and still flapping in the window
+INTERVAL=5
+LOOKBACK_STATE="$LOOKBACK_OK"
+LOOKBACK_DOWNS=([eth0]=5 [eth1]=5 [eth2]=1 [eth3]=0)
+SNAP0=(["carrier|eth0"]=10 ["carrier|eth1"]=10 ["carrier|eth2"]=10 ["carrier|eth3"]=10)
+SNAP1=(["carrier|eth0"]=12 ["carrier|eth1"]=10 ["carrier|eth2"]=12 ["carrier|eth3"]=10)
+printf '7\n' > "$SYSFS_NET/eth0/carrier_down_count"
+reset_results; check_lookback
+assert_eq "lookback repeated + flapping CRIT" "CRIT" "$(sev_of generic.link.lookback eth0)"
+assert_eq "lookback repeated, not flapping now WARN" "WARN" "$(sev_of generic.link.lookback eth1)"
+assert_eq "lookback single down while flapping WARN" "WARN" "$(sev_of generic.link.lookback eth2)"
+assert_eq "lookback no downs OK" "OK" "$(sev_of generic.link.lookback eth3)"
+assert_eq "lookback one row per port" "1" "$(count_of generic.link.lookback eth0)"
+for i in "${!REC_SEV[@]}"; do
+    [[ "${REC_CHECK[i]} ${REC_TARGET[i]}" == "generic.link.lookback eth0" ]] && LB_EVIDENCE="${REC_EVIDENCE[i]}" LB_VALUE="${REC_VALUE[i]} ${REC_UNIT[i]}"
+done
+assert_eq "lookback value and unit" "5 link-down/60m" "$LB_VALUE"
+assert_eq "lookback evidence has carrier_down_count" "yes" "$([[ "$LB_EVIDENCE" == *"carrier_down_count=7"* && "$LB_EVIDENCE" == *"carrier_changes +2 in window"* ]] && echo yes)"
+assert_eq "lookback evidence without carrier_down_count" "yes" "$(reset_results; check_lookback; for i in "${!REC_SEV[@]}"; do [[ "${REC_TARGET[i]}" == eth1 && "${REC_CHECK[i]}" == generic.link.lookback && "${REC_EVIDENCE[i]}" == *"carrier_down_count=n/a"* ]] && echo yes; done)"
+rm -f "$SYSFS_NET/eth0/carrier_down_count"
+
+# Boot inside the window is called out (the journal query stops at boot)
+SAVED_UPTIME=$(< "$FIX/uptime")
+printf '600.00 0\n' > "$FIX/uptime"
+reset_results; check_lookback
+assert_eq "lookback window truncated at boot" "yes" "$(for i in "${!REC_SEV[@]}"; do [[ "${REC_TARGET[i]}" == eth3 && "${REC_EVIDENCE[i]}" == *"boot was 10 min ago"* ]] && echo yes; done)"
+printf '%s\n' "$SAVED_UPTIME" > "$FIX/uptime"
+
+# Absolute mode (-I 0): no window, so history is never CRIT
+INTERVAL=0
+reset_results; check_lookback
+assert_eq "lookback absolute mode WARN" "WARN" "$(sev_of generic.link.lookback eth0)"
+INTERVAL=5
+
+# Real timeout(1) bounds a hung journalctl: argv is wrapped, and both exit paths (TERM honoured:
+# 124; TERM ignored, killed: 137) are timeouts, even when partial output says "is not available"
+if [[ -n "$REAL_TIMEOUT" ]]; then
+    TOOL_PATH[timeout]="$REAL_TIMEOUT"
+    SAVED_JT=$JOURNAL_TIMEOUT SAVED_JK=$JOURNAL_KILL_AFTER
+    JOURNAL_TIMEOUT=1 JOURNAL_KILL_AFTER=1
+    journal_stub 0
+    lookback_run
+    assert_eq "lookback via timeout(1) argv" "$LOOKBACK_OK -k -q --no-pager -o cat --since -60min" "$LOOKBACK_STATE $(< "$FIX/journal_argv")"
+    printf '#!/bin/bash\nexec sleep 30\n' > "$JOURNAL_STUB"
+    lookback_run
+    assert_eq "lookback journalctl TERM timeout UNKNOWN" "$LOOKBACK_FAILED journalctl timed out after 1s" "$LOOKBACK_STATE $LOOKBACK_ERR"
+    printf '#!/bin/bash\ntrap "" TERM\necho "foo: feature is not available"\nexec sleep 30\n' > "$JOURNAL_STUB"
+    lookback_run
+    assert_eq "lookback journalctl killed (partial output) UNKNOWN" "$LOOKBACK_FAILED journalctl timed out after 1s" "$LOOKBACK_STATE $LOOKBACK_ERR"
+    JOURNAL_TIMEOUT=$SAVED_JT JOURNAL_KILL_AFTER=$SAVED_JK
+else
+    echo "⏭️  SKIP lookback timeout tests: timeout(1) not found"
+fi
+TOOL_PATH[timeout]="$SAVED_TIMEOUT"
+TOOL_PATH[journalctl]=""
+LOOKBACK_STATE=""
+
+# JSON header carries the window
+assert_eq "json lookback_min" "yes" "$(render_json | grep -q '"lookback_min": 60,' && echo yes)"
+
 # --- Verdict precedence ---
 for CASE in "OK N/A:OK 0" "OK UNKNOWN:UNKNOWN 3" "WARN UNKNOWN:WARN 1" "WARN CRIT UNKNOWN:CRIT 2"; do
     read -ra REC_SEV <<< "${CASE%%:*}"
@@ -710,7 +873,7 @@ for CASE in "OK N/A:OK 0" "OK UNKNOWN:UNKNOWN 3" "WARN UNKNOWN:WARN 1" "WARN CRI
 done
 
 # --- CLI (runs before the root check, so works unprivileged) ---
-for CASE in "-l deep -v:0" "--level=basic -v:0" "-l bogus:3" "-a -v:0" "--all -v:0" "-v:0" "-I 99999:3" "-I abc:3" "-O xml:3" "extra:3" "--bogus:3"; do
+for CASE in "-l deep -v:0" "--level=basic -v:0" "-l bogus:3" "-a -v:0" "--all -v:0" "-v:0" "-I 99999:3" "-I abc:3" "-L 0 -v:0" "--lookback=1440 -v:0" "-L 1441:3" "-L abc:3" "-L 99999999999999999999:3" "-L 0001440 -v:0" "-I 0005 -v:0" "-I 18446744073709551621:3" "-O xml:3" "extra:3" "--bogus:3"; do
     # shellcheck disable=SC2086
     bash "$SCRIPT" ${CASE%%:*} >/dev/null 2>&1
     assert_eq "exit code for '${CASE%%:*}'" "${CASE#*:}" "$?"
