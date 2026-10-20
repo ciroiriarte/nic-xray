@@ -1,4 +1,4 @@
-name: Lint
+name: CI
 
 on:
   push:
@@ -7,13 +7,13 @@ on:
       - '**.sh'
       - tests/**
       - Makefile
-      - .github/workflows/lint.yml
+      - .github/workflows/ci.yml
   pull_request:
     paths:
       - '**.sh'
       - tests/**
       - Makefile
-      - .github/workflows/lint.yml
+      - .github/workflows/ci.yml
   workflow_dispatch:
 
 permissions:
@@ -46,3 +46,15 @@ jobs:
         run: |
           "$SHELLCHECK" --version
           make lint SHELLCHECK="$SHELLCHECK"
+
+  test:
+    name: make test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: make test
+        run: |
+          bash --version | head -1
+          make test
