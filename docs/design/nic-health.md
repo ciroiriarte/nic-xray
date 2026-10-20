@@ -344,6 +344,7 @@ Explicit consent boundary. Never runs unless requested.
 |---|---|---|---|
 | 2026-10-20 | NVIDIA ConnectX-6 Lx (MT2894), 2 hosts | 26.47.1026 (LNV0000000037) / 7.0.14-11-pve, 7.0.0-3-pve | Catalog checked against live `ethtool -S`, devlink, sysfs, hwmon and `hw_counters`. Corrections applied in §6 (`rx_bits_phy`, `outbound_pci_buffer_overflow`, `rx_prioN_pause_duration` absent; port reporters on the auxiliary devlink instance; no hwmon `_max`) |
 | 2026-10-20 | Intel E810-XXV (`ice`), 1 host | 4.81 0x80020b48 1.3818.0 / SLES 15 SP6 6.4.0-150600.21 | Baseline recorded in §6.4. nic-xray itself also tested here (bash 4.4, SLES, USB `cdc_ether` interface) |
+| 2026-10-20 | Phase 1 `nic-health.sh` on 5 hosts: ConnectX-6 Lx (`mlx5_core`), E810-XXV (`ice`), 82599ES (`ixgbe`), SFC9120 (`sfc`), 82574L/82579LM (`e1000e`) | Debian 12/13 (PVE/PBS), SLES 15 SP6 (bash 4.4), Unraid 7.3 | Discovery, ASIC grouping, PCIe link check, table/JSON/CSV and exit codes verified. Chipset-integrated 82579LM has no PCIe link attributes → `N/A`; USB BMC NIC → `N/A`, USB-only selection → `UNKNOWN` (exit 3) |
 | — | Broadcom `bnxt_en` | — | ⏳ Pending: no host with a Broadcom NIC identified |
 
 ## 14. ❓ Open questions
