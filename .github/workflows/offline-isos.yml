@@ -80,6 +80,11 @@ jobs:
             package_manager: dnf
 
     steps:
+      # actions/checkout needs tar and gzip; the openSUSE Leap image ships neither
+      - name: Install checkout prerequisites
+        if: matrix.distro.package_manager == 'zypper'
+        run: command -v tar >/dev/null && command -v gzip >/dev/null || zypper --non-interactive install --no-recommends tar gzip
+
       - name: Check out repository
         uses: actions/checkout@v4
 
