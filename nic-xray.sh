@@ -779,8 +779,11 @@ parse_optics() {
                 $0 ~ "Transmit avg optical power.*Channel "ch")" {
                     for(i=1;i<=NF;i++) if($i=="dBm") { print $(i-1); exit }
                 }')
+            # SFF-8636 (QSFP+/QSFP28) labels Rx per lane as
+            # "Rcvr signal avg optical power(Channel N)", or "Rcvr signal OMA(Channel N)"
+            # when the module reports OMA; keep the long SFF-8472 spelling as well
             RX_V=$(echo "$ETH_M" | awk -v ch="$CH" '
-                $0 ~ "Receiver signal average optical power.*Channel "ch")" {
+                $0 ~ "(Rcvr signal avg optical power|Rcvr signal OMA|Receiver signal average optical power).*Channel "ch")" {
                     for(i=1;i<=NF;i++) if($i=="dBm") { print $(i-1); exit }
                 }')
             [[ -z "$TX_V" ]] && TX_V="N/A"
