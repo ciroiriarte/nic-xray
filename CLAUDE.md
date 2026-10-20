@@ -1,7 +1,13 @@
-# nic-xray — single-script repository
+# nic-xray — primary script + companion repository
 
 ## 1. Objectives
 * Provide detailed physical network interface diagnostics for Linux systems
+* `nic-xray.sh` is the primary script (inventory, topology, traffic metrics).
+* Companion scripts live alongside it in the repo root. Planned: `nic-health.sh`
+  for vendor-specific NIC hardware health checks (design: `docs/design/nic-health.md`).
+* Every rule in this file applies to each script. Where a rule names `nic-xray.sh`,
+  read it as the script's own name (e.g. `--version` prints `nic-health.sh <version>`,
+  man page `man/man8/nic-health.8`).
 
 ## 2. Technical Stack & Dependencies
 * **Language:** Modern Bash
@@ -30,7 +36,7 @@
 
 ## 6. Releases
 * Use semantic versioning (https://semver.org/)
-* Bump script version & repo release tags in tandem
+* Bump script version & repo release tags in tandem (applies to all scripts: one shared version and tag)
 * Bump only on user request.
 
 ## 7. Git Commit Guidelines
