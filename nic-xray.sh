@@ -1502,6 +1502,14 @@ for IFACE in "${ENUM_IFACES[@]}"; do
         #   Bit 4: Collecting, Bit 5: Distributing
         # Bit 1 (Timeout) is intentionally ignored — short vs long is not an error
         LACP_PLAIN=$(awk -v IFACE="$IFACE" '
+            # POSIX replacement for gawk and(v, m) == m (mawk lacks bitwise ops)
+            function has_bits(v, m) {
+                while (m > 0) {
+                    if (m % 2 && !(v % 2)) return 0
+                    v = int(v / 2); m = int(m / 2)
+                }
+                return 1
+            }
             BEGIN { in_iface=0; in_actor=0; in_partner=0; agg=""; peer=""; state="" }
             $0 ~ "^Slave Interface: "IFACE"$" { in_iface=1; next }
             in_iface && /^Slave Interface:/ { in_iface=0 }
@@ -1511,7 +1519,7 @@ for IFACE in "${ENUM_IFACES[@]}"; do
             in_iface && /details partner lacp pdu:/ { in_partner=1; next }
             in_partner && /^[[:space:]]*system mac address:/ { peer=$4; in_partner=0 }
             END {
-                if (agg && peer && and(state+0, 61) == 61)
+                if (agg && peer && has_bits(state+0, 61))
                     printf "AggID:%s Peer:%s", agg, peer
                 else if (agg && peer)
                     printf "AggID:%s Peer:%s (Partial)", agg, peer
