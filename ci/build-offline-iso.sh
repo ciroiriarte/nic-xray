@@ -175,7 +175,8 @@ build_iso() {
 		-volid "NICXRAY_OFFLINE" \
 		-output "$OUT_DIR/$ISO_NAME" \
 		"$STAGING_DIR"
-	sha256sum "$OUT_DIR/$ISO_NAME" > "$OUT_DIR/$ISO_NAME.sha256"
+	# Bare file name, so "sha256sum -c" works next to the downloaded ISO
+	(cd "$OUT_DIR" && sha256sum "$ISO_NAME" > "$ISO_NAME.sha256")
 	log "Built $OUT_DIR/$ISO_NAME"
 }
 
