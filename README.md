@@ -821,7 +821,7 @@ With `-l deep`, each ConnectX physical function gets exactly one query: `timeout
 
 ### 📸 Output examples
 
-All samples are real captures with hostnames obfuscated (see [`samples/`](samples/)).
+All samples are real captures with hostnames obfuscated (see [`samples/`](samples/)), taken with nic-health 2.11.0. Later versions add rows and evidence fields (for example `generic.link.state`, `generic.link.lookback`, and `Raw Physical Errors Per Lane` in `mlx5.deep.ber`).
 
 **Healthy host** (Intel 82599ES):
 

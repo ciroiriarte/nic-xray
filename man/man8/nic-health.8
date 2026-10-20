@@ -271,7 +271,10 @@ The module is specified for operation with FEC but the link runs without FEC
 .TP
 .B mlx5.deep.ber
 Effective (post-FEC) BER of 1E-12 or more \(-> WARN. This is an average since the
-counters were last cleared, so it never escalates to CRIT.
+counters were last cleared, so it never escalates to CRIT. The evidence lists
+the effective and raw BER and error counts, plus the per-lane raw errors and
+link-down counter when the tool prints them (mstflint 4.26 has no link-down
+counter; MFT and newer mstflint do).
 .TP
 .B mlx5.deep.module
 Module temperature, voltage, bias current or optical power outside the module's

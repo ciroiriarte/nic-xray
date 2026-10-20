@@ -28,6 +28,8 @@
 #   - 2026-10-20: Phase 5: -l/--level deep with allowlisted mlxlink/mstlink queries (design §7)
 #   - 2026-10-20: -L/--lookback: generic.link.lookback counts driver link-down messages in the
 #                 kernel journal over the last N minutes (#9), so past flaps are visible
+#   - 2026-10-20: mlx5.deep.ber evidence lists only the counters the tool printed: mstflint 4.26
+#                 has no Link Down Counter, which showed as "Link Down Counter=?" (#13)
 #   - 2026-10-20: generic.pcie.link compares against what both ends of the link support: a card
 #                 in a narrower or slower slot is OK (slot-limited), not WARN (#14)
 #   - 2026-10-20: generic.link.state: no carrier on a port in use (bond/bridge member, upper
@@ -220,6 +222,10 @@ BER_ZERO_EXPONENT=-999
 DEEP_RANGE_KEYS=("Temperature [C]" "Voltage [mV]" "Bias Current [mA]" "Rx Power Current [dBm]" "Tx Power Current [dBm]")
 # Module per-lane fault flags; any non-zero lane is WARN
 DEEP_FLAG_KEYS=("Tx Fault [per lane]" "Rx LOS [per lane]" "Tx CDR LOL [per lane]" "Rx CDR LOL [per lane]")
+# mlx5.deep.ber evidence: always listed ("?" when missing), then listed only when the tool printed
+# them. Link Down Counter is printed by MFT mlxlink and mstflint >= 4.31, not by mstflint 4.26
+DEEP_BER_EVIDENCE_KEYS=("Effective Physical BER" "Raw Physical BER" "Effective Physical Errors")
+DEEP_BER_OPTIONAL_KEYS=("Raw Physical Errors Per Lane" "Link Down Counter")
 DEEP_NO_FEC="No FEC"
 DEEP_MODULE_FEC_RE='[Ww]ith FEC'
 
@@ -1383,7 +1389,14 @@ check_deep_port() {
     # Effective (post-FEC) BER, averaged since the last counter clear
     RAW="${DEEP_KV["$IFACE|Effective Physical BER"]:-}"
     local SINCE="${DEEP_KV["$IFACE|Time Since Last Clear [Min]"]:-?}"
-    EVIDENCE="Effective Physical BER=${RAW:-?} Raw Physical BER=${DEEP_KV["$IFACE|Raw Physical BER"]:-?} Effective Physical Errors=${DEEP_KV["$IFACE|Effective Physical Errors"]:-?} Link Down Counter=${DEEP_KV["$IFACE|Link Down Counter"]:-?} since ${SINCE} min"
+    EVIDENCE=""
+    for KEY in "${DEEP_BER_EVIDENCE_KEYS[@]}"; do
+        EVIDENCE+="$KEY=${DEEP_KV["$IFACE|$KEY"]:-?} "
+    done
+    for KEY in "${DEEP_BER_OPTIONAL_KEYS[@]}"; do
+        [[ -n "${DEEP_KV["$IFACE|$KEY"]:-}" ]] && EVIDENCE+="$KEY=${DEEP_KV["$IFACE|$KEY"]} "
+    done
+    EVIDENCE+="since ${SINCE} min"
     if ! $LINK_UP; then
         :
     elif [[ -z "$RAW" ]]; then

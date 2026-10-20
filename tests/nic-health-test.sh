@@ -676,8 +676,8 @@ assert_eq "mlxlink troubleshooting OK"       "OK"   "$(sev_of mlx5.deep.troubles
 assert_eq "mlxlink FEC active OK"            "OK"   "$(sev_of mlx5.deep.fec eth0)"
 assert_eq "mlxlink BER 3E-9 WARN"            "WARN" "$(sev_of mlx5.deep.ber eth0)"
 assert_eq "mlxlink BER value"                "effective 3E-9 raw 7E-7" "$(mlx5_rec REC_VALUE mlx5.deep.ber eth0)"
-assert_eq "mlxlink BER evidence names tool counter" "yes" "$([[ "$(mlx5_rec REC_EVIDENCE mlx5.deep.ber eth0)" == *"Link Down Counter=331"* ]] && echo yes)"
 assert_eq "mlxlink module (Rx -8.069 in range) OK" "OK" "$(sev_of mlx5.deep.module eth0)"
+assert_eq "mlxlink BER evidence (all counters)" "Effective Physical BER=3E-9 Raw Physical BER=7E-7 Effective Physical Errors=44005345 Raw Physical Errors Per Lane=9503137409 Link Down Counter=331 since 9145.9 min" "$(mlx5_rec REC_EVIDENCE mlx5.deep.ber eth0)"
 assert_eq "mlxlink troubleshooting evidence" "mlxlink: No issue was observed" "$(mlx5_rec REC_EVIDENCE mlx5.deep.troubleshooting eth0)"
 # Kernel says the port has link, so the tool's opcode 2 is still reported
 assert_eq "mlxlink opcode WARN while kernel has carrier" "WARN" "$(sev_of mlx5.deep.troubleshooting eth1)"
@@ -709,6 +709,26 @@ assert_eq "no-link: Tx fault still WARN" "WARN" "$(sev_of mlx5.deep.module eth1)
 assert_eq "no-link: one row per deep check" "1 1 1 1" "$(count_of mlx5.deep.troubleshooting eth1) $(count_of mlx5.deep.fec eth1) $(count_of mlx5.deep.ber eth1) $(count_of mlx5.deep.module eth1)"
 printf 'up\n' > "$SYSFS_NET/eth1/operstate"; rm -f "$SYSFS_NET/eth1/carrier"
 TOOL_PATH[mlxlink]=""
+
+# mstflint 4.26 prints no Link Down Counter (#13): list only what the tool printed, never "?"
+# shellcheck disable=SC2329
+mstlink() { cat "$FIXTURES/mstlink-4.26-cx6lx-25g-sr-ber-errors.txt"; }
+DEEP_KV=(); DEEP_ERR=(); DEEP_TOOL_USED=()
+deep_query mstlink eth0 0000:01:00.0
+reset_results; check_deep_port 0
+assert_eq "mstflint 4.26 has no Link Down Counter" "" "${DEEP_KV[eth0|Link Down Counter]:-}"
+assert_eq "mstflint 4.26 BER evidence" "Effective Physical BER=3E-9 Raw Physical BER=7E-7 Effective Physical Errors=44005346 Raw Physical Errors Per Lane=9503137852 since 9145.9 min" "$(mlx5_rec REC_EVIDENCE mlx5.deep.ber eth0)"
+assert_eq "mstflint 4.26 BER still WARN" "WARN" "$(sev_of mlx5.deep.ber eth0)"
+# A required counter that is missing is still flagged with "?"
+DEEP_KV=(["eth0|Effective Physical BER"]="3E-9" ["eth0|Raw Physical BER"]="7E-7" ["eth0|Identifier"]="N/A")
+DEEP_TOOL_USED=([eth0]=mstlink)
+reset_results; check_deep_port 0
+DEEP_KV=(["eth0|Effective Physical BER"]="3E-9" ["eth0|Raw Physical BER"]="7E-7" ["eth0|Effective Physical Errors"]="5" ["eth0|Link Down Counter"]="" ["eth0|Identifier"]="N/A")
+reset_results; check_deep_port 0
+assert_eq "optional counter printed empty is left out" "Effective Physical BER=3E-9 Raw Physical BER=7E-7 Effective Physical Errors=5 since ? min" "$(mlx5_rec REC_EVIDENCE mlx5.deep.ber eth0)"
+DEEP_KV=(["eth0|Effective Physical BER"]="3E-9" ["eth0|Raw Physical BER"]="7E-7" ["eth0|Identifier"]="N/A")
+reset_results; check_deep_port 0
+assert_eq "missing required BER counter shown as ?" "Effective Physical BER=3E-9 Raw Physical BER=7E-7 Effective Physical Errors=? since ? min" "$(mlx5_rec REC_EVIDENCE mlx5.deep.ber eth0)"
 
 # Failures: timeout, tool error, tool missing; mlxlink preferred
 # shellcheck disable=SC2329
