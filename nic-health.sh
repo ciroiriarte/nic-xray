@@ -38,9 +38,9 @@
 #                 devices or a global address) is WARN, CRIT when its bond is down too; deep
 #                 link checks skip ports without carrier instead of reporting noise (#12)
 #
-# Version: 2.11.1
+# Version: 2.12.0
 
-SCRIPT_VERSION="2.11.1"
+SCRIPT_VERSION="2.12.0"
 SCRIPT_NAME="nic-health.sh"
 JSON_SCHEMA_VERSION=1
 DESIGN_REF="docs/design/nic-health.md"

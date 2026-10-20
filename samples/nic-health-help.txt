@@ -2,7 +2,7 @@ Usage: nic-health.sh [-i|--interface IFACE]... [-I|--interval SEC] [-L|--lookbac
        [-O|--output table|csv|json] [-l|--level basic|deep] [-a|--all] [-n|--no-color]
        [-t|--check-tools] [-v|--version] [-h|--help]
 
-Version: 2.11.1
+Version: 2.12.0
 
 Description:
  Evaluates physical NIC hardware and data-path health and reports a verdict
