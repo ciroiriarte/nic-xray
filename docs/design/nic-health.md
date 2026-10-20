@@ -191,6 +191,18 @@ Collected only when an IB device is bound to the netdev. These are kernel-bypass
 
 ---
 
+### 6.4 `ice` — observed baseline (not yet a check catalog)
+
+Observed on E810-XXV, SLES 15 SP6 kernel 6.4. Recorded here so the generic module and the future `ice` module tolerate it.
+
+| Area | Observation |
+|---|---|
+| Counter naming | Port-level counters carry a `.nic` suffix (`rx_crc_errors.nic`, `illegal_bytes.nic`, `mac_local_faults.nic`, `mac_remote_faults.nic`, `rx_oversize.nic`, `rx_jabber.nic`, `link_xoff_rx.nic`, `tx_timeout.nic`, `tx_dropped_link_down.nic`). Newer kernels may use a different scheme, so match by an alias table, not one literal name |
+| Driver-level | `rx_alloc_fail`, `rx_pg_alloc_fail`, `tx_busy`, `tx_restart`, `tx_linearize` |
+| Missing on 6.4 | devlink health reporters, hwmon temperature, FEC statistics → `N/A` |
+| Firmware | `devlink dev info` gives `fw.mgmt`, `fw.bundle_id`, `fw.app` (DDP package), `fw.netlist` |
+| RDMA (`irdma`) | `hw_counters` use different names from mlx5 (`tcpRetransSegs`, `cnpHandled`, `RxECNMrkd`, `ip4InDiscards`, …) |
+
 ## 7. 🔬 Deep mode (`--level deep`)
 
 Explicit consent boundary. Never runs unless requested.
@@ -247,7 +259,7 @@ Explicit consent boundary. Never runs unless requested.
 | Vendor | Driver | Basic (no vendor tool) | Deep | Open-source path |
 |---|---|---|---|---|
 | NVIDIA/Mellanox | `mlx5_core` | ✅ rich | `mstlink`/`mlxlink` | ✅ mstflint |
-| Intel | `ice`, `i40e` | ✅ (`ethtool -S`, devlink) | little beyond devlink | ✅ upstream |
+| Intel | `ice`, `i40e` | ✅ (`ethtool -S`; devlink health/hwmon only on newer kernels) | little beyond devlink | ✅ upstream |
 | Broadcom | `bnxt_en` | ✅ (`ethtool -S`, devlink) | `niccli` | ❌ detect only |
 | Marvell | `qede` | ✅ (`ethtool -S`) | QConvergeConsole | ❌ detect only |
 
@@ -331,7 +343,8 @@ Explicit consent boundary. Never runs unless requested.
 | Date | Hardware | Firmware / kernel | Result |
 |---|---|---|---|
 | 2026-10-20 | NVIDIA ConnectX-6 Lx (MT2894), 2 hosts | 26.47.1026 (LNV0000000037) / 7.0.14-11-pve, 7.0.0-3-pve | Catalog checked against live `ethtool -S`, devlink, sysfs, hwmon and `hw_counters`. Corrections applied in §6 (`rx_bits_phy`, `outbound_pci_buffer_overflow`, `rx_prioN_pause_duration` absent; port reporters on the auxiliary devlink instance; no hwmon `_max`) |
-| — | Broadcom `bnxt_en` | — | ⏳ Pending: no reachable host yet |
+| 2026-10-20 | Intel E810-XXV (`ice`), 1 host | 4.81 0x80020b48 1.3818.0 / SLES 15 SP6 6.4.0-150600.21 | Baseline recorded in §6.4. nic-xray itself also tested here (bash 4.4, SLES, USB `cdc_ether` interface) |
+| — | Broadcom `bnxt_en` | — | ⏳ Pending: no host with a Broadcom NIC identified |
 
 ## 14. ❓ Open questions
 
