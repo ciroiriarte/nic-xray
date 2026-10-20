@@ -872,8 +872,8 @@ normalize_sfp_type() {
     local -a CANDIDATES=()
     while IFS= read -r _LINE; do
         [[ -z "$_LINE" ]] && continue
-        # Skip non-Ethernet types (FC: Fibre Channel, etc.)
-        [[ "$_LINE" == FC:* ]] && continue
+        # Skip non-Ethernet compliance categories (Fibre Channel, InfiniBand, SONET, ESCON)
+        [[ "$_LINE" =~ ^(FC|Infiniband|SONET|ESCON): ]] && continue
 
         # Strip category prefix: "10G Ethernet: 10G Base-SR" → "10G Base-SR"
         local _AFTER="${_LINE#*: }"
