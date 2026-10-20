@@ -3,9 +3,11 @@ set -Eeuo pipefail
 
 usage() {
 	cat <<-'USAGE'
-Usage: build-offline-iso.sh --distro-id ID --obs-path OBS_PATH --package-manager apt|zypper|dnf --version VERSION [--arch ARCH] [--with-graphviz true|false]
+Usage: build-offline-iso.sh --distro-id ID --obs-path OBS_PATH --package-manager apt|zypper|dnf --version VERSION [--arch ARCH] [--with-graphviz true|false] [--with-vendor-tools true|false]
 
-Build a self-contained offline installer ISO for nic-xray from the OBS package repo.
+Build a self-contained offline installer ISO for nic-xray (and its companion nic-health) from the OBS package repo.
+--with-vendor-tools adds mstflint from the distribution mirror (open source; enables nic-health -l deep on ConnectX).
+Proprietary vendor tools (NVIDIA MFT, Broadcom niccli) are never included.
 USAGE
 }
 
@@ -15,6 +17,8 @@ PACKAGE_MANAGER=""
 VERSION=""
 ARCH="$(uname -m)"
 WITH_GRAPHVIZ="true"
+WITH_VENDOR_TOOLS="false"
+VENDOR_TOOL_PKGS=(mstflint)
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -24,6 +28,7 @@ while [[ $# -gt 0 ]]; do
 		--version) VERSION="$2"; shift 2 ;;
 		--arch) ARCH="$2"; shift 2 ;;
 		--with-graphviz) WITH_GRAPHVIZ="$2"; shift 2 ;;
+		--with-vendor-tools) WITH_VENDOR_TOOLS="$2"; shift 2 ;;
 		-h|--help) usage; exit 0 ;;
 		*) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
 	esac
@@ -33,6 +38,13 @@ if [[ -z "$DISTRO_ID" || -z "$OBS_PATH" || -z "$PACKAGE_MANAGER" || -z "$VERSION
 	usage >&2
 	exit 2
 fi
+for flag_value in "$WITH_GRAPHVIZ" "$WITH_VENDOR_TOOLS"; do
+	if [[ "$flag_value" != "true" && "$flag_value" != "false" ]]; then
+		echo "Expected true or false, got: $flag_value" >&2
+		usage >&2
+		exit 2
+	fi
+done
 
 OBS_BASE_URL="https://download.opensuse.org/repositories/home:/ciriarte:/network-tools/${OBS_PATH}"
 WORKDIR="${RUNNER_TEMP:-/tmp}/nic-xray-offline-${DISTRO_ID}"
@@ -43,6 +55,9 @@ ISO_NAME="nic-xray-${VERSION}-offline-${DISTRO_ID}-${ARCH}.iso"
 INSTALL_PKGS=(nic-xray)
 if [[ "$WITH_GRAPHVIZ" == "true" ]]; then
 	INSTALL_PKGS+=(graphviz)
+fi
+if [[ "$WITH_VENDOR_TOOLS" == "true" ]]; then
+	INSTALL_PKGS+=("${VENDOR_TOOL_PKGS[@]}")
 fi
 
 log() { printf '::notice::%s\n' "$*"; }

@@ -56,5 +56,6 @@ _nic_xray() {
 		return
 	fi
 } &&
+	complete -F _nic_xray nic-xray &&
 	complete -F _nic_xray nic-xray.sh &&
 	complete -F _nic_xray ./nic-xray.sh

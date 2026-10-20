@@ -118,12 +118,15 @@ Each check emits exactly one record:
 | Option | Description |
 |---|---|
 | `-i`, `--interface IFACE` | Limit to one or more interfaces (repeatable) |
-| `-l`, `--level basic\|deep` | `basic` (default) is passive. `deep` adds allowlisted vendor tool queries |
-| `-t`, `--interval SEC` | Delta window (default 5; `0` means absolute-only snapshot) |
-| `--output table\|json\|csv` | Output format (default `table`) |
-| `--check-tools` | Report available, missing, and disabled capabilities, then exit |
-| `--thresholds FILE` | Threshold overrides (parsed as data, **never sourced**) |
-| `--no-color` | Disable ANSI colors |
+| `-I`, `--interval SEC` | Delta window (default 5; `0` means absolute-only snapshot) — *Phase 2* |
+| `-O`, `--output table\|json\|csv` | Output format (default `table`) |
+| `-t`, `--check-tools` | Report available, missing, and disabled capabilities, then exit |
+| `-a`, `--all` | Table also lists OK and N/A rows (default: WARN/CRIT/UNKNOWN only, plus a hidden-row count). CSV/JSON always contain every row |
+| `-n`, `--no-color` | Disable ANSI colors |
+| `-l`, `--level basic\|deep` | `basic` (default) is passive. `deep` adds allowlisted vendor tool queries (§7) |
+| `--thresholds FILE` | Threshold overrides (parsed as data, **never sourced**) — *planned* |
+
+> Short options avoid `-o`, which means `--optics` in `nic-xray.sh`. Options are only exposed once implemented.
 | `-v`, `--version` | Print `nic-health.sh <version>` |
 | `-h`, `--help` | Help, including version |
 
@@ -156,9 +159,9 @@ Most mlx5 counters are cumulative since driver load, so absolute values alone ar
 | ASIC | devlink health reporters (device) | `devlink health show pci/<BDF>` (mlx5: `fw`, `fw_fatal`, `vnic`; discover, don't assume) | state ≠ healthy → `CRIT`; error count Δ>0 → `WARN` |
 | Port | devlink health reporters (port) | `devlink health show` on the `auxiliary/mlx5_core.eth.N` instance (mlx5: `tx`, `rx`), mapped to the netdev via `devlink port show` | same as above |
 | ASIC | Firmware / PSID | `devlink dev info pci/<BDF>`, fallback `ethtool -i` | informational |
-| ASIC | Temperature | `device/hwmon/hwmon*/temp*_{input,crit,highest,label}` (mlx5 has no `_max`) | within 10 °C of crit → `WARN`; ≥crit → `CRIT`; `_highest` reported as historical peak |
-| Port | Link flaps | `carrier_changes` (sysfs), driver `link_down_events_phy` | Δ>0 → `WARN`. Historical totals are informational only |
-| Port | FEC mode/stats | `ethtool --show-fec` (where supported) | mode mismatch vs speed expectation → `WARN` |
+| ASIC | Temperature | `device/hwmon/hwmon*/temp*_{input,crit,max,highest,alarm,label}` on every PCI function, deduplicated by label | within 10 °C of crit, or ≥`_max` when `_max` < crit → `WARN`; ≥crit → `CRIT`; `_alarm`=1 → `WARN`. A `_max` above crit is ignored (ixgbe reports 105 > 95). Read error `EBUSY` (firmware lists the sensor but has no reading, e.g. sfc) → `N/A`; other read errors → `UNKNOWN`. `_highest` shown as peak since driver load |
+| Port | Link flaps | `carrier_changes` (sysfs) | Δ>0 → `WARN`. Historical totals are informational only. A counter present at T0 but gone at T1 → `UNKNOWN`. Driver `link_down_events_phy` (mlx5 `ethtool -S`) moves to the mlx5 module (Phase 3) since it is not generic |
+| Port | FEC mode/stats | `ethtool --show-fec` (where supported) | mode mismatch vs speed expectation → `WARN`. ⏳ **Deferred**: no validation host exposes FEC statistics (mlx5, ice, ixgbe, sfc, e1000e all checked) |
 | Port | Ring sizing context | `ethtool -g` | feeds hints only |
 
 ### 6.2 `mlx5_core` — Ethernet counters (`ethtool -S`)
@@ -177,6 +180,27 @@ Most mlx5 counters are cumulative since driver load, so absolute values alone ar
 | Pause storms | `tx_pause_storm_warning_events`, `tx_pause_storm_error_events` | cumulative | error Δ>0 → `CRIT` |
 | Module | `module_unplug`, `module_bus_stuck`, `module_high_temp`, `module_bad_shorted` | cumulative | bus_stuck/bad_shorted → `CRIT`; high_temp → `WARN` |
 | Steering | `rx_steer_missed_packets` | cumulative | informational; flags flow-steering misconfiguration |
+
+**Implementation (Phase 3).** The table above is a data table in the script (`MLX5_RULE_ID`, `MLX5_RULE_COUNTERS`, `MLX5_RULE_HINT`). There is one record per port per rule:
+
+| Check ID | Escalating counters | Context only (`INFO`) |
+|---|---|---|
+| `mlx5.rx.starvation` | `rx_out_of_buffer`, `rx_buff_alloc_err` → `WARN` | |
+| `mlx5.nic.discards` | `rx_discards_phy`, `tx_discards_phy` → `WARN` | |
+| `mlx5.phy.errors` | `rx_symbol_err_phy`, `rx_pcs_symbol_err_phy` → `CRIT`; pre-FEC BER > 1e-06 → `WARN` (only with `rx_bits_phy`) | `rx_corrected_bits_phy`, `rx_err_lane_N_phy` (lane dominance ≥90% → hint) |
+| `mlx5.frame.errors` | CRC, fragments, jabbers, undersize, oversize → `WARN` | |
+| `mlx5.pcie.path` | `rx/tx_pci_signal_integrity`, `outbound_pci_stalled_rd/wr_events` → `WARN` | stall gauges (% at T1, never deltaed) |
+| `mlx5.datapath.faults` | `tx_cqe_err`, `rx_wqe_err`, `tx_recover`, `rx_recover` → `CRIT` | |
+| `mlx5.congestion` | `rx_prioN_buf_discard`, `rx_prioN_cong_discard` → `WARN` | pause frames, global pause, `rx_buffer_passed_thres_phy` |
+| `mlx5.pause.storm` | warning → `WARN`, error → `CRIT` | |
+| `mlx5.module` | `module_bus_stuck`, `module_bad_shorted` → `CRIT`; `module_high_temp`, `module_unplug` → `WARN` | |
+| `mlx5.link.phy_down` | `link_down_events_phy` → `WARN` | |
+
+- Only aggregate counters are used. Per-channel `rxN_*`/`txN_*` are skipped: a 64-CPU host prints about 7,000 `ethtool -S` lines per port. Lines are parsed with parameter expansion and an exact-name lookup. A per-line regex made a 5 s run take 23 s on an 8-port host.
+- When `mlx5.phy.errors` fires on a link at ≥25 Gb/s, `ethtool --show-fec` is read. If active FEC is `Off`/`None`, the hint says so.
+- None of the counters listed → `N/A`. `ethtool -S` failure → one `mlx5.ethtool` `UNKNOWN` record. VFs are skipped (no `_phy` counters).
+- Steering (`rx_steer_missed_packets`) is not evaluated: it is informational and grows legitimately.
+- ConnectX-6 Lx observation: `tx_pci_signal_integrity` = 1 on every port after boot (link-training artifact). Absolute mode (`-I 0`) therefore WARNs on it. Delta mode does not.
 
 ### 6.3 `mlx5_core` — RDMA / RoCE (`/sys/class/infiniband/<dev>/ports/<p>/hw_counters/`)
 
@@ -199,7 +223,8 @@ Observed on E810-XXV, SLES 15 SP6 kernel 6.4. Recorded here so the generic modul
 |---|---|
 | Counter naming | Port-level counters carry a `.nic` suffix (`rx_crc_errors.nic`, `illegal_bytes.nic`, `mac_local_faults.nic`, `mac_remote_faults.nic`, `rx_oversize.nic`, `rx_jabber.nic`, `link_xoff_rx.nic`, `tx_timeout.nic`, `tx_dropped_link_down.nic`). Newer kernels may use a different scheme, so match by an alias table, not one literal name |
 | Driver-level | `rx_alloc_fail`, `rx_pg_alloc_fail`, `tx_busy`, `tx_restart`, `tx_linearize` |
-| Missing on 6.4 | devlink health reporters, hwmon temperature, FEC statistics → `N/A` |
+| Missing on 6.4 | devlink health reporters, FEC statistics → `N/A` |
+| Temperature | hwmon `temp1` (no label, crit 105 °C) on function `.0` only |
 | Firmware | `devlink dev info` gives `fw.mgmt`, `fw.bundle_id`, `fw.app` (DDP package), `fw.netlist` |
 | RDMA (`irdma`) | `hw_counters` use different names from mlx5 (`tcpRetransSegs`, `cnpHandled`, `RxECNMrkd`, `ip4InDiscards`, …) |
 
@@ -232,6 +257,21 @@ Explicit consent boundary. Never runs unless requested.
 
 > A future, opt-in kernel-log check must be time-bounded, BDF-correlated, and redacted.
 
+### 7.3 Implementation (Phase 5)
+
+- **Gate.** `deep_argv_allowed()` runs before every call. The tool must be `mlxlink` or `mstlink`. The argv must equal `DEEP_ARGS_TEMPLATE` (`-d {BDF} -m -c`) element by element. The BDF must match `^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$`. No element may appear in `DEEP_FORBIDDEN_ARGS`, a check that still applies if the template is ever edited. A refused call becomes `UNKNOWN` and is never executed.
+- **Tests.** A `timeout(1)` stub logs every executed argv. The suite asserts the exact calls (one per mlx5 PF) and that no forbidden flag is ever executed. Mutation testing shows that removing each guard fails at least one test.
+- **Execution.** Calls run as `LC_ALL=C <abs timeout> -k 2 10 <abs tool> <argv>` (`timeout` is required for `-l deep`), once per mlx5 physical function, after the T1 snapshot. `-k` sends SIGKILL if the tool ignores SIGTERM: exit 124 or 137 → `UNKNOWN`.
+- **Command hijack hardening** (applies to every command, not only deep mode): functions inherited from the environment (`BASH_FUNC_*`) are unset at load, and tools are resolved with `type -P` (executable files only, absolute paths). Codex review of Phase 5: 2 findings, both fixed. Output is ANSI-stripped: mstlink colors its output even when piped.
+- **Checks** (port scope):
+  - `mlx5.deep.troubleshooting`: Status Opcode ≠ 0 → `WARN`, with the tool's recommendation as the hint.
+  - `mlx5.deep.fec`: the module's Compliance says "with FEC" but the link runs "No FEC" → `WARN`.
+  - `mlx5.deep.ber`: effective BER ≥ 1E-12 → `WARN`. This is an average since the last counter clear, so it is never `CRIT`.
+  - `mlx5.deep.module`: DOM values outside the module's own `[low..high]`, or any lane with Tx Fault, Rx LOS or CDR LOL → `WARN`.
+- **Failures.** No tool → one host `N/A` with an install hint. Timeout or tool error → `UNKNOWN`.
+- **`mlxconfig`/`mstconfig` dropped from deep mode.** On a ConnectX-6 Lx (mstflint 4.31, no `mstflint_access` module), `mstconfig -d BDF q` took 6 s per device, almost all of it kernel time. `-e q` exceeded 10 s and was killed by `timeout`. The device was verified unaffected afterwards. That query reports configuration, not health, so the cost isn't justified.
+- **Measured on pve-01.** `mstlink -d BDF -m -c` takes 0.5 s per port, so deep mode adds about 4 s on 8 ports. No link or carrier change was caused.
+
 ---
 
 ## 8. 📦 Vendor tooling: distribution model
@@ -253,6 +293,11 @@ Explicit consent boundary. Never runs unless requested.
 - **OBS spec / Debian control:** `Recommends:` or `Suggests: mstflint`, plus `pciutils` and `iproute2` (devlink). **Never** MFT, which distros cannot ship.
 - **Offline ISO (`ci/build-offline-iso.sh`):** add `--with-vendor-tools true|false`, mirroring `--with-graphviz`. It pulls `mstflint` from the distro mirror into the ISO repo, which is allowed because mstflint is GPL/BSD.
 - **Proprietary tools** (MFT, Broadcom `niccli`, Marvell QConvergeConsole): documented in README and man page only. Detected if present.
+
+**Implementation (Phase 6).**
+- Shipped inside the existing `nic-xray` package as `/usr/bin/nic-health`, with `nic-health.8` and a bash completion. The completion registers both the packaged name and `nic-health.sh`.
+- The spec and `debian.control` gain `Recommends: pciutils, mstflint`. The patch is prepared, not committed: OBS builds from the release tag, so it has to land together with the release that first contains `nic-health.sh`. A local `rpmbuild` from the patched spec succeeds.
+- The ISO builder gains `--with-vendor-tools` (default `false`; deep mode is opt-in), which adds `mstflint` to the install set. `mstflint` is available in every ISO target: Debian 12 (4.21) and 13 (4.31), Ubuntu 22.04 (4.17/4.21) and 24.04 (4.26), Leap 15.6 (4.21), Tumbleweed and Slowroll (4.33), Rocky 9 and 10 (4.34, BaseOS). Only 4.31 output is validated; older `mstlink` output that lacks a key yields `N/A`.
 
 ### 8.3 Vendor coverage outlook
 
@@ -328,12 +373,12 @@ Explicit consent boundary. Never runs unless requested.
 | Phase | Scope | Exit criteria |
 |---|---|---|
 | **0** | This design approved; `CLAUDE.md` updated | Doc merged |
-| **1** | Skeleton: CLI, preflight, discovery + ASIC grouping, record model, exit codes, table/JSON/CSV, `--check-tools`. Verify the mlx5 counter catalog against the kernel doc for supported kernels | Runs on test host; exit code 3 paths covered |
-| **2** | Generic checks (§6.1) + delta engine with reset detection | Fixtures for reset/wrap/gauge cases pass |
-| **3** | `mlx5_core` Ethernet checks (§6.2) + hints | Validated on ConnectX hardware (test host) |
+| **1** | Skeleton: CLI, preflight, discovery + ASIC grouping, record model, exit codes, table/JSON/CSV, `--check-tools`. Verify the mlx5 counter catalog against the kernel doc for supported kernels | Runs on test host; exit code 3 paths covered ✅ |
+| **2** | Generic checks (§6.1) + delta engine with reset detection | Fixtures for reset/wrap/gauge cases pass ✅ (FEC deferred, see §6.1) |
+| **3** | `mlx5_core` Ethernet checks (§6.2) + hints | Validated on ConnectX hardware (test host) ✅ |
 | **4** | RDMA `hw_counters` (§6.3) | Validated on a RoCE-enabled host |
-| **5** | Deep mode: `mstlink`/`mlxlink` allowlist (§7) | Forbidden-list unit test: argv never contains a denied flag |
-| **6** | Packaging: Makefile, OBS, offline ISO, man page, README, samples | Release with tandem version bump (on request) |
+| **5** | Deep mode: `mstlink`/`mlxlink` allowlist (§7) | Forbidden-list unit test: argv never contains a denied flag ✅ |
+| **6** | Packaging: Makefile, OBS, offline ISO, man page, README, samples | Release with tandem version bump (on request). In repo ✅; OBS patch pending the release |
 | **7+** | Second vendor (`ice` or `bnxt_en`), which triggers the module split (§9.2) | — |
 
 ---
@@ -344,6 +389,10 @@ Explicit consent boundary. Never runs unless requested.
 |---|---|---|---|
 | 2026-10-20 | NVIDIA ConnectX-6 Lx (MT2894), 2 hosts | 26.47.1026 (LNV0000000037) / 7.0.14-11-pve, 7.0.0-3-pve | Catalog checked against live `ethtool -S`, devlink, sysfs, hwmon and `hw_counters`. Corrections applied in §6 (`rx_bits_phy`, `outbound_pci_buffer_overflow`, `rx_prioN_pause_duration` absent; port reporters on the auxiliary devlink instance; no hwmon `_max`) |
 | 2026-10-20 | Intel E810-XXV (`ice`), 1 host | 4.81 0x80020b48 1.3818.0 / SLES 15 SP6 6.4.0-150600.21 | Baseline recorded in §6.4. nic-xray itself also tested here (bash 4.4, SLES, USB `cdc_ether` interface) |
+| 2026-10-20 | Phase 1 `nic-health.sh` on 5 hosts: ConnectX-6 Lx (`mlx5_core`), E810-XXV (`ice`), 82599ES (`ixgbe`), SFC9120 (`sfc`), 82574L/82579LM (`e1000e`) | Debian 12/13 (PVE/PBS), SLES 15 SP6 (bash 4.4), Unraid 7.3 | Discovery, ASIC grouping, PCIe link check, table/JSON/CSV and exit codes verified. Chipset-integrated 82579LM has no PCIe link attributes → `N/A`; USB BMC NIC → `N/A`, USB-only selection → `UNKNOWN` (exit 3) |
+| 2026-10-20 | Phase 2 on the same 5 hosts | same | Delta (`-I 5`) and absolute (`-I 0`) modes; AER, temperature, devlink (device + port reporters via `devlink port show`), link flaps. sfc lists a sensor that returns `EBUSY` → `N/A`. ixgbe hwmon `_max` > `_crit`. `make test`: 77 unit tests (incl. `set -euo pipefail` sourcing) on bash 5.3 and 4.4. Codex review: 8 findings, 7 fixed (per-function AER reset detection, alarm-only sensors, `devlink port show` failure → `UNKNOWN`, vanished sources → `UNKNOWN`, bad clock → `elapsed_s: null`, `set -e`/`set -u` safety), `link_down_events_phy` moved to Phase 3 |
+| 2026-10-20 | Phase 3 on pve-01..04, pbs-01 (+ non-mlx5 hosts) | CX-6 Lx fw 26.47.1026 | All 25G AOC ports (SFP-25G-AO03) run with FEC Off. pve-01 has four ports with growing `rx_symbol_err_phy`/`rx_crc_errors_phy` (up to ~15/s; 61M since boot on `ens1f0np0`) at healthy RX power → `CRIT` + FEC hint. pve-02..04 clean. Non-mlx5 hosts get no `mlx5.*` records. `make test`: 122 tests (bash 5.3 and 4.4). Codex review: 4 findings, 3 fixed (`rx_bits_phy` reset/vanish now `UNKNOWN`; overflow-safe BER, lane and `fmt_sci` math; `outbound_pci_buffer_overflow` gauge added). The gauge-delta finding was disproved by test. 20-digit (unsigned 64-bit) counters are handled in `delta()` by splitting at 18 digits (400G `rx_bits_phy` passes 2⁶³ after ~266 days) |
+| 2026-10-20 | Phase 5 deep mode on pve-01 (mstflint 4.31.0 installed from Debian for this) | CX-6 Lx fw 26.47.1026 | All 8 ports: the module Compliance says "25GAUI C2M AOC with FEC" but the link runs "No FEC" → `mlx5.deep.fec` `WARN`. Effective BER since the last clear: 5E-10, 8E-11, 3E-11 and 6E-12 on the erroring ports (`WARN`); a clean port prints `15E-255`, shown as `~0`. mstlink's own troubleshooting says "No issue was observed" (opcode 0). pbs-01 (no tool) → `N/A`; non-mlx5 hosts → no deep records. `make test`: 235 tests (bash 5.3 and 4.4) |
 | — | Broadcom `bnxt_en` | — | ⏳ Pending: no host with a Broadcom NIC identified |
 
 ## 14. ❓ Open questions

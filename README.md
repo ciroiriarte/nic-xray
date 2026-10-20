@@ -14,6 +14,7 @@ Detailed physical network interface diagnostics for Linux.
 - [Installation](#-installation)
 - [Usage](#-usage)
 - [Output Examples](#-output-examples)
+- [NIC Health Checks (nic-health.sh)](#-nic-health-checks-nic-healthsh)
 - [License](#-license)
 - [Contributing](#-contributing)
 - [Authors](#%EF%B8%8F-authors)
@@ -43,6 +44,8 @@ Detailed physical network interface diagnostics for Linux.
 Supports multiple output formats: **table** (default, with dynamic column widths), **CSV**, **JSON**, and **network topology diagrams** (DOT/SVG/PNG).
 
 Originally developed for OpenStack node deployments, it is suitable for any Linux environment.
+
+> 🩺 **Companion:** [`nic-health.sh`](#-nic-health-checks-nic-healthsh) evaluates NIC hardware and data-path health (PCIe, AER, temperature, devlink, ConnectX counters, optional vendor-tool deep mode) and returns a Nagios-compatible verdict.
 
 ## 🔍 Features
 
@@ -302,6 +305,9 @@ Copy to `/usr/local/sbin` for easy access:
 ```bash
 sudo cp nic-xray.sh /usr/local/sbin/
 sudo chmod +x /usr/local/sbin/nic-xray.sh
+# Companion health checks (optional)
+sudo cp nic-health.sh /usr/local/sbin/
+sudo chmod +x /usr/local/sbin/nic-health.sh
 ```
 
 #### Man page
@@ -312,6 +318,7 @@ A man page is available under `man/man8/` for detailed reference (section 8: sys
 
 ```bash
 man -l man/man8/nic-xray.8
+man -l man/man8/nic-health.8
 ```
 
 **Install system-wide:**
@@ -320,7 +327,7 @@ man -l man/man8/nic-xray.8
 sudo make install-man
 ```
 
-After installation, use `man nic-xray` to view the man page.
+`make install-man` installs both pages. After installation, use `man nic-xray` or `man nic-health`.
 
 **Uninstall:**
 
@@ -344,6 +351,7 @@ A bash completion script (`completions/nic-xray.bash`) completes every option an
 
 ```bash
 source completions/nic-xray.bash
+source completions/nic-health.bash
 ```
 
 **Install system-wide** (into `/etc/bash_completion.d/`, loaded by every new interactive shell):
@@ -747,6 +755,143 @@ When `--virtual` is active, the diagram includes all virtual interfaces (bridges
 ![Virtual topology diagram](samples/topology-virtual.png)
 
 See also: [`samples/topology-virtual.dot`](samples/topology-virtual.dot) | [`samples/topology-virtual.svg`](samples/topology-virtual.svg)
+
+## 🩺 NIC Health Checks (`nic-health.sh`)
+
+`nic-health.sh` is the companion of `nic-xray.sh`. nic-xray shows **what is installed and how it is cabled**. nic-health answers **whether the NIC hardware and its data path are healthy**. It returns a monitoring-friendly verdict with evidence and a remediation hint for every check.
+
+- 🔒 **Read-only.** It never changes NIC, driver, link or firmware state.
+- ⏱️ **Measures, not snapshots.** Counters are read twice, `-I SEC` apart (default 5 s), and only growth inside that window is judged. A counter that resets or disappears during the window is `UNKNOWN`, never `OK`.
+- 🧩 **Card-aware.** Ports of the same ASIC are grouped; card-level checks run once.
+- 🚦 **Nagios-compatible exit codes:** `0` OK, `1` WARN, `2` CRIT, `3` UNKNOWN (precedence CRIT > WARN > UNKNOWN > OK).
+
+Design and rationale: [`docs/design/nic-health.md`](docs/design/nic-health.md). Full reference: `man -l man/man8/nic-health.8`.
+
+### 🔎 Checks
+
+| Area | Check IDs | Data source |
+|---|---|---|
+| PCIe link | `generic.pcie.link` | sysfs link speed/width vs. capability |
+| PCIe errors | `generic.pcie.aer` | sysfs AER counters (fatal/non-fatal → CRIT, correctable → WARN) |
+| Temperature | `generic.temperature` | hwmon sensors (critical → CRIT, within 10 °C → WARN) |
+| Firmware/driver health | `generic.devlink.health.*` | `devlink health` reporters (device and port) |
+| Link stability | `generic.link.flaps` | sysfs `carrier_changes` |
+| NVIDIA ConnectX (`mlx5_core`) | `mlx5.rx.starvation`, `mlx5.nic.discards`, `mlx5.phy.errors`, `mlx5.frame.errors`, `mlx5.pcie.path`, `mlx5.datapath.faults`, `mlx5.congestion`, `mlx5.pause.storm`, `mlx5.module`, `mlx5.link.phy_down` | `ethtool -S` (aggregate counters) |
+| Deep mode (`-l deep`) | `mlx5.deep.troubleshooting`, `mlx5.deep.fec`, `mlx5.deep.ber`, `mlx5.deep.module` | `mlxlink` / `mstlink -d <BDF> -m -c` |
+
+### 🧰 Requirements and optional tools
+
+- **Required:** Bash ≥ 4.4, root, `ethtool`, `getopt` (util-linux), `readlink` (coreutils).
+- **Optional:** `lspci` (pciutils, model names), `devlink` (iproute2, health reporters), `timeout` (coreutils, required for `-l deep`).
+- **Deep mode on ConnectX:** `mstflint` (distribution package, provides `mstlink`) or NVIDIA MFT (`mlxlink`, proprietary, install manually). Vendor tools are never bundled or downloaded.
+
+Check what is available, without root:
+
+```bash
+nic-health.sh --check-tools
+```
+
+### 🚀 Usage
+
+```bash
+sudo nic-health.sh                         # all physical NICs, 5 s window, problems only
+sudo nic-health.sh -a                      # also list OK and N/A rows
+sudo nic-health.sh -i ens1f0np0 -I 30      # one interface, 30 s window
+sudo nic-health.sh -I 0                    # totals since boot, no wait (severity capped at WARN)
+sudo nic-health.sh -l deep                 # add allowlisted mlxlink/mstlink queries
+sudo nic-health.sh -O json > health.json   # for monitoring or later comparison
+```
+
+| Option | Description |
+|---|---|
+| `-i`, `--interface IFACE` | Evaluate only IFACE (repeatable) |
+| `-I`, `--interval SEC` | Sampling window, 0–3600 s (default 5). `0` = totals since boot |
+| `-O`, `--output FORMAT` | `table` (default), `csv`, `json` |
+| `-l`, `--level LEVEL` | `basic` (default, passive) or `deep` (vendor tool queries) |
+| `-a`, `--all` | Table: also list OK and N/A rows (CSV/JSON always contain every row) |
+| `-n`, `--no-color` | Disable colors (automatic when not a terminal) |
+| `-t`, `--check-tools` | List tools, what each enables, and where to get it |
+| `-v`, `--version` / `-h`, `--help` | Version / usage |
+
+### 🔬 Deep mode safety
+
+With `-l deep`, each ConnectX physical function gets exactly one query: `timeout -k 2 10 mlxlink -d <BDF> -m -c`, or `mstlink` when MFT is absent. An allowlist gate checks the tool, the exact argument template, the PCI address format and a forbidden-flag list before every call. Eye scans, PRBS, link/FEC changes, counter clears, register access, firmware operations, `mst start` and devlink dumps/recovery are **never** run. `mlxconfig`/`mstconfig` are not used: they cost several seconds of kernel time per device.
+
+### 📸 Output examples
+
+All samples are real captures with hostnames obfuscated (see [`samples/`](samples/)).
+
+**Healthy host** (Intel 82599ES):
+
+```
+🩺 nic-health.sh 2.11.0  host server-02.example.net  2026-10-20T17:46:28Z  window 5.02s
+
+Hardware
+  0000:05:00  Intel Corporation 82599ES 10-Gigabit SFI/SFP+ Network Connection  (ixgbe, fw 0x800009e1, 1.3227.0)
+    └─ ens6f0 (up)  ens6f1 (down)
+
+Checks
+  ✅ No problems found in 6 checks (-a/--all lists them)
+
+Summary: ✅ 5 OK   ⚠️ 0 WARN   ❌ 0 CRIT   ❔ 0 UNKNOWN   ➖ 1 N/A   → OK (exit 0)
+```
+
+**Host with a live fault** (4× ConnectX-6 Lx, 25G AOC links running without FEC; growing uncorrectable symbol errors on four ports):
+
+```
+🩺 nic-health.sh 2.11.0  host server-01.example.net  2026-10-20T17:45:47Z  window 5.55s
+
+Hardware
+  0000:01:00  Mellanox Technologies MT2894 Family [ConnectX-6 Lx]  (mlx5_core, fw 26.47.1026 (LNV0000000036))
+    └─ ens1f0np0 (up)  ens1f1np1 (up)
+  0000:41:00  Mellanox Technologies MT2894 Family [ConnectX-6 Lx]  (mlx5_core, fw 26.47.1026 (LNV0000000037))
+    └─ ens13f0np0 (up)  ens13f1np1 (up)
+  0000:c1:00  Mellanox Technologies MT2894 Family [ConnectX-6 Lx]  (mlx5_core, fw 26.47.1026 (LNV0000000036))
+    └─ ens5f0np0 (up)  ens5f1np1 (up)
+  0000:e1:00  Mellanox Technologies MT2894 Family [ConnectX-6 Lx]  (mlx5_core, fw 26.47.1026 (LNV0000000036))
+    └─ ens4f0np0 (up)  ens4f1np1 (up)
+
+Checks
+  SEVERITY  SCOPE  TARGET      CHECK              VALUE                                                       THRESHOLD                        HINT
+  CRIT      port   ens1f0np0   mlx5.phy.errors    rx_symbol_err_phy=+94 rx_pcs_symbol_err_phy=+94 per window  >0 CRIT, pre-FEC BER>1e-06 WARN  Active FEC is Off at 25000 Mb/s: links at 25G and above normally rely on RS-FEC to correct routine bit errors; check that FEC matches on both ends. Uncorrectable symbol errors: traffic is being lost; clean/replace the optic or cable, check peer port and FEC mode
+  WARN      port   ens1f0np0   mlx5.frame.errors  rx_crc_errors_phy=+94 per window                            >0 WARN                          Frame errors: CRC/fragments/jabbers point to cabling or optics; oversize frames to an MTU mismatch with the peer
+  CRIT      port   ens13f1np1  mlx5.phy.errors    rx_symbol_err_phy=+7 rx_pcs_symbol_err_phy=+7 per window    >0 CRIT, pre-FEC BER>1e-06 WARN  Active FEC is Off at 25000 Mb/s: links at 25G and above normally rely on RS-FEC to correct routine bit errors; check that FEC matches on both ends. Uncorrectable symbol errors: traffic is being lost; clean/replace the optic or cable, check peer port and FEC mode
+  WARN      port   ens13f1np1  mlx5.frame.errors  rx_crc_errors_phy=+7 per window                             >0 WARN                          Frame errors: CRC/fragments/jabbers point to cabling or optics; oversize frames to an MTU mismatch with the peer
+  CRIT      port   ens5f0np0   mlx5.phy.errors    rx_symbol_err_phy=+3 rx_pcs_symbol_err_phy=+3 per window    >0 CRIT, pre-FEC BER>1e-06 WARN  Active FEC is Off at 25000 Mb/s: links at 25G and above normally rely on RS-FEC to correct routine bit errors; check that FEC matches on both ends. Uncorrectable symbol errors: traffic is being lost; clean/replace the optic or cable, check peer port and FEC mode
+  WARN      port   ens5f0np0   mlx5.frame.errors  rx_crc_errors_phy=+3 per window                             >0 WARN                          Frame errors: CRC/fragments/jabbers point to cabling or optics; oversize frames to an MTU mismatch with the peer
+  CRIT      port   ens4f1np1   mlx5.phy.errors    rx_symbol_err_phy=+2 rx_pcs_symbol_err_phy=+2 per window    >0 CRIT, pre-FEC BER>1e-06 WARN  Active FEC is Off at 25000 Mb/s: links at 25G and above normally rely on RS-FEC to correct routine bit errors; check that FEC matches on both ends. Uncorrectable symbol errors: traffic is being lost; clean/replace the optic or cable, check peer port and FEC mode
+  WARN      port   ens4f1np1   mlx5.frame.errors  rx_crc_errors_phy=+2 per window                             >0 WARN                          Frame errors: CRC/fragments/jabbers point to cabling or optics; oversize frames to an MTU mismatch with the peer
+  140 OK/N/A rows hidden (-a/--all to show)
+
+Summary: ✅ 140 OK   ⚠️ 4 WARN   ❌ 4 CRIT   ❔ 0 UNKNOWN   ➖ 0 N/A   → CRIT (exit 2)
+```
+
+**Deep mode** on the same host (deep rows only): the modules are specified for FEC operation, but every link runs without it, and the effective BER since the last counter clear is above 1E-12 on the erroring ports:
+
+```
+  SEVERITY  SCOPE  TARGET      CHECK              VALUE                                                       THRESHOLD                        HINT
+  WARN      port   ens1f0np0   mlx5.deep.fec      link: No FEC                                                module FEC = link FEC            Module is specified for operation with FEC but the link runs without it: enable RS-FEC on both ends (NIC and switch port)
+  WARN      port   ens1f0np0   mlx5.deep.ber      effective 5E-10 raw 5E-10                                   effective<1E-12                  Average since the last counter clear (71744.6 min) exceeds 1E-12: clean/replace the optic or cable, check FEC; mlx5.phy.errors shows whether errors are still growing
+  WARN      port   ens1f1np1   mlx5.deep.fec      link: No FEC                                                module FEC = link FEC            Module is specified for operation with FEC but the link runs without it: enable RS-FEC on both ends (NIC and switch port)
+  WARN      port   ens13f0np0  mlx5.deep.fec      link: No FEC                                                module FEC = link FEC            Module is specified for operation with FEC but the link runs without it: enable RS-FEC on both ends (NIC and switch port)
+  WARN      port   ens13f1np1  mlx5.deep.fec      link: No FEC                                                module FEC = link FEC            Module is specified for operation with FEC but the link runs without it: enable RS-FEC on both ends (NIC and switch port)
+  WARN      port   ens13f1np1  mlx5.deep.ber      effective 8E-11 raw 8E-11                                   effective<1E-12                  Average since the last counter clear (71744.8 min) exceeds 1E-12: clean/replace the optic or cable, check FEC; mlx5.phy.errors shows whether errors are still growing
+  WARN      port   ens5f0np0   mlx5.deep.fec      link: No FEC                                                module FEC = link FEC            Module is specified for operation with FEC but the link runs without it: enable RS-FEC on both ends (NIC and switch port)
+  WARN      port   ens5f0np0   mlx5.deep.ber      effective 6E-12 raw 6E-12                                   effective<1E-12                  Average since the last counter clear (71744.6 min) exceeds 1E-12: clean/replace the optic or cable, check FEC; mlx5.phy.errors shows whether errors are still growing
+  WARN      port   ens5f1np1   mlx5.deep.fec      link: No FEC                                                module FEC = link FEC            Module is specified for operation with FEC but the link runs without it: enable RS-FEC on both ends (NIC and switch port)
+  WARN      port   ens4f0np0   mlx5.deep.fec      link: No FEC                                                module FEC = link FEC            Module is specified for operation with FEC but the link runs without it: enable RS-FEC on both ends (NIC and switch port)
+  WARN      port   ens4f1np1   mlx5.deep.fec      link: No FEC                                                module FEC = link FEC            Module is specified for operation with FEC but the link runs without it: enable RS-FEC on both ends (NIC and switch port)
+  WARN      port   ens4f1np1   mlx5.deep.ber      effective 3E-11 raw 3E-11                                   effective<1E-12                  Average since the last counter clear (71744.7 min) exceeds 1E-12: clean/replace the optic or cable, check FEC; mlx5.phy.errors shows whether errors are still growing
+Summary: ✅ 160 OK   ⚠️ 16 WARN   ❌ 4 CRIT   ❔ 0 UNKNOWN   ➖ 0 N/A   → CRIT (exit 2)
+```
+
+**JSON** (one result; the full document also carries `summary`, `verdict`, `exit_code`, `capabilities` and `asics`):
+
+```json
+{"severity": "WARN", "scope": "port", "target": "ens1f0np0", "check_id": "mlx5.deep.ber", "value": "effective 5E-10 raw 5E-10", "unit": "", "threshold": "effective<1E-12", "evidence": "Effective Physical BER=5E-10 Raw Physical BER=5E-10 Effective Physical Errors=61196801 Link Down Counter=0 since 71744.8 min", "hint": "Average since the last counter clear (71744.8 min) exceeds 1E-12: clean/replace the optic or cable, check FEC; mlx5.phy.errors shows whether errors are still growing", "ref": "docs/design/nic-health.md §7"}
+```
+
+Bash completion: `completions/nic-health.bash` (installed with `make install-completion`, see [Bash completion](#bash-completion)).
 
 ## 📄 License
 

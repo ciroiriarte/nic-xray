@@ -1,0 +1,30 @@
+🩺 nic-health.sh 2.11.0  host server-01.example.net  2026-10-20T17:46:04Z  window 5.08s
+
+Hardware
+  0000:01:00  Mellanox Technologies MT2894 Family [ConnectX-6 Lx]  (mlx5_core, fw 26.47.1026 (LNV0000000036))
+    └─ ens1f0np0 (up)
+
+Checks
+  SEVERITY  SCOPE  TARGET                CHECK                            VALUE                                                       THRESHOLD                          HINT
+  OK        asic   0000:01:00            generic.pcie.link                16.0 GT/s x8                                                16.0 GT/s x8                       
+  OK        asic   0000:01:00            generic.pcie.aer                 cor=+0 nonfatal=+0 fatal=+0 errors/window                   fatal/nonfatal>0 CRIT, cor>0 WARN  
+  OK        asic   0000:01:00 (asic)     generic.temperature              66 C                                                        warn>=95 crit>=105                 Peak since driver load: 71C
+  OK        asic   0000:01:00 (Module0)  generic.temperature              46 C                                                        warn>=75 crit>=85                  Peak since driver load: 49C
+  OK        port   ens1f0np0             generic.link.flaps               +0 transitions/window                                       >0 WARN                            
+  OK        asic   0000:01:00.0          generic.devlink.health.fw        state=healthy error=+0 recover=+0 events/window             state!=healthy CRIT, error>0 WARN  
+  OK        asic   0000:01:00.0          generic.devlink.health.fw_fatal  state=healthy error=+0 recover=+0 events/window             state!=healthy CRIT, error>0 WARN  
+  OK        asic   0000:01:00.0          generic.devlink.health.vnic      state=healthy error=+0 recover=+0 events/window             state!=healthy CRIT, error>0 WARN  
+  OK        port   ens1f0np0             generic.devlink.health.tx        state=healthy error=+0 recover=+0 events/window             state!=healthy CRIT, error>0 WARN  
+  OK        port   ens1f0np0             generic.devlink.health.rx        state=healthy error=+0 recover=+0 events/window             state!=healthy CRIT, error>0 WARN  
+  OK        port   ens1f0np0             mlx5.rx.starvation               +0 per window                                               >0 WARN                            
+  OK        port   ens1f0np0             mlx5.nic.discards                +0 per window                                               >0 WARN                            
+  CRIT      port   ens1f0np0             mlx5.phy.errors                  rx_symbol_err_phy=+68 rx_pcs_symbol_err_phy=+68 per window  >0 CRIT, pre-FEC BER>1e-06 WARN    Active FEC is Off at 25000 Mb/s: links at 25G and above normally rely on RS-FEC to correct routine bit errors; check that FEC matches on both ends. Uncorrectable symbol errors: traffic is being lost; clean/replace the optic or cable, check peer port and FEC mode
+  WARN      port   ens1f0np0             mlx5.frame.errors                rx_crc_errors_phy=+68 per window                            >0 WARN                            Frame errors: CRC/fragments/jabbers point to cabling or optics; oversize frames to an MTU mismatch with the peer
+  OK        port   ens1f0np0             mlx5.pcie.path                   +0 per window                                               >0 WARN                            
+  OK        port   ens1f0np0             mlx5.datapath.faults             +0 per window                                               >0 CRIT                            
+  OK        port   ens1f0np0             mlx5.congestion                  +0 per window                                               >0 WARN                            
+  OK        port   ens1f0np0             mlx5.pause.storm                 +0 per window                                               >0 CRIT/WARN                       
+  OK        port   ens1f0np0             mlx5.module                      +0 per window                                               >0 CRIT/WARN                       
+  OK        port   ens1f0np0             mlx5.link.phy_down               +0 per window                                               >0 WARN                            
+
+Summary: ✅ 18 OK   ⚠️ 1 WARN   ❌ 1 CRIT   ❔ 0 UNKNOWN   ➖ 0 N/A   → CRIT (exit 2)
