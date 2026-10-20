@@ -1703,11 +1703,11 @@ if $SHOW_VIRTUAL; then
         _EFF=$(compute_effective_mtu "${DATA_IFACE[$i]}")
         local _TYPE="${DATA_VIRT_TYPE[$i]}"
         if (( _EFF < 576 )); then
-            DATA_MTU_WARN[$i]="DROP"
+            DATA_MTU_WARN[i]="DROP"
         elif (( _EFF < 1500 )) && [[ "$_TYPE" != "vpn" ]]; then
-            DATA_MTU_WARN[$i]="FRAG"
+            DATA_MTU_WARN[i]="FRAG"
         else
-            DATA_MTU_WARN[$i]=""
+            DATA_MTU_WARN[i]=""
         fi
     done
 fi
@@ -1805,7 +1805,7 @@ fi
         done
         if [[ ${#_UNIQ_MTU[@]} -gt 1 ]]; then
             for IDX in "${MEMBERS[@]}"; do
-                DATA_MTU_WARN[$IDX]="MISMATCH"
+                DATA_MTU_WARN[IDX]="MISMATCH"
             done
         fi
         unset _UNIQ_MTU
@@ -1817,7 +1817,7 @@ fi
             _MASTER_MTU=$(<"$_MASTER_MTU_FILE")
             for IDX in "${MEMBERS[@]}"; do
                 if [[ "${DATA_MTU[$IDX]}" != "$_MASTER_MTU" ]]; then
-                    DATA_MTU_WARN[$IDX]="MISMATCH"
+                    DATA_MTU_WARN[IDX]="MISMATCH"
                 fi
             done
         fi

@@ -1,6 +1,8 @@
 PREFIX      ?= /usr/local
 MANDIR      ?= $(PREFIX)/share/man
 COMPDIR     ?= /etc/bash_completion.d
+# shellcheck binary for `make lint` (CI passes a pinned release)
+SHELLCHECK  ?= shellcheck
 
 # Primary script and companions: each ships a man page (section 8) and a completion
 SCRIPTS     := nic-xray nic-health
@@ -26,5 +28,6 @@ test:
 
 # Static analysis of the scripts and the test suite (needs shellcheck)
 lint:
-	shellcheck nic-xray.sh nic-health.sh
-	shellcheck -x tests/nic-health-test.sh
+	@command -v $(SHELLCHECK) >/dev/null || { echo "lint: $(SHELLCHECK) not found; install shellcheck" >&2; exit 1; }
+	$(SHELLCHECK) nic-xray.sh nic-health.sh
+	$(SHELLCHECK) -x tests/nic-health-test.sh

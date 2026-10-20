@@ -1,0 +1,48 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**.sh'
+      - tests/**
+      - Makefile
+      - .github/workflows/lint.yml
+  pull_request:
+    paths:
+      - '**.sh'
+      - tests/**
+      - Makefile
+      - .github/workflows/lint.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Pinned so a new shellcheck release cannot break CI unannounced; bump both together
+  SHELLCHECK_VERSION: v0.11.0
+  SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+
+jobs:
+  shellcheck:
+    name: make lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck ${{ env.SHELLCHECK_VERSION }}
+        run: |
+          set -euo pipefail
+          TARBALL="shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          curl -fsSL -o "$RUNNER_TEMP/$TARBALL" \
+            "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/${TARBALL}"
+          echo "${SHELLCHECK_SHA256}  $RUNNER_TEMP/$TARBALL" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/$TARBALL" -C "$RUNNER_TEMP"
+          echo "SHELLCHECK=$RUNNER_TEMP/shellcheck-${SHELLCHECK_VERSION}/shellcheck" >> "$GITHUB_ENV"
+
+      - name: make lint
+        run: |
+          "$SHELLCHECK" --version
+          make lint SHELLCHECK="$SHELLCHECK"
