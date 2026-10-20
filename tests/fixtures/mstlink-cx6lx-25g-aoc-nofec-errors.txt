@@ -1,0 +1,94 @@
+
+Operational Info
+----------------
+State                           : [32mActive
+[0mPhysical state                  : [32mETH_AN_FSM_ENABLE
+[0mSpeed                           : [32m25G
+[0mWidth                           : [32m1x
+[0mFEC                             : [32mNo FEC
+[0mLoopback Mode                   : [32mNo Loopback
+[0mAuto Negotiation                : [32mON
+[0m
+Supported Info
+--------------
+Enabled Link Speed (Ext.)       : [32m0x00000052 (25G,10G,1G)
+[0mSupported Cable Speed (Ext.)    : [32m0x00000052 (25G,10G,1G)
+[0m
+Troubleshooting Info
+--------------------
+Status Opcode                   : [32m0
+[0mGroup Opcode                    : [32mN/A
+[0mRecommendation                  : [32mNo issue was observed
+[0m
+Tool Information
+----------------
+Firmware Version                : [32m26.47.1026
+[0mamBER Version                   : [32m4.5
+[0mMSTFLINT Version                : [32mmstflint 4.31.0
+[0m
+Module Info
+-----------
+Temperature [C]                 : 45 [-45..90]
+Voltage [mV]                    : 3290.8 [3000..3600]
+Bias Current [mA]               : 6.808 [1..15]
+Rx Power Current [dBm]          : -0.079 [-13.01..4.4]
+Tx Power Current [dBm]          : 0.607 [-9.431..3.398]
+Identifier                      : SFP28/SFP+
+Compliance                      : 100G AOC (Active Optical Cable) or 25GAUI C2M AOC with FEC
+Cable Technology                : Active
+Cable Type                      : Active cable (active copper / optics)
+OUI                             : Other
+Vendor Name                     : FS
+Vendor Part Number              : SFP-25G-AO03
+Vendor Serial Number            : FIXTURE-SERIAL
+Rev                             : N/A
+Wavelength [nm]                 : 0
+Transfer Distance [m]           : 3
+Attenuation (5g,7g,12g)[dB]     : N/A
+FW Version                      : N/A
+Digital Diagnostic Monitoring   : Yes
+Power Class                     : 1.0 W max
+CDR RX                          : ON
+CDR TX                          : ON
+LOS Alarm                       : N/A
+SNR Media Lanes [dB]            : N/A
+SNR Host Lanes [dB]             : N/A
+IB Cable Width                  : N/A
+Memory Map Revision             : 0
+Linear Direct Drive             : 0
+Cable Breakout                  : N/A
+SMF Length                      : N/A
+MAX Power                       : 0
+Cable Rx AMP                    : 0
+Cable Rx Emphasis               : 0
+Cable Rx Post Emphasis          : 0
+Cable Tx Equalization           : 0
+Wavelength Tolerance            : 0.0nm
+Module State                    : N/A
+DataPath state [per lane]       : N/A
+Rx Output Valid [per lane]      : 0
+Nominal bit rate                : 25.750Gb/s
+Rx Power Type                   : Average power
+Manufacturing Date              : 20_03_26
+Active Set Host Compliance Code : N/A
+Active Set Media Compliance Code: N/A
+Error Code Response             : N/A
+Module FW Fault                 : N/A
+DataPath FW Fault               : N/A
+Tx Fault [per lane]             : 0
+Tx LOS [per lane]               : N/A
+Tx CDR LOL [per lane]           : 0
+Rx LOS [per lane]               : 0
+Rx CDR LOL [per lane]           : 0
+Tx Adaptive EQ Fault [per lane] : N/A
+
+Physical Counters and BER Info
+------------------------------
+Time Since Last Clear [Min]     : 71726.0
+Effective Physical Errors       : 61179413
+Effective Physical BER          : 5E-10
+Raw Physical Errors Per Lane    : 61179413
+Link Down Counter               : 0
+Link Error Recovery Counter     : 0
+Raw Physical BER                : 5E-10
+

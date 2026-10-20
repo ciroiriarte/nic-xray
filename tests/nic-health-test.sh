@@ -544,6 +544,164 @@ compute_verdict
 assert_eq "table with no problems" "yes" "$([[ "$(render_table)" == *"No problems found in 1 checks (-a/--all lists them)"* ]] && echo yes)"
 assert_eq "no header when nothing listed" "0" "$(render_table | grep -c 'SEVERITY')"
 
+# --- Deep mode (-l deep) ---
+FIXTURES="$TEST_DIR/fixtures"
+assert_eq "to_milli negative" "-79" "$(to_milli -0.079)"
+assert_eq "to_milli integer" "45000" "$(to_milli 45)"
+assert_eq "to_milli truncates" "3290800" "$(to_milli 3290.8001)"
+assert_eq "ber_exponent 5E-10"   "-10"  "$(ber_exponent 5E-10)"
+assert_eq "ber_exponent 15E-255" "-254" "$(ber_exponent 15E-255)"
+assert_eq "ber_exponent 1.2E-12" "-12"  "$(ber_exponent 1.2E-12)"
+assert_eq "ber_exponent zero"    "$BER_ZERO_EXPONENT" "$(ber_exponent 0E0)"
+RC=0; ber_exponent "N/A" >/dev/null || RC=$?; assert_eq "ber_exponent unparseable" "1" "$RC"
+assert_eq "ber_display tiny" "~0" "$(ber_display 15E-255)"
+
+# Allowlist gate
+deep_build_argv 0000:01:00.0
+assert_eq "argv from template" "-d 0000:01:00.0 -m -c" "${DEEP_ARGV[*]}"
+RC=0; deep_argv_allowed mstlink "${DEEP_ARGV[@]}" || RC=$?; assert_eq "allowlist accepts template" "0" "$RC"
+RC=0; deep_argv_allowed mlxlink "${DEEP_ARGV[@]}" || RC=$?; assert_eq "allowlist accepts mlxlink" "0" "$RC"
+for T in mstreg mlxreg mstconfig mstfwreset mstflint mlxfwmanager mst; do
+    RC=0; deep_argv_allowed "$T" "${DEEP_ARGV[@]}" || RC=$?
+    assert_eq "allowlist refuses tool $T" "1" "$RC"
+done
+for F in "${DEEP_FORBIDDEN_ARGS[@]}"; do
+    RC=0; deep_argv_allowed mstlink -d 0000:01:00.0 "$F" -c || RC=$?
+    assert_eq "allowlist refuses $F" "1" "$RC"
+    RC=0; deep_argv_allowed mstlink -d 0000:01:00.0 -m -c "$F" || RC=$?
+    assert_eq "allowlist refuses appended $F" "1" "$RC"
+done
+for B in "0000:01:00.0;reboot" "/dev/mst/mt4127_pciconf0" "01:00.0" "0000:01:00.8" ""; do
+    RC=0; deep_argv_allowed mstlink -d "$B" -m -c || RC=$?
+    assert_eq "allowlist refuses BDF '$B'" "1" "$RC"
+done
+RC=0; deep_argv_allowed mstlink -m -d 0000:01:00.0 -c || RC=$?; assert_eq "allowlist refuses reordered argv" "1" "$RC"
+RC=0; deep_argv_allowed mstlink -d 0000:01:00.0 -m || RC=$?; assert_eq "allowlist refuses truncated argv" "1" "$RC"
+# Defense in depth: a forbidden flag is refused even if someone adds it to the template
+SAVED_TEMPLATE=("${DEEP_ARGS_TEMPLATE[@]}")
+DEEP_ARGS_TEMPLATE+=("-e")
+RC=0; deep_argv_allowed mstlink -d 0000:01:00.0 -m -c -e || RC=$?; assert_eq "forbidden flag refused even in template" "1" "$RC"
+DEEP_ARGS_TEMPLATE=("${SAVED_TEMPLATE[@]}")
+TEMPLATE_HITS=0
+for A in "${DEEP_ARGS_TEMPLATE[@]}"; do for F in "${DEEP_FORBIDDEN_ARGS[@]}"; do [[ "$A" == "$F" ]] && (( ++TEMPLATE_HITS )); done; done
+assert_eq "template contains no forbidden arg" "0" "$TEMPLATE_HITS"
+
+# Execution: record every argv that reaches timeout(1) (to a file: it runs in a subshell);
+# serve the real pve-01 captures
+: > "$FIX/deep_calls"
+# shellcheck disable=SC2329  # reached through TOOL_PATH[timeout]
+timeout() { printf '%s\n' "$*" >> "$FIX/deep_calls"; shift 3; "$@"; }
+# shellcheck disable=SC2329  # stubs below are invoked through the timeout stub
+mstlink() {
+    case "$2" in
+        0000:01:00.0) cat "$FIXTURES/mstlink-cx6lx-25g-aoc-nofec-errors.txt" ;;
+        0000:01:00.1) cat "$FIXTURES/mstlink-cx6lx-25g-aoc-nofec-clean.txt" ;;
+        *) echo "-E- device not found"; return 1 ;;
+    esac
+}
+# Function stubs are reached through TOOL_PATH (the script executes tools by path)
+TOOL_PATH[mstlink]=mstlink
+TOOL_PATH[mlxlink]=""
+TOOL_PATH[timeout]=timeout
+OUTPUT_FORMAT=json
+DEEP_KV=(); DEEP_ERR=(); DEEP_TOOL_USED=()
+deep_collect
+mapfile -t DEEP_CALLS < "$FIX/deep_calls"
+assert_eq "deep calls: one per mlx5 PF, exact argv" "-k $DEEP_KILL_AFTER $DEEP_TIMEOUT mstlink -d 0000:01:00.0 -m -c|-k $DEEP_KILL_AFTER $DEEP_TIMEOUT mstlink -d 0000:01:00.1 -m -c" "$(IFS='|'; echo "${DEEP_CALLS[*]}")"
+FORBIDDEN_SEEN=0
+for C in "${DEEP_CALLS[@]}"; do
+    read -ra W <<< "$C"
+    for A in "${W[@]}"; do for F in "${DEEP_FORBIDDEN_ARGS[@]}"; do [[ "$A" == "$F" ]] && (( ++FORBIDDEN_SEEN )); done; done
+done
+assert_eq "no forbidden flag ever executed" "0" "$FORBIDDEN_SEEN"
+assert_eq "ANSI stripped from values" "Active" "${DEEP_KV[eth0|State]}"
+assert_eq "parsed FEC" "No FEC" "${DEEP_KV[eth0|FEC]}"
+assert_eq "parsed key with brackets" "45 [-45..90]" "${DEEP_KV[eth0|Temperature [C]]}"
+
+reset_results
+check_deep
+assert_eq "deep troubleshooting OK"          "OK"   "$(sev_of mlx5.deep.troubleshooting eth0)"
+assert_eq "deep FEC mismatch WARN"           "WARN" "$(sev_of mlx5.deep.fec eth0)"
+assert_eq "deep BER 5E-10 WARN"              "WARN" "$(sev_of mlx5.deep.ber eth0)"
+assert_eq "deep BER value"                   "effective 5E-10 raw 5E-10" "$(mlx5_rec REC_VALUE mlx5.deep.ber eth0)"
+assert_eq "deep BER clean OK"                "OK"   "$(sev_of mlx5.deep.ber eth1)"
+assert_eq "deep BER clean shown ~0"          "effective ~0 raw ~0" "$(mlx5_rec REC_VALUE mlx5.deep.ber eth1)"
+assert_eq "deep module in range OK"          "OK"   "$(sev_of mlx5.deep.module eth0)"
+assert_eq "deep module value" "Temperature=45 Voltage=3290.8 Bias=6.808 Rx=-0.079 Tx=0.607" "$(mlx5_rec REC_VALUE mlx5.deep.module eth0)"
+
+# Module out of range and lane faults
+sed -e 's/^Rx Power Current \[dBm\]          : .*/Rx Power Current [dBm]          : -20.5 [-13.01..4.4]/' \
+    -e 's/^Tx Fault \[per lane\]             : 0/Tx Fault [per lane]             : 1/' \
+    "$FIXTURES/mstlink-cx6lx-25g-aoc-nofec-clean.txt" > "$FIX/mstlink-bad.txt"
+# shellcheck disable=SC2329
+mstlink() { cat "$FIX/mstlink-bad.txt"; }
+DEEP_KV=(); DEEP_ERR=(); DEEP_TOOL_USED=()
+deep_query mstlink eth1 0000:01:00.1
+reset_results
+check_deep_port 1
+assert_eq "deep module Rx out of range + Tx fault WARN" "WARN" "$(sev_of mlx5.deep.module eth1)"
+assert_eq "deep module hint" "Rx Power Current [dBm] -20.5 outside [-13.01..4.4]; Tx Fault set (lane mask 1): reseat or replace the module, check the peer optic and fiber" "$(mlx5_rec REC_HINT mlx5.deep.module eth1)"
+
+# Failures: timeout, tool error, tool missing; mlxlink preferred
+# shellcheck disable=SC2329
+timeout() { return 124; }
+DEEP_KV=(); DEEP_ERR=(); DEEP_TOOL_USED=()
+deep_query mstlink eth0 0000:01:00.0
+reset_results
+check_deep_port 0
+assert_eq "deep timeout UNKNOWN" "UNKNOWN" "$(sev_of mlx5.deep eth0)"
+assert_eq "deep timeout evidence" "mstlink timed out after ${DEEP_TIMEOUT}s" "$(mlx5_rec REC_EVIDENCE mlx5.deep eth0)"
+# shellcheck disable=SC2329
+timeout() { shift 3; "$@"; }
+# shellcheck disable=SC2329
+mstlink() { echo "-E- Failed to open device"; return 1; }
+DEEP_KV=(); DEEP_ERR=()
+deep_query mstlink eth0 0000:01:00.0
+assert_eq "deep tool error captured" "mstlink exit 1: -E- Failed to open device" "${DEEP_ERR[eth0]}"
+# The gate inside deep_query: a malformed BDF never reaches timeout(1)
+: > "$FIX/deep_calls"
+# shellcheck disable=SC2329  # reached through TOOL_PATH[timeout]
+timeout() { printf '%s\n' "$*" >> "$FIX/deep_calls"; shift 3; "$@"; }
+DEEP_KV=(); DEEP_ERR=()
+deep_query mstlink eth0 "0000:01:00.0;reboot"
+assert_eq "deep_query refuses bad BDF" "refused by allowlist: mstlink -d 0000:01:00.0;reboot -m -c" "${DEEP_ERR[eth0]}"
+assert_eq "refused query never executed" "0" "$(wc -l < "$FIX/deep_calls" | tr -d ' ')"
+TOOL_PATH[mlxlink]=stub
+assert_eq "mlxlink preferred over mstlink" "mlxlink" "$(deep_tool)"
+TOOL_PATH[mlxlink]=""; TOOL_PATH[mstlink]=""
+reset_results
+check_deep
+assert_eq "deep without tools N/A" "N/A" "$(sev_of mlx5.deep "$HOSTNAME")"
+unset -f timeout mstlink
+OUTPUT_FORMAT=table
+
+# Real timeout(1) against a tool that ignores SIGTERM: must end as UNKNOWN within the kill grace
+REAL_TIMEOUT=$(type -P timeout || true)
+if [[ -n "$REAL_TIMEOUT" ]]; then
+    mkdir -p "$FIX/bin"
+    printf '#!/bin/bash\ntrap "" TERM\nexec sleep 30\n' > "$FIX/bin/mstlink"
+    chmod +x "$FIX/bin/mstlink"
+    TOOL_PATH[timeout]="$REAL_TIMEOUT"; TOOL_PATH[mstlink]="$FIX/bin/mstlink"
+    SAVED_T=$DEEP_TIMEOUT SAVED_K=$DEEP_KILL_AFTER
+    DEEP_TIMEOUT=1 DEEP_KILL_AFTER=1
+    DEEP_KV=(); DEEP_ERR=()
+    START=$SECONDS
+    deep_query mstlink eth0 0000:01:00.0
+    ELAPSED=$(( SECONDS - START ))
+    assert_eq "TERM-ignoring tool killed within grace" "yes" "$( (( ELAPSED <= 4 )) && echo yes || echo "no (${ELAPSED}s)")"
+    assert_eq "TERM-ignoring tool reported as timeout" "mstlink timed out after 1s" "${DEEP_ERR[eth0]:-}"
+    DEEP_TIMEOUT=$SAVED_T DEEP_KILL_AFTER=$SAVED_K
+    TOOL_PATH[timeout]=""; TOOL_PATH[mstlink]=""
+fi
+
+# Inherited (exported) functions are dropped when the script loads
+# Control: the exported function is imported before the script loads, and gone after it
+# shellcheck disable=SC2016  # $1 expands in the child shell
+OUT=$(env 'BASH_FUNC_ethtool%%=() { echo HIJACKED; }' bash -c 'type -t ethtool; source "$1"; [[ "$(type -t ethtool)" == function ]] && echo still-function || echo dropped' _ "$SCRIPT")
+assert_eq "exported functions dropped at load" "function dropped" "$(tr '\n' ' ' <<< "$OUT" | sed 's/ $//')"
+# shellcheck disable=SC2329  # the function only has to exist while detect_tools runs
+assert_eq "detect_tools resolves files, not functions" "yes" "$(ethtool() { :; }; TOOL_PATH=(); detect_tools; [[ "${TOOL_PATH[ethtool]:-/}" == /* ]] && echo yes)"
+
 # --- Verdict precedence ---
 for CASE in "OK N/A:OK 0" "OK UNKNOWN:UNKNOWN 3" "WARN UNKNOWN:WARN 1" "WARN CRIT UNKNOWN:CRIT 2"; do
     read -ra REC_SEV <<< "${CASE%%:*}"
@@ -552,7 +710,7 @@ for CASE in "OK N/A:OK 0" "OK UNKNOWN:UNKNOWN 3" "WARN UNKNOWN:WARN 1" "WARN CRI
 done
 
 # --- CLI (runs before the root check, so works unprivileged) ---
-for CASE in "-a -v:0" "--all -v:0" "-v:0" "-I 99999:3" "-I abc:3" "-O xml:3" "extra:3" "--bogus:3"; do
+for CASE in "-l deep -v:0" "--level=basic -v:0" "-l bogus:3" "-a -v:0" "--all -v:0" "-v:0" "-I 99999:3" "-I abc:3" "-O xml:3" "extra:3" "--bogus:3"; do
     # shellcheck disable=SC2086
     bash "$SCRIPT" ${CASE%%:*} >/dev/null 2>&1
     assert_eq "exit code for '${CASE%%:*}'" "${CASE#*:}" "$?"

@@ -123,7 +123,7 @@ Each check emits exactly one record:
 | `-t`, `--check-tools` | Report available, missing, and disabled capabilities, then exit |
 | `-a`, `--all` | Table also lists OK and N/A rows (default: WARN/CRIT/UNKNOWN only, plus a hidden-row count). CSV/JSON always contain every row |
 | `-n`, `--no-color` | Disable ANSI colors |
-| `-l`, `--level basic\|deep` | `basic` (default) is passive. `deep` adds allowlisted vendor tool queries — *planned, Phase 5* |
+| `-l`, `--level basic\|deep` | `basic` (default) is passive. `deep` adds allowlisted vendor tool queries (§7) |
 | `--thresholds FILE` | Threshold overrides (parsed as data, **never sourced**) — *planned* |
 
 > Short options avoid `-o`, which means `--optics` in `nic-xray.sh`. Options are only exposed once implemented.
@@ -257,6 +257,21 @@ Explicit consent boundary. Never runs unless requested.
 
 > A future, opt-in kernel-log check must be time-bounded, BDF-correlated, and redacted.
 
+### 7.3 Implementation (Phase 5)
+
+- **Gate.** `deep_argv_allowed()` runs before every call. The tool must be `mlxlink` or `mstlink`. The argv must equal `DEEP_ARGS_TEMPLATE` (`-d {BDF} -m -c`) element by element. The BDF must match `^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$`. No element may appear in `DEEP_FORBIDDEN_ARGS`, a check that still applies if the template is ever edited. A refused call becomes `UNKNOWN` and is never executed.
+- **Tests.** A `timeout(1)` stub logs every executed argv. The suite asserts the exact calls (one per mlx5 PF) and that no forbidden flag is ever executed. Mutation testing shows that removing each guard fails at least one test.
+- **Execution.** Calls run as `LC_ALL=C <abs timeout> -k 2 10 <abs tool> <argv>` (`timeout` is required for `-l deep`), once per mlx5 physical function, after the T1 snapshot. `-k` sends SIGKILL if the tool ignores SIGTERM: exit 124 or 137 → `UNKNOWN`.
+- **Command hijack hardening** (applies to every command, not only deep mode): functions inherited from the environment (`BASH_FUNC_*`) are unset at load, and tools are resolved with `type -P` (executable files only, absolute paths). Codex review of Phase 5: 2 findings, both fixed. Output is ANSI-stripped: mstlink colors its output even when piped.
+- **Checks** (port scope):
+  - `mlx5.deep.troubleshooting`: Status Opcode ≠ 0 → `WARN`, with the tool's recommendation as the hint.
+  - `mlx5.deep.fec`: the module's Compliance says "with FEC" but the link runs "No FEC" → `WARN`.
+  - `mlx5.deep.ber`: effective BER ≥ 1E-12 → `WARN`. This is an average since the last counter clear, so it is never `CRIT`.
+  - `mlx5.deep.module`: DOM values outside the module's own `[low..high]`, or any lane with Tx Fault, Rx LOS or CDR LOL → `WARN`.
+- **Failures.** No tool → one host `N/A` with an install hint. Timeout or tool error → `UNKNOWN`.
+- **`mlxconfig`/`mstconfig` dropped from deep mode.** On a ConnectX-6 Lx (mstflint 4.31, no `mstflint_access` module), `mstconfig -d BDF q` took 6 s per device, almost all of it kernel time. `-e q` exceeded 10 s and was killed by `timeout`. The device was verified unaffected afterwards. That query reports configuration, not health, so the cost isn't justified.
+- **Measured on pve-01.** `mstlink -d BDF -m -c` takes 0.5 s per port, so deep mode adds about 4 s on 8 ports. No link or carrier change was caused.
+
 ---
 
 ## 8. 📦 Vendor tooling: distribution model
@@ -357,7 +372,7 @@ Explicit consent boundary. Never runs unless requested.
 | **2** | Generic checks (§6.1) + delta engine with reset detection | Fixtures for reset/wrap/gauge cases pass ✅ (FEC deferred, see §6.1) |
 | **3** | `mlx5_core` Ethernet checks (§6.2) + hints | Validated on ConnectX hardware (test host) ✅ |
 | **4** | RDMA `hw_counters` (§6.3) | Validated on a RoCE-enabled host |
-| **5** | Deep mode: `mstlink`/`mlxlink` allowlist (§7) | Forbidden-list unit test: argv never contains a denied flag |
+| **5** | Deep mode: `mstlink`/`mlxlink` allowlist (§7) | Forbidden-list unit test: argv never contains a denied flag ✅ |
 | **6** | Packaging: Makefile, OBS, offline ISO, man page, README, samples | Release with tandem version bump (on request) |
 | **7+** | Second vendor (`ice` or `bnxt_en`), which triggers the module split (§9.2) | — |
 
@@ -372,6 +387,7 @@ Explicit consent boundary. Never runs unless requested.
 | 2026-10-20 | Phase 1 `nic-health.sh` on 5 hosts: ConnectX-6 Lx (`mlx5_core`), E810-XXV (`ice`), 82599ES (`ixgbe`), SFC9120 (`sfc`), 82574L/82579LM (`e1000e`) | Debian 12/13 (PVE/PBS), SLES 15 SP6 (bash 4.4), Unraid 7.3 | Discovery, ASIC grouping, PCIe link check, table/JSON/CSV and exit codes verified. Chipset-integrated 82579LM has no PCIe link attributes → `N/A`; USB BMC NIC → `N/A`, USB-only selection → `UNKNOWN` (exit 3) |
 | 2026-10-20 | Phase 2 on the same 5 hosts | same | Delta (`-I 5`) and absolute (`-I 0`) modes; AER, temperature, devlink (device + port reporters via `devlink port show`), link flaps. sfc lists a sensor that returns `EBUSY` → `N/A`. ixgbe hwmon `_max` > `_crit`. `make test`: 77 unit tests (incl. `set -euo pipefail` sourcing) on bash 5.3 and 4.4. Codex review: 8 findings, 7 fixed (per-function AER reset detection, alarm-only sensors, `devlink port show` failure → `UNKNOWN`, vanished sources → `UNKNOWN`, bad clock → `elapsed_s: null`, `set -e`/`set -u` safety), `link_down_events_phy` moved to Phase 3 |
 | 2026-10-20 | Phase 3 on pve-01..04, pbs-01 (+ non-mlx5 hosts) | CX-6 Lx fw 26.47.1026 | All 25G AOC ports (SFP-25G-AO03) run with FEC Off. pve-01 has four ports with growing `rx_symbol_err_phy`/`rx_crc_errors_phy` (up to ~15/s; 61M since boot on `ens1f0np0`) at healthy RX power → `CRIT` + FEC hint. pve-02..04 clean. Non-mlx5 hosts get no `mlx5.*` records. `make test`: 122 tests (bash 5.3 and 4.4). Codex review: 4 findings, 3 fixed (`rx_bits_phy` reset/vanish now `UNKNOWN`; overflow-safe BER, lane and `fmt_sci` math; `outbound_pci_buffer_overflow` gauge added). The gauge-delta finding was disproved by test. 20-digit (unsigned 64-bit) counters are handled in `delta()` by splitting at 18 digits (400G `rx_bits_phy` passes 2⁶³ after ~266 days) |
+| 2026-10-20 | Phase 5 deep mode on pve-01 (mstflint 4.31.0 installed from Debian for this) | CX-6 Lx fw 26.47.1026 | All 8 ports: the module Compliance says "25GAUI C2M AOC with FEC" but the link runs "No FEC" → `mlx5.deep.fec` `WARN`. Effective BER since the last clear: 5E-10, 8E-11, 3E-11 and 6E-12 on the erroring ports (`WARN`); a clean port prints `15E-255`, shown as `~0`. mstlink's own troubleshooting says "No issue was observed" (opcode 0). pbs-01 (no tool) → `N/A`; non-mlx5 hosts → no deep records. `make test`: 235 tests (bash 5.3 and 4.4) |
 | — | Broadcom `bnxt_en` | — | ⏳ Pending: no host with a Broadcom NIC identified |
 
 ## 14. ❓ Open questions

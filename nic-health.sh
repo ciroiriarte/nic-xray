@@ -25,6 +25,7 @@
 #                 Script is now sourceable for unit tests (tests/)
 #   - 2026-10-20: Phase 3: mlx5_core ethtool -S rule table (design §6.2)
 #   - 2026-10-20: Table lists only WARN/CRIT/UNKNOWN rows unless -a/--all
+#   - 2026-10-20: Phase 5: -l/--level deep with allowlisted mlxlink/mstlink queries (design §7)
 #
 # Version: 2.10.3
 
@@ -37,6 +38,13 @@ DESIGN_REF="docs/design/nic-health.md"
 SAFE_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 PATH="$SAFE_PATH"
 export PATH
+
+# Drop functions inherited from the environment (exported BASH_FUNC_*): as root they would
+# shadow the commands below regardless of PATH. Only inherited ones exist at this point
+while read -r _ _ INHERITED_FN; do
+    unset -f "$INHERITED_FN"
+done < <(declare -F)
+unset INHERITED_FN
 
 # Nagios-compatible exit codes
 EXIT_OK=0
@@ -136,6 +144,40 @@ FEC_OFF_MODES=("Off" "None")
 LANE_DOMINANCE_PCT=90
 LANE_MIN_ERRORS=100
 
+# --- Deep mode (-l deep, design §7): allowlisted vendor tool queries ---
+LEVEL_BASIC="basic"
+LEVEL_DEEP="deep"
+# Preference order: NVIDIA MFT, then open-source mstflint (same output format)
+DEEP_TOOLS=("mlxlink" "mstlink")
+DEEP_TIMEOUT=10
+# Seconds after the SIGTERM at timeout before SIGKILL
+DEEP_KILL_AFTER=2
+# Exit status of timeout(1) when the command timed out, and when it had to be killed
+DEEP_TIMEOUT_RC=124
+DEEP_KILLED_RC=137
+DEEP_BDF_SLOT="{BDF}"
+# The only argv ever passed to a deep tool: module info plus physical counters/BER (query only)
+DEEP_ARGS_TEMPLATE=("-d" "$DEEP_BDF_SLOT" "-m" "-c")
+# Never passed, even if the template changes: eye scan, PRBS, port/FEC/speed set, counter clear,
+# error injection, register/cable access, data collection (unit-tested)
+DEEP_FORBIDDEN_ARGS=("-e" "--show_eye" "-a" "--port_state" "--fec" "--fec_speed" "--speeds" "--link_mode_force"
+    "--prbs" "--test_mode" "--pprt" "--pptt" "--pc" "--clear" "--loopback" "--margin" "--pcie_error_injection"
+    "--amber_collect" "--rx_fec_histogram" "--cable" "--write" "--read" "--dump" "--ddm")
+BDF_RE='^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]$'
+# Effective (post-FEC) BER above 10^-EXP is WARN; it is an average since the last counter clear,
+# so it never escalates to CRIT (live growth is judged by mlx5.phy.errors)
+DEEP_EFFECTIVE_BER_WARN_EXP=12
+# BER at or below 10^-EXP is shown as ~0 (mstlink prints e.g. 15E-255 for no errors)
+DEEP_BER_ZERO_EXP=30
+# Exponent reported for a literal zero BER (e.g. 0E0)
+BER_ZERO_EXPONENT=-999
+# Module values printed as "VALUE [LOW..HIGH]"; outside the range is WARN
+DEEP_RANGE_KEYS=("Temperature [C]" "Voltage [mV]" "Bias Current [mA]" "Rx Power Current [dBm]" "Tx Power Current [dBm]")
+# Module per-lane fault flags; any non-zero lane is WARN
+DEEP_FLAG_KEYS=("Tx Fault [per lane]" "Rx LOS [per lane]" "Tx CDR LOL [per lane]" "Rx CDR LOL [per lane]")
+DEEP_NO_FEC="No FEC"
+DEEP_MODULE_FEC_RE='[Ww]ith FEC'
+
 # PCIe AER sysfs files and their total-counter keys
 AER_KINDS=("cor" "nonfatal" "fatal")
 declare -A AER_FILE=([cor]="aer_dev_correctable" [nonfatal]="aer_dev_nonfatal" [fatal]="aer_dev_fatal")
@@ -146,16 +188,17 @@ DEVLINK_HEALTHY="healthy"
 
 # Tool catalog for --check-tools and JSON capabilities (parallel arrays)
 REQUIRED_CMDS=("ethtool" "getopt" "readlink")
-TOOL_NAMES=("ethtool" "getopt" "readlink" "lspci" "devlink" "mlxlink" "mstlink")
-TOOL_ROLES=("required" "required" "required" "optional" "optional" "optional" "optional")
+TOOL_NAMES=("ethtool" "getopt" "readlink" "lspci" "devlink" "timeout" "mlxlink" "mstlink")
+TOOL_ROLES=("required" "required" "required" "optional" "optional" "optional" "optional" "optional")
 TOOL_USES=(
     "Driver/firmware identification, mlx5 counters (ethtool -S)"
     "Command-line parsing"
     "sysfs path resolution"
     "NIC vendor/model names (falls back to PCI IDs)"
     "devlink health reporter checks"
-    "mlx5 deep mode via NVIDIA MFT (planned, Phase 5)"
-    "mlx5 deep mode via open-source mstflint (planned, Phase 5)"
+    "Bounds deep-mode tool runs (required for -l deep)"
+    "mlx5 deep mode (-l deep) via NVIDIA MFT (preferred)"
+    "mlx5 deep mode (-l deep) via open-source mstflint"
 )
 TOOL_PACKAGES=(
     "ethtool"
@@ -163,6 +206,7 @@ TOOL_PACKAGES=(
     "coreutils"
     "pciutils"
     "iproute2 (iproute on RHEL)"
+    "coreutils"
     "NVIDIA MFT (proprietary, install manually)"
     "mstflint"
 )
@@ -172,6 +216,7 @@ OUTPUT_FORMAT="table"
 USE_COLOR=true
 CHECK_TOOLS=false
 SHOW_ALL=false
+LEVEL="$LEVEL_BASIC"
 INTERVAL="$DEFAULT_INTERVAL"
 IFACE_FILTER=()
 
@@ -198,6 +243,11 @@ declare -A SNAP0=()
 declare -A SNAP1=()
 declare -A DL_PORT_NETDEV=()
 DL_ORDER=()
+# Deep mode results: DEEP_KV[IFACE|Key]=value, DEEP_ERR[IFACE]=failure, DEEP_TOOL_USED[IFACE]=tool
+declare -A DEEP_KV=()
+declare -A DEEP_ERR=()
+declare -A DEEP_TOOL_USED=()
+DEEP_ARGV=()
 # Error from 'devlink port show' (port reporters cannot be mapped to netdevs)
 DL_PORT_ERROR=""
 # false when /proc/uptime could not be read for either snapshot
@@ -244,7 +294,7 @@ build_mlx5_wanted
 
 usage() {
     echo -e "Usage: $SCRIPT_NAME [-i|--interface IFACE]... [-I|--interval SEC] [-O|--output table|csv|json]"
-    echo -e "       [-a|--all] [-n|--no-color] [-t|--check-tools] [-v|--version] [-h|--help]"
+    echo -e "       [-l|--level basic|deep] [-a|--all] [-n|--no-color] [-t|--check-tools] [-v|--version] [-h|--help]"
     echo -e ""
     echo -e "Version: $SCRIPT_VERSION"
     echo -e ""
@@ -261,6 +311,9 @@ usage() {
     echo -e "                        0 = single read of totals since boot/driver load (historical;"
     echo -e "                        severity capped at WARN)"
     echo -e " -O, --output TYPE      Output format: table (default), csv, or json"
+    echo -e " -l, --level LEVEL      basic (default): passive sysfs/ethtool/devlink reads only"
+    echo -e "                        deep: also query mlx5 ports with mlxlink or mstlink (-d BDF -m -c only,"
+    echo -e "                        ${DEEP_TIMEOUT}s timeout each); never eye scans, PRBS, resets, writes or flashing"
     echo -e " -a, --all              Table: also list OK and N/A rows (default: only WARN, CRIT, UNKNOWN;\n                        CSV and JSON always contain every row)"
     echo -e " -n, --no-color         Disable color output (auto-disabled for non-terminal)"
     echo -e " -t, --check-tools      List required/optional tools, what each enables, and exit"
@@ -278,6 +331,8 @@ usage() {
     echo -e " mlx5.*                 ConnectX (mlx5_core) ethtool -S counters: RX starvation, NIC discards,"
     echo -e "                        PHY symbol errors / pre-FEC BER, frame errors, PCIe path, datapath faults,"
     echo -e "                        congestion, pause storms, module faults, PHY link-down events"
+    echo -e " mlx5.deep.*            -l deep: tool troubleshooting code, module/link FEC mismatch,"
+    echo -e "                        effective BER since last clear, module ranges and lane fault flags"
     echo -e ""
     echo -e "Exit status (Nagios-compatible):"
     echo -e " $EXIT_OK  All checks OK or N/A"
@@ -414,11 +469,11 @@ add_record() {
 
 parse_args() {
     local OPTIONS
-    if [[ -z "${TOOL_PATH[getopt]:-$(command -v getopt 2>/dev/null || true)}" ]]; then
+    if [[ -z "${TOOL_PATH[getopt]:-$(type -P getopt || true)}" ]]; then
         die_unknown "Required command 'getopt' is not installed or not in PATH."
     fi
 
-    if ! OPTIONS=$(getopt -o hvi:I:O:ant --long help,version,interface:,interval:,output:,all,no-color,check-tools -n "$SCRIPT_NAME" -- "$@"); then
+    if ! OPTIONS=$(getopt -o hvi:I:O:l:ant --long help,version,interface:,interval:,output:,level:,all,no-color,check-tools -n "$SCRIPT_NAME" -- "$@"); then
         die_unknown "Failed to parse options." usage
     fi
 
@@ -442,6 +497,12 @@ parse_args() {
                 OUTPUT_FORMAT="$2"
                 [[ "$OUTPUT_FORMAT" =~ ^(table|csv|json)$ ]] \
                     || die_unknown "Invalid --output value '$OUTPUT_FORMAT' (expected table, csv or json)." usage
+                shift 2
+                ;;
+            -l|--level)
+                [[ "$2" == "$LEVEL_BASIC" || "$2" == "$LEVEL_DEEP" ]] \
+                    || die_unknown "Invalid --level value '$2' (expected $LEVEL_BASIC or $LEVEL_DEEP)." usage
+                LEVEL="$2"
                 shift 2
                 ;;
             -a|--all)
@@ -506,7 +567,8 @@ setup_colors() {
 detect_tools() {
     local TOOL
     for TOOL in "${TOOL_NAMES[@]}"; do
-        TOOL_PATH["$TOOL"]=$(command -v "$TOOL" 2>/dev/null || true)
+        # type -P: executable files only (never functions, aliases or builtins), absolute path
+        TOOL_PATH["$TOOL"]=$(type -P "$TOOL" || true)
     done
 }
 
@@ -544,6 +606,9 @@ preflight() {
     local CMD
     if [[ $EUID -ne 0 ]]; then
         die_unknown "This script must be run as root. Please use sudo or switch to root."
+    fi
+    if [[ "$LEVEL" == "$LEVEL_DEEP" && -z "${TOOL_PATH[timeout]}" ]]; then
+        die_unknown "--level $LEVEL_DEEP requires 'timeout' (coreutils) to bound vendor tool runs."
     fi
     for CMD in "${REQUIRED_CMDS[@]}"; do
         [[ -n "${TOOL_PATH[$CMD]}" ]] || die_unknown "Required command '$CMD' is not installed or not in PATH. Run '$SCRIPT_NAME --check-tools'."
@@ -1045,6 +1110,248 @@ check_mlx5_port() {
     done
 }
 
+# --- Deep mode (design §7) ---
+
+# Build the deep-tool argv for one PCI function into DEEP_ARGV
+deep_build_argv() {
+    local ARG
+    DEEP_ARGV=()
+    for ARG in "${DEEP_ARGS_TEMPLATE[@]}"; do
+        if [[ "$ARG" == "$DEEP_BDF_SLOT" ]]; then DEEP_ARGV+=("$1"); else DEEP_ARGV+=("$ARG"); fi
+    done
+}
+
+# Allowlist gate: tool must be a deep tool and argv must match the template exactly,
+# with a well-formed BDF in the slot and no forbidden flag anywhere
+# Args: tool arg...
+deep_argv_allowed() {
+    local TOOL="$1" T OK=false i ARG F
+    shift
+    for T in "${DEEP_TOOLS[@]}"; do [[ "$TOOL" == "$T" ]] && OK=true; done
+    $OK || return 1
+    (( $# == ${#DEEP_ARGS_TEMPLATE[@]} )) || return 1
+    local -a ARGS=("$@")
+    for i in "${!ARGS[@]}"; do
+        ARG="${ARGS[i]}"
+        for F in "${DEEP_FORBIDDEN_ARGS[@]}"; do [[ "$ARG" == "$F" ]] && return 1; done
+        if [[ "${DEEP_ARGS_TEMPLATE[i]}" == "$DEEP_BDF_SLOT" ]]; then
+            [[ "$ARG" =~ $BDF_RE ]] || return 1
+        else
+            [[ "$ARG" == "${DEEP_ARGS_TEMPLATE[i]}" ]] || return 1
+        fi
+    done
+    return 0
+}
+
+# First available deep tool, or nothing
+deep_tool() {
+    local T
+    for T in "${DEEP_TOOLS[@]}"; do
+        if [[ -n "${TOOL_PATH[$T]:-}" ]]; then printf '%s' "$T"; return 0; fi
+    done
+}
+
+# Remove ANSI color sequences (mstlink colors its output even when not on a terminal)
+strip_ansi() {
+    local OUT="$1" ESC=$'\e'
+    local RE="${ESC}\\[[0-9;]*m"
+    while [[ "$OUT" =~ $RE ]]; do OUT="${OUT//"${BASH_REMATCH[0]}"/}"; done
+    printf '%s' "$OUT"
+}
+
+# Run the deep query for one port and store "Key : Value" lines as DEEP_KV[IFACE|Key],
+# or the failure as DEEP_ERR[IFACE]
+# Args: tool iface bdf
+deep_query() {
+    local TOOL="$1" IFACE="$2" BDF="$3" OUT RC=0 LINE KEY VAL
+    deep_build_argv "$BDF"
+    if ! deep_argv_allowed "$TOOL" "${DEEP_ARGV[@]}"; then
+        DEEP_ERR["$IFACE"]="refused by allowlist: $TOOL ${DEEP_ARGV[*]}"
+        return 0
+    fi
+    # Absolute paths from detect_tools; -k: SIGKILL if the tool ignores SIGTERM
+    OUT=$(LC_ALL=C "${TOOL_PATH[timeout]}" -k "$DEEP_KILL_AFTER" "$DEEP_TIMEOUT" "${TOOL_PATH[$TOOL]}" "${DEEP_ARGV[@]}" 2>&1) || RC=$?
+    OUT=$(strip_ansi "$OUT")
+    if (( RC == DEEP_TIMEOUT_RC || RC == DEEP_KILLED_RC )); then
+        DEEP_ERR["$IFACE"]="$TOOL timed out after ${DEEP_TIMEOUT}s"
+        return 0
+    elif (( RC != 0 )); then
+        LINE="${OUT%%$'\n'*}"
+        DEEP_ERR["$IFACE"]="$TOOL exit $RC: ${LINE:-no output}"
+        return 0
+    fi
+    while IFS= read -r LINE; do
+        [[ "$LINE" == *" : "* || "$LINE" == *": "* ]] || continue
+        KEY="${LINE%%:*}"
+        KEY="${KEY%"${KEY##*[![:space:]]}"}"
+        VAL="${LINE#*:}"
+        VAL="${VAL#"${VAL%%[![:space:]]*}"}"
+        VAL="${VAL%"${VAL##*[![:space:]]}"}"
+        [[ -n "$KEY" ]] && DEEP_KV["$IFACE|$KEY"]="$VAL"
+    done <<< "$OUT"
+    DEEP_TOOL_USED["$IFACE"]="$TOOL"
+}
+
+# Query every eligible mlx5 port, with a progress line for table output on a TTY
+deep_collect() {
+    local TOOL IDX N=0 DONE=0 BAR PAD FILLED
+    local -a TARGETS=()
+    TOOL=$(deep_tool)
+    [[ -n "$TOOL" ]] || return 0
+    for IDX in "${!PORT_IFACE[@]}"; do
+        mlx5_port_eligible "$IDX" && TARGETS+=("$IDX")
+    done
+    N=${#TARGETS[@]}
+    for IDX in "${TARGETS[@]}"; do
+        deep_query "$TOOL" "${PORT_IFACE[IDX]}" "${PORT_BDF[IDX]}"
+        DONE=$(( DONE + 1 ))
+        if [[ "$OUTPUT_FORMAT" == "table" && -t 2 ]]; then
+            FILLED=$(( DONE * PROGRESS_WIDTH / N ))
+            printf -v BAR '%*s' "$FILLED" ''
+            printf -v PAD '%*s' $(( PROGRESS_WIDTH - FILLED )) ''
+            printf '\r🔬 Deep queries (%s): [%s%s] %d/%d' "$TOOL" "${BAR// /#}" "${PAD// /.}" "$DONE" "$N" >&2
+        fi
+    done
+    if [[ "$OUTPUT_FORMAT" == "table" && -t 2 ]] && (( N > 0 )); then
+        printf '\r%*s\r' 70 '' >&2
+    fi
+    return 0
+}
+
+# Convert a decimal string ("-0.079", "45", "3290.8") to thousandths; fails if not a number
+to_milli() {
+    [[ "$1" =~ ^(-?)([0-9]+)(\.([0-9]{1,3}))?[0-9]*$ ]] || return 1
+    local FRAC="${BASH_REMATCH[4]}000"
+    printf '%s%d' "${BASH_REMATCH[1]}" $(( 10#${BASH_REMATCH[2]} * 1000 + 10#${FRAC:0:3} ))
+}
+
+# Normalized base-10 exponent of a BER string like "5E-10", "1.2E-12", "15E-255":
+# value = m * 10^k with 1 <= m < 10. Zero gives BER_ZERO_EXPONENT; unparseable fails
+ber_exponent() {
+    [[ "$1" =~ ^([0-9]+)(\.[0-9]+)?[eE]([-+]?)([0-9]+)$ ]] || return 1
+    local INT="${BASH_REMATCH[1]}" SIGN=1 EXP=$(( 10#${BASH_REMATCH[4]} ))
+    [[ "${BASH_REMATCH[3]}" == "-" ]] && SIGN=-1
+    INT="${INT#"${INT%%[!0]*}"}"
+    if [[ -z "$INT" ]]; then
+        printf '%d' "$BER_ZERO_EXPONENT"
+        return 0
+    fi
+    printf '%d' $(( SIGN * EXP + ${#INT} - 1 ))
+}
+
+# Display form of a BER: ~0 below the zero threshold, else as printed by the tool
+ber_display() {
+    local K
+    K=$(ber_exponent "$1") || { printf '%s' "$1"; return 0; }
+    if (( K <= -DEEP_BER_ZERO_EXP )); then printf '~0'; else printf '%s' "$1"; fi
+}
+
+check_deep_port() {
+    local IDX="$1" IFACE="${PORT_IFACE[$1]}" REF="$DESIGN_REF §7"
+    local SEV HINT VALUE EVIDENCE K KEY RAW LO HI V M_V M_LO M_HI FLAG
+    local TOOL="${DEEP_TOOL_USED[$IFACE]:-}"
+
+    if [[ -n "${DEEP_ERR[$IFACE]:-}" ]]; then
+        add_record "port" "$IFACE" "mlx5.deep" "-" "" "-" "$SEV_UNKNOWN" "${DEEP_ERR[$IFACE]}" \
+            "Deep query failed; basic checks are unaffected" "$REF"
+        return 0
+    fi
+
+    # Troubleshooting code computed by the tool from link state and counters
+    K="${DEEP_KV["$IFACE|Status Opcode"]:-}"
+    if [[ -z "$K" ]]; then
+        add_record "port" "$IFACE" "mlx5.deep.troubleshooting" "-" "" "-" "$SEV_NA" "$TOOL printed no Status Opcode" "" "$REF"
+    elif [[ "$K" == "0" ]]; then
+        add_record "port" "$IFACE" "mlx5.deep.troubleshooting" "opcode 0" "" "0" "$SEV_OK" \
+            "$TOOL: ${DEEP_KV["$IFACE|Recommendation"]:-}" "" "$REF"
+    else
+        add_record "port" "$IFACE" "mlx5.deep.troubleshooting" "opcode $K" "" "0" "$SEV_WARN" \
+            "$TOOL Status Opcode=$K Group Opcode=${DEEP_KV["$IFACE|Group Opcode"]:-?}" \
+            "${DEEP_KV["$IFACE|Recommendation"]:-Tool reported a link issue}" "$REF"
+    fi
+
+    # FEC: module requires it but the link runs without
+    local FEC="${DEEP_KV["$IFACE|FEC"]:-}" COMP="${DEEP_KV["$IFACE|Compliance"]:-}"
+    if [[ -z "$FEC" ]]; then
+        add_record "port" "$IFACE" "mlx5.deep.fec" "-" "" "-" "$SEV_NA" "$TOOL printed no FEC line" "" "$REF"
+    elif [[ "$FEC" == "$DEEP_NO_FEC" && "$COMP" =~ $DEEP_MODULE_FEC_RE ]]; then
+        add_record "port" "$IFACE" "mlx5.deep.fec" "link: $FEC" "" "module FEC = link FEC" "$SEV_WARN" \
+            "FEC=$FEC; module Compliance=$COMP" \
+            "Module is specified for operation with FEC but the link runs without it: enable RS-FEC on both ends (NIC and switch port)" "$REF"
+    else
+        add_record "port" "$IFACE" "mlx5.deep.fec" "link: $FEC" "" "module FEC = link FEC" "$SEV_OK" \
+            "FEC=$FEC; module Compliance=${COMP:-n/a}" "" "$REF"
+    fi
+
+    # Effective (post-FEC) BER, averaged since the last counter clear
+    RAW="${DEEP_KV["$IFACE|Effective Physical BER"]:-}"
+    local SINCE="${DEEP_KV["$IFACE|Time Since Last Clear [Min]"]:-?}"
+    EVIDENCE="Effective Physical BER=${RAW:-?} Raw Physical BER=${DEEP_KV["$IFACE|Raw Physical BER"]:-?} Effective Physical Errors=${DEEP_KV["$IFACE|Effective Physical Errors"]:-?} Link Down Counter=${DEEP_KV["$IFACE|Link Down Counter"]:-?} since ${SINCE} min"
+    if [[ -z "$RAW" ]]; then
+        add_record "port" "$IFACE" "mlx5.deep.ber" "-" "" "-" "$SEV_NA" "$TOOL printed no Effective Physical BER" "" "$REF"
+    elif ! K=$(ber_exponent "$RAW"); then
+        add_record "port" "$IFACE" "mlx5.deep.ber" "$RAW" "" "-" "$SEV_UNKNOWN" "$EVIDENCE" "Unparseable BER value" "$REF"
+    else
+        VALUE="effective $(ber_display "$RAW") raw $(ber_display "${DEEP_KV["$IFACE|Raw Physical BER"]:-?}")"
+        if (( K >= -DEEP_EFFECTIVE_BER_WARN_EXP )); then
+            SEV="$SEV_WARN"
+            HINT="Average since the last counter clear ($SINCE min) exceeds 1E-$DEEP_EFFECTIVE_BER_WARN_EXP: clean/replace the optic or cable, check FEC; mlx5.phy.errors shows whether errors are still growing"
+        else
+            SEV="$SEV_OK"; HINT=""
+        fi
+        add_record "port" "$IFACE" "mlx5.deep.ber" "$VALUE" "" "effective<1E-$DEEP_EFFECTIVE_BER_WARN_EXP" "$SEV" "$EVIDENCE" "$HINT" "$REF"
+    fi
+
+    # Module: DOM values against the module's own ranges, and per-lane fault flags
+    if [[ -z "${DEEP_KV["$IFACE|Identifier"]:-}" || "${DEEP_KV["$IFACE|Identifier"]}" == "N/A" ]]; then
+        add_record "port" "$IFACE" "mlx5.deep.module" "-" "" "-" "$SEV_NA" "no module identified" "Empty cage or module without EEPROM" "$REF"
+        return 0
+    fi
+    SEV="$SEV_OK"; HINT=""; VALUE=""; EVIDENCE=""
+    for KEY in "${DEEP_RANGE_KEYS[@]}"; do
+        V="${DEEP_KV["$IFACE|$KEY"]:-}"
+        [[ "$V" =~ ^(-?[0-9.]+)\ \[(-?[0-9.]+)\.\.(-?[0-9.]+)\]$ ]] || continue
+        RAW="${BASH_REMATCH[1]}"; LO="${BASH_REMATCH[2]}"; HI="${BASH_REMATCH[3]}"
+        if ! { M_V=$(to_milli "$RAW") && M_LO=$(to_milli "$LO") && M_HI=$(to_milli "$HI"); }; then
+            continue
+        fi
+        EVIDENCE+="$KEY=$V; "
+        VALUE+="${KEY%% *}=$RAW "
+        if (( M_V < M_LO || M_V > M_HI )); then
+            SEV="$SEV_WARN"
+            HINT+="$KEY $RAW outside [$LO..$HI]; "
+        fi
+    done
+    for KEY in "${DEEP_FLAG_KEYS[@]}"; do
+        FLAG="${DEEP_KV["$IFACE|$KEY"]:-}"
+        [[ "$FLAG" =~ ^[0-9]+$ ]] || continue
+        EVIDENCE+="$KEY=$FLAG; "
+        if (( 10#$FLAG != 0 )); then
+            SEV="$SEV_WARN"
+            HINT+="${KEY% \[per lane\]} set (lane mask $FLAG); "
+        fi
+    done
+    [[ -n "$HINT" ]] && HINT="${HINT%; }: reseat or replace the module, check the peer optic and fiber"
+    EVIDENCE="${EVIDENCE%; }; module ${DEEP_KV["$IFACE|Vendor Name"]:-?} ${DEEP_KV["$IFACE|Vendor Part Number"]:-?}"
+    add_record "port" "$IFACE" "mlx5.deep.module" "${VALUE% }" "" "within module ranges, no lane faults" "$SEV" "$EVIDENCE" "$HINT" "$REF"
+}
+
+check_deep() {
+    local IDX TOOL
+    TOOL=$(deep_tool)
+    if [[ -z "$TOOL" ]]; then
+        local HAS_MLX5=false
+        for IDX in "${!PORT_IFACE[@]}"; do mlx5_port_eligible "$IDX" && HAS_MLX5=true; done
+        $HAS_MLX5 && add_record "host" "$HOSTNAME" "mlx5.deep" "-" "" "-" "$SEV_NA" "neither mlxlink nor mstlink found" \
+            "Install mstflint (distribution package) or NVIDIA MFT to enable deep mode" "$DESIGN_REF §7"
+        return 0
+    fi
+    for IDX in "${!PORT_IFACE[@]}"; do
+        mlx5_port_eligible "$IDX" && check_deep_port "$IDX"
+    done
+    return 0
+}
+
 # --- Checks ---
 
 # generic.pcie.link: compare trained PCIe link speed/width with the device maximum
@@ -1402,6 +1709,7 @@ run_checks() {
     for IDX in "${!PORT_IFACE[@]}"; do
         mlx5_port_eligible "$IDX" && check_mlx5_port "$IDX"
     done
+    [[ "$LEVEL" == "$LEVEL_DEEP" ]] && check_deep
     return 0
 }
 
@@ -1444,6 +1752,7 @@ render_table() {
     else
         MODE="absolute (totals since boot/driver load)"
     fi
+    [[ "$LEVEL" == "$LEVEL_DEEP" ]] && MODE+="  level $LEVEL_DEEP"
     printf '%b🩺 %s %s%b  host %s  %s  %s\n\n' "$BOLD" "$SCRIPT_NAME" "$SCRIPT_VERSION" "$RESET_COLOR" "$HOSTNAME" "$COLLECTED_AT" "$MODE"
 
     printf '%bHardware%b\n' "$BOLD" "$RESET_COLOR"
@@ -1519,7 +1828,7 @@ render_json() {
     printf '  "version": "%s",\n' "$SCRIPT_VERSION"
     printf '  "host": "%s",\n' "$(json_escape "$HOSTNAME")"
     printf '  "collected_at": "%s",\n' "$COLLECTED_AT"
-    printf '  "level": "basic",\n'
+    printf '  "level": "%s",\n' "$LEVEL"
     if (( INTERVAL > 0 )); then
         printf '  "mode": "delta",\n'
         printf '  "interval_s": %d,\n' "$INTERVAL"
@@ -1628,6 +1937,7 @@ main() {
             sample_wait
         fi
         snapshot SNAP1 DL_ORDER
+        [[ "$LEVEL" == "$LEVEL_DEEP" ]] && deep_collect
         T0="${SNAP0[time]:-}"
         T1="${SNAP1[time]:-}"
         if (( INTERVAL > 0 )); then
