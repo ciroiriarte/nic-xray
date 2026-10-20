@@ -269,6 +269,8 @@ if command -v python3 &>/dev/null; then
     else
         (( ++FAIL )); echo "❌ render_json produced invalid JSON"
     fi
+else
+    echo "⏭️  SKIP JSON validity test: python3 not found"
 fi
 assert_eq "CSV rows = records + header" "$(( ${#REC_SEV[@]} + 1 ))" "$(render_csv | wc -l | tr -d ' ')"
 

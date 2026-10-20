@@ -58,3 +58,24 @@ jobs:
         run: |
           bash --version | head -1
           make test
+
+  # The scripts support Bash 4.4 (SLES 15 ships it); run the suite there too, with GNU tools
+  test-bash44:
+    name: make test (Bash 4.4, SLES 15)
+    runs-on: ubuntu-latest
+    container: registry.suse.com/bci/bci-base:15.7
+    steps:
+      # actions/checkout needs tar and gzip; make, timeout(1) and python3 (JSON validity) are used
+      # by the suite
+      - name: Install test prerequisites
+        run: zypper --non-interactive install --no-recommends tar gzip make coreutils util-linux python3
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: make test
+        shell: bash
+        run: |
+          bash --version | head -1
+          [[ "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}" == "4.4" ]] || { echo "expected Bash 4.4, got $BASH_VERSION" >&2; exit 1; }
+          make test
