@@ -649,6 +649,38 @@ check_deep_port 1
 assert_eq "deep module Rx out of range + Tx fault WARN" "WARN" "$(sev_of mlx5.deep.module eth1)"
 assert_eq "deep module hint" "Rx Power Current [dBm] -20.5 outside [-13.01..4.4]; Tx Fault set (lane mask 1): reseat or replace the module, check the peer optic and fiber" "$(mlx5_rec REC_HINT mlx5.deep.module eth1)"
 
+# NVIDIA MFT mlxlink (4.34.1-25, installed --without-kernel), real captures from a ConnectX-6 Lx
+# 25G SR port with a dirty link (eth0) and its unused no-link neighbour (eth1)
+# shellcheck disable=SC2329
+mlxlink() {
+    case "$2" in
+        0000:01:00.0) cat "$FIXTURES/mlxlink-cx6lx-25g-sr-ber-errors.txt" ;;
+        0000:01:00.1) cat "$FIXTURES/mlxlink-cx6lx-25g-sr-nolink.txt" ;;
+        *) echo "-E- device not found"; return 1 ;;
+    esac
+}
+TOOL_PATH[mlxlink]=mlxlink
+assert_eq "mlxlink preferred when both tools exist" "mlxlink" "$(deep_tool)"
+: > "$FIX/deep_calls"
+DEEP_KV=(); DEEP_ERR=(); DEEP_TOOL_USED=()
+deep_collect
+mapfile -t DEEP_CALLS < "$FIX/deep_calls"
+assert_eq "mlxlink calls: exact argv" "-k $DEEP_KILL_AFTER $DEEP_TIMEOUT mlxlink -d 0000:01:00.0 -m -c|-k $DEEP_KILL_AFTER $DEEP_TIMEOUT mlxlink -d 0000:01:00.1 -m -c" "$(IFS='|'; echo "${DEEP_CALLS[*]}")"
+assert_eq "mlxlink parsed FEC" "Firecode FEC" "${DEEP_KV[eth0|FEC]}"
+assert_eq "mlxlink parsed Link Down Counter" "331" "${DEEP_KV[eth0|Link Down Counter]}"
+reset_results
+check_deep
+assert_eq "mlxlink troubleshooting OK"       "OK"   "$(sev_of mlx5.deep.troubleshooting eth0)"
+assert_eq "mlxlink FEC active OK"            "OK"   "$(sev_of mlx5.deep.fec eth0)"
+assert_eq "mlxlink BER 3E-9 WARN"            "WARN" "$(sev_of mlx5.deep.ber eth0)"
+assert_eq "mlxlink BER value"                "effective 3E-9 raw 7E-7" "$(mlx5_rec REC_VALUE mlx5.deep.ber eth0)"
+assert_eq "mlxlink BER evidence names tool counter" "yes" "$([[ "$(mlx5_rec REC_EVIDENCE mlx5.deep.ber eth0)" == *"Link Down Counter=331"* ]] && echo yes)"
+assert_eq "mlxlink module (Rx -8.069 in range) OK" "OK" "$(sev_of mlx5.deep.module eth0)"
+assert_eq "mlxlink troubleshooting evidence" "mlxlink: No issue was observed" "$(mlx5_rec REC_EVIDENCE mlx5.deep.troubleshooting eth0)"
+# No-link port: opcode 2 is reported; the N/A BER and -40 dBm rows are tracked in #12
+assert_eq "mlxlink no-link opcode WARN"      "WARN" "$(sev_of mlx5.deep.troubleshooting eth1)"
+TOOL_PATH[mlxlink]=""
+
 # Failures: timeout, tool error, tool missing; mlxlink preferred
 # shellcheck disable=SC2329
 timeout() { return 124; }

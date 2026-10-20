@@ -351,7 +351,11 @@ and
 .IP \(bu 2
 mstflint (distribution package) or NVIDIA MFT: deep mode on ConnectX cards.
 MFT is proprietary and must be installed manually; it is never bundled or
-downloaded.
+downloaded. Installing it with
+.B "install.sh \-\-without\-kernel"
+is enough:
+.B mlxlink
+reaches the card by PCI address without the MFT kernel module.
 .IP \(bu 2
 bash-completion: tab completion via
 .IR completions/nic\-health.bash .

@@ -1,0 +1,94 @@
+
+Operational Info
+----------------
+State                              : Polling 
+Physical state                     : ETH_AN_FSM_ENABLE 
+Speed                              : N/A 
+Width                              : N/A 
+FEC                                : N/A 
+Loopback Mode                      : No Loopback 
+Auto Negotiation                   : ON 
+
+Supported Info
+--------------
+Enabled Link Speed (Ext.)          : 0x00000052 (25G,10G,1G) 
+Supported Cable Speed (Ext.)       : 0x00000052 (25G,10G,1G) 
+
+Troubleshooting Info
+--------------------
+Status Opcode                      : 2 
+Group Opcode                       : PHY FW 
+Recommendation                     : Negotiation failure 
+
+Tool Information
+----------------
+Firmware Version                   : 26.49.1014 
+amBER Version                      : 5.75 
+MFT Version                        : 4.34.1-25 
+
+Module Info
+-----------
+Temperature [C]                    : 34 [-5..90]
+Voltage [mV]                       : 3318.9 [3080..3500]
+Bias Current [mA]                  : 5.500 [0.5..13]
+Rx Power Current [dBm]             : -40 [-11.308..3.398]
+Tx Power Current [dBm]             : -0.650 [-9.431..3.398]
+Identifier                         : SFP28/SFP+
+Compliance                         : 100GBASE-SR4 or 25GBASE-SR
+Cable Technology                   : N/A
+Cable Type                         : Optical Module (separated)
+OUI                                : Other
+Vendor Name                        : DELLEMC
+Vendor Part Number                 : M14MK
+Vendor Serial Number               : FIXTURE-SERIAL
+Rev                                : A1
+Wavelength [nm]                    : 850
+Transfer Distance [m]              : 10
+Attenuation (5g,7g,12g)[dB]        : N/A
+FW Version                         : N/A
+Digital Diagnostic Monitoring      : Yes
+Power Class                        : 0 (1.0 W max)
+MAX Power                          : 0.0 W max
+CDR RX                             : ON
+CDR TX                             : ON
+LOS Alarm                          : N/A
+SNR Media Lanes [dB]               : N/A
+SNR Host Lanes [dB]                : N/A
+IB Cable Width                     : N/A
+Memory Map Revision                : 0
+Linear Direct Drive                : 0
+Cable Breakout                     : N/A
+SMF Length                         : N/A
+Cable Rx AMP                       : 0
+Cable Rx Emphasis                  : 0
+Cable Rx Post Emphasis             : 0
+Cable Tx Equalization              : 0
+Wavelength Tolerance               : 0.0nm
+Module State                       : N/A
+DataPath state [per lane]          : N/A
+Rx Output Valid [per lane]         : 0
+Nominal bit rate                   : 25.750Gb/s
+Rx Power Type                      : Average power
+Manufacturing Date                 : 04_12_25
+Active Set Host Compliance Code    : N/A
+Active Set Media Compliance Code   : N/A
+Error Code Response                : N/A
+Module FW Fault                    : N/A
+DataPath FW Fault                  : N/A
+Tx Fault [per lane]                : 0
+Tx LOS [per lane]                  : N/A
+Tx CDR LOL [per lane]              : 0
+Rx LOS [per lane]                  : 0
+Rx CDR LOL [per lane]              : 0
+Tx Adaptive EQ Fault [per lane]    : N/A
+
+Physical Counters and BER Info
+------------------------------
+Time Since Last Clear [Min]        : N/A
+Effective Physical Errors          : N/A
+Effective Physical BER             : N/A
+Raw Physical Errors Per Lane       : N/A
+Link Down Counter                  : N/A
+Link Error Recovery Counter        : N/A
+Raw Physical BER                   : N/A
+

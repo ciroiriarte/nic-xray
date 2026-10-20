@@ -783,7 +783,7 @@ Design and rationale: [`docs/design/nic-health.md`](docs/design/nic-health.md). 
 
 - **Required:** Bash ≥ 4.4, root, `ethtool`, `getopt` (util-linux), `readlink` (coreutils).
 - **Optional:** `lspci` (pciutils, model names), `devlink` (iproute2, health reporters), `timeout` (coreutils, required for `-l deep`), `journalctl` (systemd, link-down look-back).
-- **Deep mode on ConnectX:** `mstflint` (distribution package, provides `mstlink`) or NVIDIA MFT (`mlxlink`, proprietary, install manually). Vendor tools are never bundled or downloaded.
+- **Deep mode on ConnectX:** `mstflint` (distribution package, provides `mstlink`) or NVIDIA MFT (`mlxlink`, proprietary, install manually). Both are validated on hardware and give identical verdicts; MFT also reports the PHY `Link Down Counter`. MFT's `install.sh --without-kernel` is enough: `mlxlink -d <BDF>` works without the MFT kernel module (no DKMS build), via the `mft-mlx5` package. Vendor tools are never bundled or downloaded.
 
 Check what is available, without root:
 
