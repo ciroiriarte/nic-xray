@@ -448,6 +448,24 @@ json_escape() {
     local STR="$1"
     STR="${STR//\\/\\\\}"
     STR="${STR//\"/\\\"}"
+    STR="${STR//$'\n'/\\n}"
+    STR="${STR//$'\r'/\\r}"
+    STR="${STR//$'\t'/\\t}"
+    STR="${STR//$'\b'/\\b}"
+    STR="${STR//$'\f'/\\f}"
+    # Remaining C0 control characters (U+0001-U+001F) must be \u-escaped
+    if [[ "$STR" == *[$'\x01'-$'\x1f']* ]]; then
+        local OUT="" CHAR CODE i
+        for (( i = 0; i < ${#STR}; i++ )); do
+            CHAR="${STR:i:1}"
+            if [[ "$CHAR" == [$'\x01'-$'\x1f'] ]]; then
+                printf -v CODE '%d' "'$CHAR"
+                printf -v CHAR '\\u%04x' "$CODE"
+            fi
+            OUT+="$CHAR"
+        done
+        STR="$OUT"
+    fi
     printf '%s' "$STR"
 }
 
