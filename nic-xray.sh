@@ -1463,6 +1463,8 @@ for IFACE in "${ENUM_IFACES[@]}"; do
     $IS_PHYSICAL && ETHTOOL_OUT=$(ethtool "$IFACE" 2>/dev/null)
     SPEED=$(echo "$ETHTOOL_OUT" | awk -F': ' '/Speed:/ {print $2}' | sed 's/Unknown.*/N\/A/')
     DUPLEX=$(echo "$ETHTOOL_OUT" | awk -F': ' '/Duplex:/ {print $2}' | sed 's/Unknown.*/N\/A/')
+    # Some drivers (e.g. cdc_ether) report "Half" with no link; duplex is meaningless then
+    [[ "$LINK_PLAIN" == "down" ]] && DUPLEX="N/A"
     SPEED_DUPLEX="${SPEED:-N/A} (${DUPLEX:-N/A})"
 
     BOND_MASTER="None"
