@@ -143,6 +143,8 @@ jobs:
       - name: Attach assets
         env:
           GH_TOKEN: ${{ github.token }}
+          # No checkout in this job: tell gh which repository to use
+          GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
           set -Eeuo pipefail
