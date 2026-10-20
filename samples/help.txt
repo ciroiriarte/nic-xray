@@ -1,9 +1,9 @@
-Usage: /tmp/nic-xray.sh [--lacp] [--vlan] [--bmac] [-o|--optics] [-p|--physical] [-V|--virtual] [--all]
+Usage: nic-xray.sh [--lacp] [--vlan] [--bmac] [-o|--optics] [-p|--physical] [-V|--virtual] [--all]
        [--no-color] [--filter-link up|down] [-s[SEP]|--separator[=SEP]]
        [--group-bond] [--cluster bond|nic] [-m[SEC]|--metrics[=SEC]]
        [-w[SEC]|--watch[=SEC]] [--output FORMAT] [--diagram-out FILE] [--help]
 
-Version: 2.10.3
+Version: 2.11.0
 
 Description:
  Lists physical network interfaces with detailed information including:

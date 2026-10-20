@@ -824,7 +824,7 @@ All samples are real captures with hostnames obfuscated (see [`samples/`](sample
 **Healthy host** (Intel 82599ES):
 
 ```
-🩺 nic-health.sh 2.10.3  host server-02.example.net  2026-10-20T17:46:28Z  window 5.02s
+🩺 nic-health.sh 2.11.0  host server-02.example.net  2026-10-20T17:46:28Z  window 5.02s
 
 Hardware
   0000:05:00  Intel Corporation 82599ES 10-Gigabit SFI/SFP+ Network Connection  (ixgbe, fw 0x800009e1, 1.3227.0)
@@ -839,7 +839,7 @@ Summary: ✅ 5 OK   ⚠️ 0 WARN   ❌ 0 CRIT   ❔ 0 UNKNOWN   ➖ 1 N/A   →
 **Host with a live fault** (4× ConnectX-6 Lx, 25G AOC links running without FEC; growing uncorrectable symbol errors on four ports):
 
 ```
-🩺 nic-health.sh 2.10.3  host server-01.example.net  2026-10-20T17:45:47Z  window 5.55s
+🩺 nic-health.sh 2.11.0  host server-01.example.net  2026-10-20T17:45:47Z  window 5.55s
 
 Hardware
   0000:01:00  Mellanox Technologies MT2894 Family [ConnectX-6 Lx]  (mlx5_core, fw 26.47.1026 (LNV0000000036))

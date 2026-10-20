@@ -27,9 +27,9 @@
 #   - 2026-10-20: Table lists only WARN/CRIT/UNKNOWN rows unless -a/--all
 #   - 2026-10-20: Phase 5: -l/--level deep with allowlisted mlxlink/mstlink queries (design §7)
 #
-# Version: 2.10.3
+# Version: 2.11.0
 
-SCRIPT_VERSION="2.10.3"
+SCRIPT_VERSION="2.11.0"
 SCRIPT_NAME="nic-health.sh"
 JSON_SCHEMA_VERSION=1
 DESIGN_REF="docs/design/nic-health.md"
