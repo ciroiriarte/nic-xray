@@ -1,1 +1,1 @@
-nic-xray.sh 2.11.0
+nic-xray.sh 2.11.1

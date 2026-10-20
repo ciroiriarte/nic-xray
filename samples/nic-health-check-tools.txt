@@ -1,4 +1,4 @@
-🧰 nic-health.sh 2.11.0: tool check
+🧰 nic-health.sh 2.11.1: tool check
 
 TOOL       ROLE      STATUS    PATH                    USED FOR
 ethtool    required  found     /usr/sbin/ethtool       Driver/firmware identification, mlx5 counters (ethtool -S)

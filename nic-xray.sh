@@ -81,9 +81,9 @@
 #                           colorize_nonzero() helpers
 #                         - Delta clamping via nameref loop
 #
-# Version: 2.11.0
+# Version: 2.11.1
 
-SCRIPT_VERSION="2.11.0"
+SCRIPT_VERSION="2.11.1"
 SCRIPT_NAME="nic-xray.sh"
 SCRIPT_YEAR="2026"
 
