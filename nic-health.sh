@@ -24,6 +24,7 @@
 #                 temperature (hwmon), devlink health reporters, link flaps.
 #                 Script is now sourceable for unit tests (tests/)
 #   - 2026-10-20: Phase 3: mlx5_core ethtool -S rule table (design §6.2)
+#   - 2026-10-20: Table lists only WARN/CRIT/UNKNOWN rows unless -a/--all
 #
 # Version: 2.10.3
 
@@ -170,6 +171,7 @@ TOOL_PACKAGES=(
 OUTPUT_FORMAT="table"
 USE_COLOR=true
 CHECK_TOOLS=false
+SHOW_ALL=false
 INTERVAL="$DEFAULT_INTERVAL"
 IFACE_FILTER=()
 
@@ -242,7 +244,7 @@ build_mlx5_wanted
 
 usage() {
     echo -e "Usage: $SCRIPT_NAME [-i|--interface IFACE]... [-I|--interval SEC] [-O|--output table|csv|json]"
-    echo -e "       [-n|--no-color] [-t|--check-tools] [-v|--version] [-h|--help]"
+    echo -e "       [-a|--all] [-n|--no-color] [-t|--check-tools] [-v|--version] [-h|--help]"
     echo -e ""
     echo -e "Version: $SCRIPT_VERSION"
     echo -e ""
@@ -259,6 +261,7 @@ usage() {
     echo -e "                        0 = single read of totals since boot/driver load (historical;"
     echo -e "                        severity capped at WARN)"
     echo -e " -O, --output TYPE      Output format: table (default), csv, or json"
+    echo -e " -a, --all              Table: also list OK and N/A rows (default: only WARN, CRIT, UNKNOWN;\n                        CSV and JSON always contain every row)"
     echo -e " -n, --no-color         Disable color output (auto-disabled for non-terminal)"
     echo -e " -t, --check-tools      List required/optional tools, what each enables, and exit"
     echo -e "                        (does not require root)"
@@ -415,7 +418,7 @@ parse_args() {
         die_unknown "Required command 'getopt' is not installed or not in PATH."
     fi
 
-    if ! OPTIONS=$(getopt -o hvi:I:O:nt --long help,version,interface:,interval:,output:,no-color,check-tools -n "$SCRIPT_NAME" -- "$@"); then
+    if ! OPTIONS=$(getopt -o hvi:I:O:ant --long help,version,interface:,interval:,output:,all,no-color,check-tools -n "$SCRIPT_NAME" -- "$@"); then
         die_unknown "Failed to parse options." usage
     fi
 
@@ -440,6 +443,10 @@ parse_args() {
                 [[ "$OUTPUT_FORMAT" =~ ^(table|csv|json)$ ]] \
                     || die_unknown "Invalid --output value '$OUTPUT_FORMAT' (expected table, csv or json)." usage
                 shift 2
+                ;;
+            -a|--all)
+                SHOW_ALL=true
+                shift
                 ;;
             -n|--no-color)
                 USE_COLOR=false
@@ -1415,6 +1422,11 @@ compute_verdict() {
 
 # --- Rendering ---
 
+# WARN, CRIT and UNKNOWN rows are always shown in the table; OK and N/A only with -a/--all
+is_problem() {
+    [[ "$1" == "$SEV_WARN" || "$1" == "$SEV_CRIT" || "$1" == "$SEV_UNKNOWN" ]]
+}
+
 # Value with its unit, as shown in the table
 display_value() {
     local i="$1"
@@ -1446,9 +1458,11 @@ render_table() {
     echo
 
     local -a HEAD=("SEVERITY" "SCOPE" "TARGET" "CHECK" "VALUE" "THRESHOLD" "HINT")
-    local -a SHOWN=()
+    local -a SHOWN=() ROWS=()
     local W_SEV=${#HEAD[0]} W_SCOPE=${#HEAD[1]} W_TARGET=${#HEAD[2]} W_CHECK=${#HEAD[3]} W_VALUE=${#HEAD[4]} W_THRESH=${#HEAD[5]}
     for i in "${!REC_SEV[@]}"; do
+        is_problem "${REC_SEV[i]}" || $SHOW_ALL || continue
+        ROWS+=("$i")
         SHOWN[i]=$(display_value "$i")
         (( ${#REC_SEV[i]} > W_SEV ))          && W_SEV=${#REC_SEV[i]}
         (( ${#REC_SCOPE[i]} > W_SCOPE ))      && W_SCOPE=${#REC_SCOPE[i]}
@@ -1457,17 +1471,23 @@ render_table() {
         (( ${#SHOWN[i]} > W_VALUE ))          && W_VALUE=${#SHOWN[i]}
         (( ${#REC_THRESHOLD[i]} > W_THRESH )) && W_THRESH=${#REC_THRESHOLD[i]}
     done
+    local HIDDEN=$(( ${#REC_SEV[@]} - ${#ROWS[@]} ))
 
     printf '%bChecks%b\n' "$BOLD" "$RESET_COLOR"
-    printf "  %-${W_SEV}s  %-${W_SCOPE}s  %-${W_TARGET}s  %-${W_CHECK}s  %-${W_VALUE}s  %-${W_THRESH}s  %s\n" "${HEAD[@]}"
-    for i in "${!REC_SEV[@]}"; do
-        SEV="${REC_SEV[i]}"
-        COLOR=$(severity_color "$SEV")
-        # Pad plain text first, then wrap in color, so ANSI codes never affect alignment
-        printf "  %s%-${W_SEV}s%s  %-${W_SCOPE}s  %-${W_TARGET}s  %-${W_CHECK}s  %-${W_VALUE}s  %-${W_THRESH}s  %s\n" \
-            "$COLOR" "$SEV" "$RESET_COLOR" "${REC_SCOPE[i]}" "${REC_TARGET[i]}" "${REC_CHECK[i]}" \
-            "${SHOWN[i]}" "${REC_THRESHOLD[i]}" "${REC_HINT[i]}"
-    done
+    if (( ${#ROWS[@]} == 0 )); then
+        printf '  %s No problems found in %d checks (-a/--all lists them)\n' "$(severity_icon "$SEV_OK")" "$HIDDEN"
+    else
+        printf "  %-${W_SEV}s  %-${W_SCOPE}s  %-${W_TARGET}s  %-${W_CHECK}s  %-${W_VALUE}s  %-${W_THRESH}s  %s\n" "${HEAD[@]}"
+        for i in "${ROWS[@]}"; do
+            SEV="${REC_SEV[i]}"
+            COLOR=$(severity_color "$SEV")
+            # Pad plain text first, then wrap in color, so ANSI codes never affect alignment
+            printf "  %s%-${W_SEV}s%s  %-${W_SCOPE}s  %-${W_TARGET}s  %-${W_CHECK}s  %-${W_VALUE}s  %-${W_THRESH}s  %s\n" \
+                "$COLOR" "$SEV" "$RESET_COLOR" "${REC_SCOPE[i]}" "${REC_TARGET[i]}" "${REC_CHECK[i]}" \
+                "${SHOWN[i]}" "${REC_THRESHOLD[i]}" "${REC_HINT[i]}"
+        done
+        (( HIDDEN > 0 )) && printf '  %b%d OK/N/A rows hidden (-a/--all to show)%b\n' "$DIM" "$HIDDEN" "$RESET_COLOR"
+    fi
     echo
 
     printf 'Summary: '

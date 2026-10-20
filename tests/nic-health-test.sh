@@ -520,6 +520,30 @@ assert_eq "overflow-safe BER value" "pre-FEC BER=1.0e-05" "$(mlx5_rec REC_VALUE 
 assert_eq "overflow-safe lane hint" "yes" "$([[ "$(mlx5_rec REC_HINT mlx5.phy.errors eth0)" == *"concentrated on rx_err_lane_1_phy"* ]] && echo yes)"
 assert_eq "bits counter not listed as context" "no" "$([[ "$(mlx5_rec REC_HINT mlx5.phy.errors eth0)" == *rx_bits_phy* ]] && echo yes || echo no)"
 
+# --- Table filtering (-a/--all) ---
+USE_COLOR=false
+setup_colors
+COLLECTED_AT="2026-10-20T00:00:00Z"
+reset_results
+add_record port eth0 c.ok   1 "" "-" OK      "" "" ""
+add_record port eth0 c.na   - "" "-" "N/A"   "" "" ""
+add_record port eth0 c.warn 1 "" "-" WARN    "" "" ""
+add_record port eth0 c.unk  - "" "-" UNKNOWN "" "" ""
+compute_verdict
+SHOW_ALL=false
+OUT=$(render_table)
+assert_eq "table hides OK/N/A by default" "c.unk c.warn" "$(grep -oE 'c\.[a-z]+' <<< "$OUT" | sort | tr '\n' ' ' | sed 's/ $//')"
+assert_eq "table reports hidden count" "yes" "$([[ "$OUT" == *"2 OK/N/A rows hidden (-a/--all to show)"* ]] && echo yes)"
+SHOW_ALL=true
+assert_eq "table -a shows all rows" "4" "$(render_table | grep -cE 'c\.[a-z]+')"
+SHOW_ALL=false
+assert_eq "CSV keeps all rows" "5" "$(render_csv | wc -l | tr -d ' ')"
+reset_results
+add_record port eth0 c.ok 1 "" "-" OK "" "" ""
+compute_verdict
+assert_eq "table with no problems" "yes" "$([[ "$(render_table)" == *"No problems found in 1 checks (-a/--all lists them)"* ]] && echo yes)"
+assert_eq "no header when nothing listed" "0" "$(render_table | grep -c 'SEVERITY')"
+
 # --- Verdict precedence ---
 for CASE in "OK N/A:OK 0" "OK UNKNOWN:UNKNOWN 3" "WARN UNKNOWN:WARN 1" "WARN CRIT UNKNOWN:CRIT 2"; do
     read -ra REC_SEV <<< "${CASE%%:*}"
@@ -528,7 +552,7 @@ for CASE in "OK N/A:OK 0" "OK UNKNOWN:UNKNOWN 3" "WARN UNKNOWN:WARN 1" "WARN CRI
 done
 
 # --- CLI (runs before the root check, so works unprivileged) ---
-for CASE in "-v:0" "-I 99999:3" "-I abc:3" "-O xml:3" "extra:3" "--bogus:3"; do
+for CASE in "-a -v:0" "--all -v:0" "-v:0" "-I 99999:3" "-I abc:3" "-O xml:3" "extra:3" "--bogus:3"; do
     # shellcheck disable=SC2086
     bash "$SCRIPT" ${CASE%%:*} >/dev/null 2>&1
     assert_eq "exit code for '${CASE%%:*}'" "${CASE#*:}" "$?"

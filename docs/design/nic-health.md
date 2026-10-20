@@ -121,6 +121,7 @@ Each check emits exactly one record:
 | `-I`, `--interval SEC` | Delta window (default 5; `0` means absolute-only snapshot) — *Phase 2* |
 | `-O`, `--output table\|json\|csv` | Output format (default `table`) |
 | `-t`, `--check-tools` | Report available, missing, and disabled capabilities, then exit |
+| `-a`, `--all` | Table also lists OK and N/A rows (default: WARN/CRIT/UNKNOWN only, plus a hidden-row count). CSV/JSON always contain every row |
 | `-n`, `--no-color` | Disable ANSI colors |
 | `-l`, `--level basic\|deep` | `basic` (default) is passive. `deep` adds allowlisted vendor tool queries — *planned, Phase 5* |
 | `--thresholds FILE` | Threshold overrides (parsed as data, **never sourced**) — *planned* |
