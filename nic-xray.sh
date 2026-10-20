@@ -84,6 +84,7 @@
 # Version: 2.10.3
 
 SCRIPT_VERSION="2.10.3"
+SCRIPT_NAME="nic-xray.sh"
 SCRIPT_YEAR="2026"
 
 # Interface name pattern to skip (virtual, bond masters, etc.)
@@ -242,7 +243,7 @@ while true; do
 			shift 2
 			;;
 		-v|--version)
-			echo "$0 $SCRIPT_VERSION"
+			echo "$SCRIPT_NAME $SCRIPT_VERSION"
 			exit 0
 			;;
 		-h|--help)
