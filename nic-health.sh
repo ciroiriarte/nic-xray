@@ -28,6 +28,8 @@
 #   - 2026-10-20: Phase 5: -l/--level deep with allowlisted mlxlink/mstlink queries (design §7)
 #   - 2026-10-20: -L/--lookback: generic.link.lookback counts driver link-down messages in the
 #                 kernel journal over the last N minutes (#9), so past flaps are visible
+#   - 2026-10-20: lane-concentration hint only counts the lanes the link uses (ethtool "Lanes:",
+#                 else link speed): a single-lane 25G link no longer blames "lane 0" (#16)
 #   - 2026-10-20: mlx5.deep.ber evidence lists only the counters the tool printed: mstflint 4.26
 #                 has no Link Down Counter, which showed as "Link Down Counter=?" (#13)
 #   - 2026-10-20: generic.pcie.link compares against what both ends of the link support: a card
@@ -190,6 +192,10 @@ FEC_OFF_MODES=("Off" "None")
 # Lane skew hint: one lane carries at least this % of corrected bits (and at least the minimum)
 LANE_DOMINANCE_PCT=90
 LANE_MIN_ERRORS=100
+# Lanes the link uses: ethtool's "Lanes: N" line (kernel and ethtool >= 5.13), else links at or
+# below this speed (Mb/s: 1G, 10G, 25G) are single-lane. Lane counters beyond that are ignored
+ETHTOOL_LANES_RE='^[[:space:]]*Lanes:[[:space:]]*([0-9]+)[[:space:]]*$'
+SINGLE_LANE_MAX_SPEED=25000
 
 # --- Deep mode (-l deep, design §7): allowlisted vendor tool queries ---
 LEVEL_BASIC="basic"
@@ -1148,10 +1154,29 @@ mlx5_gauge_context() {
     printf '%s' "$OUT"
 }
 
+# Number of lanes the link uses, or nothing when unknown (then every exposed lane counter counts)
+# Args: iface
+port_active_lanes() {
+    local IFACE="$1" OUT LINE SPEED
+    if OUT=$(LC_ALL=C ethtool "$IFACE" 2>/dev/null); then
+        while IFS= read -r LINE; do
+            if [[ "$LINE" =~ $ETHTOOL_LANES_RE ]] && (( 10#${BASH_REMATCH[1]} > 0 )); then
+                printf '%d' "$(( 10#${BASH_REMATCH[1]} ))"
+                return 0
+            fi
+        done <<< "$OUT"
+    fi
+    if SPEED=$(read_attr "$SYSFS_NET/$IFACE/speed") && [[ "$SPEED" =~ ^[0-9]+$ ]] \
+        && (( SPEED > 0 && SPEED <= SINGLE_LANE_MAX_SPEED )); then
+        printf '1'
+    fi
+    return 0
+}
+
 # Pre-FEC BER and lane skew for the PHY rule. Sets BER_VALUE, LANE_HINT and may raise SEV to WARN
 # (uses the caller's SEV and EVIDENCE through dynamic scoping)
 mlx5_ber_eval() {
-    local IFACE="$1" CORR BITS NAME TOTAL=0 MAX=0 MAX_LANE="" LANES=0 RC
+    local IFACE="$1" CORR BITS NAME TOTAL=0 MAX=0 MAX_LANE="" LANES=0 RC ACTIVE
     local BKEY="ets|$IFACE|$MLX5_BITS_COUNTER" CKEY="ets|$IFACE|$MLX5_CORRECTED_COUNTER"
     (( INTERVAL > 0 )) || return 0
 
@@ -1169,9 +1194,15 @@ mlx5_ber_eval() {
         fi
     fi
 
+    # mlx5 exposes rx_err_lane_0..3_phy whatever the link width: only the lanes in use count, so a
+    # single-lane link never looks "concentrated on lane 0" (#16)
+    ACTIVE=$(port_active_lanes "$IFACE")
     for NAME in "${!SNAP1[@]}"; do
         # shellcheck disable=SC2053
         [[ "$NAME" == "ets|$IFACE|"$MLX5_LANE_COUNTER_GLOB ]] || continue
+        if [[ -n "$ACTIVE" && "${NAME##*|}" =~ ([0-9]+) ]] && (( 10#${BASH_REMATCH[1]} >= ACTIVE )); then
+            continue
+        fi
         RC=0; delta "$NAME" || RC=$?
         (( RC == 0 )) || continue
         (( ++LANES ))

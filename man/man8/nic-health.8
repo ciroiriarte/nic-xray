@@ -232,7 +232,8 @@ rx_discards_phy, tx_discards_phy \(-> WARN (NIC buffer exhausted).
 rx_symbol_err_phy, rx_pcs_symbol_err_phy \(-> CRIT (uncorrectable symbol errors,
 traffic is lost). Pre-FEC BER above 1E-06 \(-> WARN when the card exposes
 rx_bits_phy. Adds a lane-skew hint when one lane carries most corrected bits,
-and a FEC hint when the link runs at 25 Gb/s or more with FEC off.
+counting only the lanes the link uses (ethtool "Lanes:", else one lane at
+25 Gb/s or less), and a FEC hint when the link runs at 25 Gb/s or more with FEC off.
 .TP
 .B mlx5.frame.errors
 CRC, fragment, jabber, undersize and oversize frames \(-> WARN.

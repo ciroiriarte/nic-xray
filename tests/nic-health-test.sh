@@ -201,7 +201,14 @@ ethtool() {
         cat "$FIX/ets_$2"
         return 0
     fi
-    printf 'driver: stub\nfirmware-version: 1.2.3 (STUB)\nbus-info: x\n'
+    if [[ "$1" == "-i" ]]; then
+        printf 'driver: stub\nfirmware-version: 1.2.3 (STUB)\nbus-info: x\n'
+        return 0
+    fi
+    # Plain "ethtool IFACE": link settings, with a Lanes line when the fixture provides one
+    printf 'Settings for %s:\n\tSpeed: 25000Mb/s\n' "$1"
+    [[ -e "$FIX/lanes_$1" ]] && printf '\tLanes: %s\n' "$(< "$FIX/lanes_$1")"
+    printf '\tLink detected: yes\n'
 }
 devlink() {
     case "$1 $2" in
@@ -522,12 +529,49 @@ assert_eq "rx_bits_phy reset UNKNOWN" "UNKNOWN" "$(sev_of mlx5.phy.errors eth0)"
 reset_results
 ets_write eth0 rx_bits_phy=0
 huge() { ets_write eth0 rx_bits_phy=1000000000000000000 rx_corrected_bits_phy=10000000000000 rx_err_lane_1_phy=5000000000000000000; }
+# Multi-lane link (100G, no "Lanes:" from the stub): lane counters are judged
+SAVED_SPEED=$(< "$SYSFS_NET/eth0/speed"); printf '100000\n' > "$SYSFS_NET/eth0/speed"
 snap_pair huge
 check_mlx5_port 0
 assert_eq "overflow-safe BER WARN" "WARN" "$(sev_of mlx5.phy.errors eth0)"
 assert_eq "overflow-safe BER value" "pre-FEC BER=1.0e-05" "$(mlx5_rec REC_VALUE mlx5.phy.errors eth0)"
 assert_eq "overflow-safe lane hint" "yes" "$([[ "$(mlx5_rec REC_HINT mlx5.phy.errors eth0)" == *"concentrated on rx_err_lane_1_phy"* ]] && echo yes)"
 assert_eq "bits counter not listed as context" "no" "$([[ "$(mlx5_rec REC_HINT mlx5.phy.errors eth0)" == *rx_bits_phy* ]] && echo yes || echo no)"
+printf '%s\n' "$SAVED_SPEED" > "$SYSFS_NET/eth0/speed"
+
+# Lanes in use (#16): ethtool "Lanes:", else speed <= 25G means one lane, else unknown
+lane_hint() { reset_results; snap_pair "$1"; check_mlx5_port 0; mlx5_rec REC_HINT mlx5.phy.errors eth0; }
+printf '4\n' > "$FIX/lanes_eth0"
+assert_eq "active lanes from ethtool" "4" "$(port_active_lanes eth0)"
+printf '0\n' > "$FIX/lanes_eth0"
+assert_eq "Lanes: 0 ignored, speed fallback (25G)" "1" "$(port_active_lanes eth0)"
+rm -f "$FIX/lanes_eth0"
+assert_eq "no Lanes line, 25G: one lane" "1" "$(port_active_lanes eth0)"
+printf '100000\n' > "$SYSFS_NET/eth0/speed"
+assert_eq "no Lanes line, 100G: unknown" "" "$(port_active_lanes eth0)"
+printf -- '-1\n' > "$SYSFS_NET/eth0/speed"
+assert_eq "no link speed: unknown" "" "$(port_active_lanes eth0)"
+printf '%s\n' "$SAVED_SPEED" > "$SYSFS_NET/eth0/speed"
+# The reported case: single-lane 25G, all corrected bits on lane 0 -> no lane hint
+ets_write eth0 rx_corrected_bits_phy=0 rx_err_lane_0_phy=0 rx_err_lane_1_phy=0 rx_err_lane_2_phy=0 rx_err_lane_3_phy=0
+lane0() { ets_write eth0 rx_corrected_bits_phy=3911 rx_err_lane_0_phy=3911 rx_err_lane_1_phy=0 rx_err_lane_2_phy=0 rx_err_lane_3_phy=0; }
+assert_eq "single-lane 25G: no lane hint" "no" "$([[ "$(lane_hint lane0)" == *concentrated* ]] && echo yes || echo no)"
+printf '1\n' > "$FIX/lanes_eth0"; printf '100000\n' > "$SYSFS_NET/eth0/speed"
+ets_write eth0 rx_corrected_bits_phy=0 rx_err_lane_0_phy=0 rx_err_lane_1_phy=0 rx_err_lane_2_phy=0 rx_err_lane_3_phy=0
+assert_eq "Lanes: 1 from ethtool: no lane hint" "no" "$([[ "$(lane_hint lane0)" == *concentrated* ]] && echo yes || echo no)"
+printf '%s\n' "$SAVED_SPEED" > "$SYSFS_NET/eth0/speed"
+# 4-lane link with one dominant lane: hint kept
+printf '4\n' > "$FIX/lanes_eth0"
+ets_write eth0 rx_corrected_bits_phy=0 rx_err_lane_0_phy=0 rx_err_lane_1_phy=0 rx_err_lane_2_phy=0 rx_err_lane_3_phy=0
+lane2() { ets_write eth0 rx_corrected_bits_phy=1000 rx_err_lane_0_phy=5 rx_err_lane_1_phy=5 rx_err_lane_2_phy=990 rx_err_lane_3_phy=0; }
+assert_eq "4-lane link, lane 2 dominant: hint" "yes" "$([[ "$(lane_hint lane2)" == *"concentrated on rx_err_lane_2_phy"* ]] && echo yes || echo no)"
+# 2-lane link: growth on an unused lane (3) is ignored, spread over the used lanes gives no hint
+printf '2\n' > "$FIX/lanes_eth0"
+ets_write eth0 rx_corrected_bits_phy=0 rx_err_lane_0_phy=0 rx_err_lane_1_phy=0 rx_err_lane_2_phy=0 rx_err_lane_3_phy=0
+unused3() { ets_write eth0 rx_corrected_bits_phy=1000 rx_err_lane_0_phy=500 rx_err_lane_1_phy=500 rx_err_lane_2_phy=0 rx_err_lane_3_phy=900000; }
+assert_eq "2-lane link: unused lane 3 ignored" "no" "$([[ "$(lane_hint unused3)" == *concentrated* ]] && echo yes || echo no)"
+rm -f "$FIX/lanes_eth0"
+ets_write eth0 rx_corrected_bits_phy=0 rx_err_lane_0_phy=0 rx_err_lane_1_phy=0 rx_err_lane_2_phy=0 rx_err_lane_3_phy=0
 
 # --- Table filtering (-a/--all) ---
 USE_COLOR=false

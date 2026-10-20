@@ -173,7 +173,7 @@ Most mlx5 counters are cumulative since driver load, so absolute values alone ar
 |---|---|---|---|
 | Host RX starvation | `rx_out_of_buffer`, `rx_buff_alloc_err` | cumulative | Host can't drain rings → hint `ethtool -G … rx <max>`, IRQ affinity, CPU |
 | NIC buffer drops | `rx_discards_phy`, `tx_discards_phy` | cumulative | NIC buffer exhausted, often PCIe or host backpressure |
-| PHY / signal | `rx_bits_phy` (denominator, **absent on ConnectX-6 Lx**), `rx_corrected_bits_phy` (pre-FEC), `rx_pcs_symbol_err_phy`, `rx_symbol_err_phy` (post-FEC), `rx_err_lane_N_phy` | cumulative | Compute pre/post-FEC BER. Without `rx_bits_phy`, fall back to `rx_bytes_phy`×8 (approximate; mark it in evidence) or deep-mode `mlxlink` BER. Post-FEC errors > 0 → `CRIT`. Per-lane skew → optic/cable suspect |
+| PHY / signal | `rx_bits_phy` (denominator, **absent on ConnectX-6 Lx**), `rx_corrected_bits_phy` (pre-FEC), `rx_pcs_symbol_err_phy`, `rx_symbol_err_phy` (post-FEC), `rx_err_lane_N_phy` | cumulative | Compute pre/post-FEC BER. Without `rx_bits_phy`, fall back to `rx_bytes_phy`×8 (approximate; mark it in evidence) or deep-mode `mlxlink` BER. Post-FEC errors > 0 → `CRIT`. Per-lane skew → optic/cable suspect (only the lanes the link uses: mlx5 exposes 4 lane counters even on a single-lane 25G link, #16) |
 | Frame errors | `rx_crc_errors_phy`, `rx_oversize_pkts_phy`, `rx_undersize_pkts_phy`, `rx_fragments_phy`, `rx_jabbers_phy` | cumulative | CRC → cabling/optic; oversize → MTU mismatch with peer |
 | PCIe path | `rx_pci_signal_integrity`, `tx_pci_signal_integrity` | cumulative | PCIe link recovery from framing/CRC faults → `WARN`, `CRIT` if sustained |
 | PCIe path | `outbound_pci_stalled_rd`, `outbound_pci_stalled_wr`, `outbound_pci_buffer_overflow` (**absent on ConnectX-6 Lx**) | **gauge (%)** | Host root-complex/credit starvation. Do not delta |
@@ -190,7 +190,7 @@ Most mlx5 counters are cumulative since driver load, so absolute values alone ar
 |---|---|---|
 | `mlx5.rx.starvation` | `rx_out_of_buffer`, `rx_buff_alloc_err` → `WARN` | |
 | `mlx5.nic.discards` | `rx_discards_phy`, `tx_discards_phy` → `WARN` | |
-| `mlx5.phy.errors` | `rx_symbol_err_phy`, `rx_pcs_symbol_err_phy` → `CRIT`; pre-FEC BER > 1e-06 → `WARN` (only with `rx_bits_phy`) | `rx_corrected_bits_phy`, `rx_err_lane_N_phy` (lane dominance ≥90% → hint) |
+| `mlx5.phy.errors` | `rx_symbol_err_phy`, `rx_pcs_symbol_err_phy` → `CRIT`; pre-FEC BER > 1e-06 → `WARN` (only with `rx_bits_phy`) | `rx_corrected_bits_phy`, `rx_err_lane_N_phy` (lane dominance ≥90% among the lanes in use → hint; lanes from `ethtool IFACE` "Lanes:", else ≤25G = 1 lane, else all) |
 | `mlx5.frame.errors` | CRC, fragments, jabbers, undersize, oversize → `WARN` | |
 | `mlx5.pcie.path` | `rx/tx_pci_signal_integrity`, `outbound_pci_stalled_rd/wr_events` → `WARN` | stall gauges (% at T1, never deltaed) |
 | `mlx5.datapath.faults` | `tx_cqe_err`, `rx_wqe_err`, `tx_recover`, `rx_recover` → `CRIT` | |
