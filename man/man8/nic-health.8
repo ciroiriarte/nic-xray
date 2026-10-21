@@ -80,6 +80,14 @@ Counter sampling window in seconds (0\-3600, default 5).
 .B 0
 selects absolute mode (totals since boot or driver load, severity capped at
 .BR WARN ).
+The default suits quick sweeps and monitoring. For troubleshooting use
+.B "\-I 30"
+or longer: bursty link errors can fall outside a short window, so a bad link
+can look clean in one run and fail the next (the history floor of
+.B mlx5.phy.errors
+and
+.B mlx5.frame.errors
+keeps such a link at WARN or worse).
 In table output a progress bar is shown on standard error while sampling.
 .TP
 .BR \-L ", " \-\-lookback " \fIMIN\fP"
@@ -230,13 +238,25 @@ rx_discards_phy, tx_discards_phy \(-> WARN (NIC buffer exhausted).
 .TP
 .B mlx5.phy.errors
 rx_symbol_err_phy, rx_pcs_symbol_err_phy \(-> CRIT (uncorrectable symbol errors,
-traffic is lost). Pre-FEC BER above 1E-06 \(-> WARN when the card exposes
-rx_bits_phy. Adds a lane-skew hint when one lane carries most corrected bits,
+traffic is lost). Pre-FEC BER above 1E-06 \(-> WARN. The BER uses rx_bits_phy
+when the card exposes it; otherwise (ConnectX-6 Lx) it is estimated from the
+link speed and the window length, shown as "pre-FEC BER~", and judged only
+when every lane runs at 25 Gb/s or less (NRZ; PAM4 lanes run a higher pre-FEC
+BER by design). Adds a lane-skew hint when one lane carries most corrected bits,
 counting only the lanes the link uses (ethtool "Lanes:", else one lane at
 25 Gb/s or less), and a FEC hint when the link runs at 25 Gb/s or more with FEC off.
 .TP
 .B mlx5.frame.errors
 CRC, fragment, jabber, undersize and oversize frames \(-> WARN.
+.IP
+History floor (both rules above, delta mode only): when none of the escalating
+counters grow in the window, a counter whose total since boot is at least 1000
+and averages at least 60 an hour over the host uptime \(-> WARN, with the value
+"history: COUNTER ~N/h". The totals only reset at driver reload or reboot, so a
+link cleaned after an incident stays at WARN until the average falls below the
+floor; watch it with a longer window to see whether errors still grow. Uptime is
+at least the time since driver load, so the average is a lower bound. History
+alone never gives CRIT.
 .TP
 .B mlx5.pcie.path
 PCIe signal-integrity recoveries and outbound stall events \(-> WARN; stall
@@ -434,7 +454,7 @@ List every result, including OK and N/A:
 .B sudo nic-health.sh \-a
 .RE
 .PP
-Two interfaces, 30-second window:
+Two interfaces, 30-second window (recommended when troubleshooting a link):
 .PP
 .RS
 .B sudo nic-health.sh \-i ens1f0np0 \-i ens1f1np1 \-I 30

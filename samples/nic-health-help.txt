@@ -14,6 +14,8 @@ Options:
  -i, --interface IFACE  Evaluate only IFACE (repeatable; default: all physical NICs)
  -I, --interval SEC     Counter sampling window in seconds (default: 5, max: 3600)
                         Counters are read twice; only growth inside the window is judged.
+                        5 s suits sweeps and monitoring; troubleshoot with -I 30 or longer,
+                        as bursty link errors can miss a short window
                         0 = single read of totals since boot/driver load (historical;
                         severity capped at WARN)
  -L, --lookback MIN     Count driver link-down messages in the kernel journal over the last
@@ -46,7 +48,9 @@ Checks:
                         still flapping in the window (CRIT)
  mlx5.*                 ConnectX (mlx5_core) ethtool -S counters: RX starvation, NIC discards,
                         PHY symbol errors / pre-FEC BER, frame errors, PCIe path, datapath faults,
-                        congestion, pause storms, module faults, PHY link-down events
+                        congestion, pause storms, module faults, PHY link-down events.
+                        PHY/frame errors not growing in the window but high since boot
+                        (>=1000, >=60/h over uptime): WARN
  mlx5.deep.*            -l deep: tool troubleshooting code, module/link FEC mismatch,
                         effective BER since last clear, module ranges and lane fault flags
                         (ports without carrier: link checks N/A, Rx power/LOS/CDR LOL not judged)

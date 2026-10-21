@@ -761,7 +761,7 @@ See also: [`samples/topology-virtual.dot`](samples/topology-virtual.dot) | [`sam
 `nic-health.sh` is the companion of `nic-xray.sh`. nic-xray shows **what is installed and how it is cabled**. nic-health answers **whether the NIC hardware and its data path are healthy**. It returns a monitoring-friendly verdict with evidence and a remediation hint for every check.
 
 - 🔒 **Read-only.** It never changes NIC, driver, link or firmware state.
-- ⏱️ **Measures, not snapshots.** Counters are read twice, `-I SEC` apart (default 5 s), and only growth inside that window is judged. A counter that resets or disappears during the window is `UNKNOWN`, never `OK`.
+- ⏱️ **Measures, not snapshots.** Counters are read twice, `-I SEC` apart (default 5 s), and only growth inside that window is judged. A counter that resets or disappears during the window is `UNKNOWN`, never `OK`. Bursty link errors can miss a short window, so PHY and frame errors that are high since boot stay `WARN` even when the window saw none. Use `-I 30` or longer when troubleshooting.
 - 🧩 **Card-aware.** Ports of the same ASIC are grouped; card-level checks run once.
 - 🚦 **Nagios-compatible exit codes:** `0` OK, `1` WARN, `2` CRIT, `3` UNKNOWN (precedence CRIT > WARN > UNKNOWN > OK).
 
@@ -796,7 +796,7 @@ nic-health.sh --check-tools
 ```bash
 sudo nic-health.sh                         # all physical NICs, 5 s window, problems only
 sudo nic-health.sh -a                      # also list OK and N/A rows
-sudo nic-health.sh -i ens1f0np0 -I 30      # one interface, 30 s window
+sudo nic-health.sh -i ens1f0np0 -I 30      # one interface, 30 s window (troubleshooting)
 sudo nic-health.sh -I 0                    # totals since boot, no wait (severity capped at WARN)
 sudo nic-health.sh -L 1440                 # link-downs over the last 24 h (default look-back: 60 min)
 sudo nic-health.sh -l deep                 # add allowlisted mlxlink/mstlink queries
@@ -806,7 +806,7 @@ sudo nic-health.sh -O json > health.json   # for monitoring or later comparison
 | Option | Description |
 |---|---|
 | `-i`, `--interface IFACE` | Evaluate only IFACE (repeatable) |
-| `-I`, `--interval SEC` | Sampling window, 0–3600 s (default 5). `0` = totals since boot |
+| `-I`, `--interval SEC` | Sampling window, 0–3600 s (default 5, for sweeps and monitoring; 30+ for troubleshooting). `0` = totals since boot |
 | `-L`, `--lookback MIN` | Link-down look-back in the kernel journal, 0–1440 min (default 60, current boot only). `0` = off |
 | `-O`, `--output FORMAT` | `table` (default), `csv`, `json` |
 | `-l`, `--level LEVEL` | `basic` (default, passive) or `deep` (vendor tool queries) |

@@ -144,6 +144,7 @@ Most mlx5 counters are cumulative since driver load, so absolute values alone ar
 5. **Denominators.** Error rates are normalised by traffic: BER uses `rx_bits_phy`; drop ratios use packet counters. A thousand drops in a terabit is not the same as a thousand drops in a megabit.
 6. **RDMA `hw_counters` lifespan.** `/sys/class/infiniband/*/ports/*/hw_counters/lifespan` caches values (ms; 10 ms on the validation hosts). The interval must exceed the lifespan, or the check is `UNKNOWN`.
 7. **Absolute-only mode** (`--interval 0`) reports totals since driver load, labelled as *historical*, with severity capped at `WARN`.
+8. **History floor (#15).** Bursty errors can fall between two snapshots: one 5 s run gave `CRIT`, the next `OK`, on a port with 160M symbol/CRC errors in 7 weeks. In delta mode, when no escalating counter of `mlx5.phy.errors` or `mlx5.frame.errors` grows, a counter whose total is ≥1000 and averages ≥60/h over host uptime is `WARN` ("history: NAME ~N/h"). Uptime ≥ time since driver load, so the average is a lower bound. History alone never gives `CRIT`, as in absolute mode. Context-only counters (`rx_corrected_bits_phy`) do not count. Trade-off: `_phy` counters cannot be cleared, so a link fixed after an incident keeps the `WARN` until a driver reload, reboot, or the average dropping below 60/h; the hint says so. Assumes the counters restart with the boot (unverified for kexec or a warm reboot that keeps the NIC powered). The default window stays 5 s for sweeps and monitoring; `--help`, the man page and the README recommend `-I 30` or longer for troubleshooting.
 
 ---
 
@@ -173,7 +174,7 @@ Most mlx5 counters are cumulative since driver load, so absolute values alone ar
 |---|---|---|---|
 | Host RX starvation | `rx_out_of_buffer`, `rx_buff_alloc_err` | cumulative | Host can't drain rings → hint `ethtool -G … rx <max>`, IRQ affinity, CPU |
 | NIC buffer drops | `rx_discards_phy`, `tx_discards_phy` | cumulative | NIC buffer exhausted, often PCIe or host backpressure |
-| PHY / signal | `rx_bits_phy` (denominator, **absent on ConnectX-6 Lx**), `rx_corrected_bits_phy` (pre-FEC), `rx_pcs_symbol_err_phy`, `rx_symbol_err_phy` (post-FEC), `rx_err_lane_N_phy` | cumulative | Compute pre/post-FEC BER. Without `rx_bits_phy`, fall back to `rx_bytes_phy`×8 (approximate; mark it in evidence) or deep-mode `mlxlink` BER. Post-FEC errors > 0 → `CRIT`. Per-lane skew → optic/cable suspect (only the lanes the link uses: mlx5 exposes 4 lane counters even on a single-lane 25G link, #16) |
+| PHY / signal | `rx_bits_phy` (denominator, **absent on ConnectX-6 Lx**), `rx_corrected_bits_phy` (pre-FEC), `rx_pcs_symbol_err_phy`, `rx_symbol_err_phy` (post-FEC), `rx_err_lane_N_phy` | cumulative | Compute pre/post-FEC BER. Without `rx_bits_phy`, estimate the bits as link speed × window (the PHY counts idle bits too, so `rx_bytes_phy`×8 would overstate the BER on a quiet link), shown as `BER~` and marked in evidence (#15). The data rate is a few % below the line rate, so the estimate reads slightly high. It is judged only when every lane is NRZ (≤25G per lane; lanes unknown above 25G → not judged), since PAM4 runs a far higher pre-FEC BER by design; deep-mode `mlxlink` reports the measured BER. Post-FEC errors > 0 → `CRIT`. Per-lane skew → optic/cable suspect (only the lanes the link uses: mlx5 exposes 4 lane counters even on a single-lane 25G link, #16) |
 | Frame errors | `rx_crc_errors_phy`, `rx_oversize_pkts_phy`, `rx_undersize_pkts_phy`, `rx_fragments_phy`, `rx_jabbers_phy` | cumulative | CRC → cabling/optic; oversize → MTU mismatch with peer |
 | PCIe path | `rx_pci_signal_integrity`, `tx_pci_signal_integrity` | cumulative | PCIe link recovery from framing/CRC faults → `WARN`, `CRIT` if sustained |
 | PCIe path | `outbound_pci_stalled_rd`, `outbound_pci_stalled_wr`, `outbound_pci_buffer_overflow` (**absent on ConnectX-6 Lx**) | **gauge (%)** | Host root-complex/credit starvation. Do not delta |
@@ -190,8 +191,8 @@ Most mlx5 counters are cumulative since driver load, so absolute values alone ar
 |---|---|---|
 | `mlx5.rx.starvation` | `rx_out_of_buffer`, `rx_buff_alloc_err` → `WARN` | |
 | `mlx5.nic.discards` | `rx_discards_phy`, `tx_discards_phy` → `WARN` | |
-| `mlx5.phy.errors` | `rx_symbol_err_phy`, `rx_pcs_symbol_err_phy` → `CRIT`; pre-FEC BER > 1e-06 → `WARN` (only with `rx_bits_phy`) | `rx_corrected_bits_phy`, `rx_err_lane_N_phy` (lane dominance ≥90% among the lanes in use → hint; lanes from `ethtool IFACE` "Lanes:", else ≤25G = 1 lane, else all) |
-| `mlx5.frame.errors` | CRC, fragments, jabbers, undersize, oversize → `WARN` | |
+| `mlx5.phy.errors` | `rx_symbol_err_phy`, `rx_pcs_symbol_err_phy` → `CRIT`; pre-FEC BER > 1e-06 → `WARN` (`rx_bits_phy`, else estimated from link speed × window, NRZ lanes only); history floor (§5.8) → `WARN` | `rx_corrected_bits_phy`, `rx_err_lane_N_phy` (lane dominance ≥90% among the lanes in use → hint; lanes from `ethtool IFACE` "Lanes:", else ≤25G = 1 lane, else all) |
+| `mlx5.frame.errors` | CRC, fragments, jabbers, undersize, oversize → `WARN`; history floor (§5.8) → `WARN` | |
 | `mlx5.pcie.path` | `rx/tx_pci_signal_integrity`, `outbound_pci_stalled_rd/wr_events` → `WARN` | stall gauges (% at T1, never deltaed) |
 | `mlx5.datapath.faults` | `tx_cqe_err`, `rx_wqe_err`, `tx_recover`, `rx_recover` → `CRIT` | |
 | `mlx5.congestion` | `rx_prioN_buf_discard`, `rx_prioN_cong_discard` → `WARN` | pause frames, global pause, `rx_buffer_passed_thres_phy` |
@@ -402,7 +403,7 @@ Explicit consent boundary. Never runs unless requested.
 
 ## 14. ❓ Open questions
 
-1. **Default `--interval`.** 5 s is a balance between signal and run time. Should monitoring mode default lower?
+1. **Default `--interval`.** 5 s is a balance between signal and run time. Should monitoring mode default lower? Bursty errors miss short windows (#15): the history floor (§5.8) covers the worst case, and the docs recommend `-I 30`+ for troubleshooting.
 2. **Threshold source of truth.** Ship defaults per driver only, or per device ID / firmware range from the start?
 3. **Prometheus textfile output** (`--output prom`) as a later format, to cover trend-based alerting that a snapshot cannot?
 4. **`json_escape` fix in `nic-xray.sh`.** Track as a separate `fix:` change, independent of this design.

@@ -37,6 +37,9 @@
 #   - 2026-10-20: generic.link.state: no carrier on a port in use (bond/bridge member, upper
 #                 devices or a global address) is WARN, CRIT when its bond is down too; deep
 #                 link checks skip ports without carrier instead of reporting noise (#12)
+#   - 2026-10-20: bursty PHY/frame errors no longer read as OK when the window misses them:
+#                 high totals since boot (>=1000, >=60/h over uptime) are WARN; pre-FEC BER is
+#                 estimated from link speed x window when rx_bits_phy is absent (#15)
 #
 # Version: 2.12.0
 
@@ -180,6 +183,23 @@ MLX5_BITS_COUNTER="rx_bits_phy"
 MLX5_CORRECTED_COUNTER="rx_corrected_bits_phy"
 MLX5_LANE_COUNTER_GLOB="rx_err_lane_[0-9]_phy"
 MLX5_PRE_FEC_BER_WARN_EXP=6
+# Without rx_bits_phy the window's bits are estimated as link speed x elapsed time (the PHY counts
+# idle bits too): bits per centisecond per Mb/s, and the most speed digits trusted (10 Tb/s).
+# Speed is the data rate, a few % below the line rate, so the estimate reads slightly high. It is
+# only judged on NRZ lanes (<= SINGLE_LANE_MAX_SPEED per lane): PAM4 links run a far higher
+# pre-FEC BER by design
+BITS_PER_CS_PER_MBPS=10000
+SPEED_MAX_DIGITS=7
+# History floor (#15): bursty PHY/frame errors can miss a short window. When nothing grows in the
+# window, a total of at least MIN errors averaging at least PER_HOUR over host uptime is still WARN
+# (never CRIT). Uptime is at least the time since driver load, so the average is a lower bound
+MLX5_HISTORY_RULES=("mlx5.phy.errors" "mlx5.frame.errors")
+MLX5_HISTORY_MIN_ERRORS=1000
+MLX5_HISTORY_WARN_PER_HOUR=60
+SECONDS_PER_HOUR=3600
+CS_PER_SECOND=100
+# Window suggested when only the history shows errors
+TROUBLESHOOT_INTERVAL=60
 # Big-counter arithmetic: digits that always fit a signed 64-bit integer, and its base
 BIG_DIGITS=18
 BIG_BASE=1000000000000000000
@@ -375,6 +395,8 @@ usage() {
     echo -e " -i, --interface IFACE  Evaluate only IFACE (repeatable; default: all physical NICs)"
     echo -e " -I, --interval SEC     Counter sampling window in seconds (default: $DEFAULT_INTERVAL, max: $MAX_INTERVAL)"
     echo -e "                        Counters are read twice; only growth inside the window is judged."
+    echo -e "                        ${DEFAULT_INTERVAL} s suits sweeps and monitoring; troubleshoot with -I 30 or longer,"
+    echo -e "                        as bursty link errors can miss a short window"
     echo -e "                        0 = single read of totals since boot/driver load (historical;"
     echo -e "                        severity capped at WARN)"
     echo -e " -L, --lookback MIN     Count driver link-down messages in the kernel journal over the last"
@@ -406,7 +428,9 @@ usage() {
     echo -e "                        still flapping in the window (CRIT)"
     echo -e " mlx5.*                 ConnectX (mlx5_core) ethtool -S counters: RX starvation, NIC discards,"
     echo -e "                        PHY symbol errors / pre-FEC BER, frame errors, PCIe path, datapath faults,"
-    echo -e "                        congestion, pause storms, module faults, PHY link-down events"
+    echo -e "                        congestion, pause storms, module faults, PHY link-down events."
+    echo -e "                        PHY/frame errors not growing in the window but high since boot"
+    echo -e "                        (>=$MLX5_HISTORY_MIN_ERRORS, >=$MLX5_HISTORY_WARN_PER_HOUR/h over uptime): WARN"
     echo -e " mlx5.deep.*            -l deep: tool troubleshooting code, module/link FEC mismatch,"
     echo -e "                        effective BER since last clear, module ranges and lane fault flags"
     echo -e "                        (ports without carrier: link checks N/A, Rx power/LOS/CDR LOL not judged)"
@@ -1008,6 +1032,25 @@ fmt_sci() {
     printf '%d.%de-%02d' $(( M / 10 )) $(( M % 10 )) "$E"
 }
 
+# Average errors per hour of a counter total over UPTIME seconds; fails below the history floor
+# (MLX5_HISTORY_MIN_ERRORS total and MLX5_HISTORY_WARN_PER_HOUR). Totals past 18 digits are clamped
+# Args: total uptime-seconds
+mlx5_history_rate() {
+    local N="$1" UP="$2" Q RATE
+    N="${N#"${N%%[!0]*}"}"; N="${N:-0}"
+    (( ${#N} > BIG_DIGITS )) && N=$(( BIG_BASE - 1 ))
+    (( UP > 0 )) || UP=1
+    # N*3600 must stay inside signed 64-bit range: divide first for huge totals
+    if (( N < BIG_BASE / SECONDS_PER_HOUR )); then
+        RATE=$(( N * SECONDS_PER_HOUR / UP ))
+    else
+        Q=$(( N / UP ))
+        if (( Q < BIG_BASE / SECONDS_PER_HOUR )); then RATE=$(( Q * SECONDS_PER_HOUR )); else RATE=$(( BIG_BASE - 1 )); fi
+    fi
+    (( N >= MLX5_HISTORY_MIN_ERRORS && RATE >= MLX5_HISTORY_WARN_PER_HOUR )) || return 1
+    printf '%d' "$RATE"
+}
+
 # Evaluate one mlx5 rule for a port
 # Args: port-index rule-index
 check_mlx5_rule() {
@@ -1016,6 +1059,12 @@ check_mlx5_rule() {
     local CHECK="${MLX5_RULE_ID[R]}" HINT_TXT="${MLX5_RULE_HINT[R]}" REF="$DESIGN_REF §6.2"
     local ITEM GLOB CSEV NAME KEY RC SEV="$SEV_OK" HINT="" UNIT
     local VALUE_PARTS="" CONTEXT="" EVIDENCE="" MATCHED=0 THRESH SHOWN
+    # History floor (#15): only in delta mode, for the PHY/frame rules, with a readable clock
+    local HIST_ON=false HIST="" UP_S=0 RATE
+    if (( INTERVAL > 0 )) && [[ " ${MLX5_HISTORY_RULES[*]} " == *" $CHECK "* && "${SNAP1[time]:-}" =~ ^[0-9]+$ ]]; then
+        HIST_ON=true
+        UP_S=$(( SNAP1[time] / CS_PER_SECOND ))
+    fi
     # Set by mlx5_ber_eval through dynamic scoping
     local LANE_HINT="" BER_VALUE=""
     local -a NAMES1 NAMES0
@@ -1065,6 +1114,9 @@ check_mlx5_rule() {
                 (( INTERVAL > 0 )) && EVIDENCE+=" (+$DELTA)"
                 EVIDENCE+=" "
             fi
+            if $HIST_ON && [[ "$CSEV" != "$SEV_INFO" ]] && RATE=$(mlx5_history_rate "${SNAP1[$KEY]}" "$UP_S"); then
+                HIST+="$NAME ~$RATE/h "
+            fi
             [[ "$DELTA" =~ [1-9] ]] || continue
             # The BER denominator is only lifecycle-checked here; it is not an event
             [[ "$NAME" == "$MLX5_BITS_COUNTER" ]] && continue
@@ -1101,18 +1153,31 @@ check_mlx5_rule() {
         UNIT="since driver load"
         SEV=$(historical_cap "$SEV")
     fi
+    # Nothing grew in the window, but the totals since boot show a bad link (#15)
+    local HIST_FIRED=false
+    if [[ "$SEV" == "$SEV_OK" && -n "$HIST" ]]; then
+        HIST_FIRED=true
+        SEV="$SEV_WARN"
+        UNIT="avg since boot"
+        VALUE_PARTS="history: ${HIST% }"
+    fi
     if [[ "$SEV" != "$SEV_OK" ]]; then
         HINT="$HINT_TXT"
         [[ "$CHECK" == "$MLX5_BER_RULE" ]] && HINT="$(fec_off_hint "$IFACE")$HINT"
         (( INTERVAL == 0 )) && HINT="Historical totals, re-run with -I to see if they grow. $HINT"
+        $HIST_FIRED && HINT="None in this ${INTERVAL}s window, but high totals since boot: bursty errors or a past incident. Watch with -I $TROUBLESHOOT_INTERVAL or longer, or -l deep for the link BER; the totals only reset at driver reload or reboot. $HINT"
+        $HIST_FIRED && [[ -n "$CONTEXT" ]] && HINT+=". Context: ${CONTEXT%, }"
     elif [[ -n "$CONTEXT" ]]; then
         HINT="Context only: ${CONTEXT%, }"
     fi
     [[ -n "${LANE_HINT:-}" ]] && HINT="${HINT:+$HINT. }$LANE_HINT"
     VALUE_PARTS="${VALUE_PARTS% }"
+    # The BER is the window's, not an average since boot like the history next to it
+    [[ -n "${BER_VALUE:-}" ]] && $HIST_FIRED && BER_VALUE="window $BER_VALUE"
     [[ -n "${BER_VALUE:-}" ]] && VALUE_PARTS="${VALUE_PARTS:+$VALUE_PARTS }$BER_VALUE"
     THRESH=">0 $(mlx5_rule_severities "$R")"
     [[ "$CHECK" == "$MLX5_BER_RULE" ]] && THRESH+=", pre-FEC BER>1e-$(printf '%02d' "$MLX5_PRE_FEC_BER_WARN_EXP") $SEV_WARN"
+    $HIST_ON && THRESH+=", history>=${MLX5_HISTORY_WARN_PER_HOUR}/h $SEV_WARN"
     if [[ -z "$VALUE_PARTS" ]]; then
         VALUE_PARTS="0"
         (( INTERVAL > 0 )) && VALUE_PARTS="+0"
@@ -1173,30 +1238,57 @@ port_active_lanes() {
     return 0
 }
 
+# Bits a link at its current speed carries in the window; nothing when the speed or the window
+# length is unknown
+# Args: iface
+window_line_bits() {
+    local SPEED
+    $CLOCK_OK && (( ELAPSED_CS > 0 )) || return 0
+    SPEED=$(read_attr "$SYSFS_NET/$1/speed") || return 0
+    [[ "$SPEED" =~ ^[0-9]+$ ]] && (( ${#SPEED} <= SPEED_MAX_DIGITS )) || return 0
+    SPEED=$(( 10#$SPEED ))
+    (( SPEED > 0 )) || return 0
+    printf '%d' $(( SPEED * BITS_PER_CS_PER_MBPS * ELAPSED_CS ))
+}
+
 # Pre-FEC BER and lane skew for the PHY rule. Sets BER_VALUE, LANE_HINT and may raise SEV to WARN
 # (uses the caller's SEV and EVIDENCE through dynamic scoping)
 mlx5_ber_eval() {
-    local IFACE="$1" CORR BITS NAME TOTAL=0 MAX=0 MAX_LANE="" LANES=0 RC ACTIVE
+    local IFACE="$1" CORR BITS NAME TOTAL=0 MAX=0 MAX_LANE="" LANES=0 RC ACTIVE REL="=" JUDGE=true SPEED
     local BKEY="ets|$IFACE|$MLX5_BITS_COUNTER" CKEY="ets|$IFACE|$MLX5_CORRECTED_COUNTER"
     (( INTERVAL > 0 )) || return 0
 
+    ACTIVE=$(port_active_lanes "$IFACE")
+    RC=0; delta "$CKEY" || RC=$?; (( RC == 0 )) && CORR=$DELTA || CORR=""
     if [[ -z "${SNAP1[$BKEY]+x}" ]]; then
-        EVIDENCE+="; $MLX5_BITS_COUNTER not exposed: pre-FEC BER not computed (deep mode mlxlink reports it)"
-    else
-        RC=0; delta "$CKEY" || RC=$?; (( RC == 0 )) && CORR=$DELTA || CORR=""
-        RC=0; delta "$BKEY" || RC=$?; (( RC == 0 )) && BITS=$DELTA || BITS=""
-        if [[ -n "$CORR" && -n "$BITS" ]] && (( BITS > 0 )); then
-            BER_VALUE="pre-FEC BER=$(fmt_sci "$CORR" "$BITS")"
-            # CORR/BITS > 10^-EXP without multiplying large counters
-            if (( CORR > 0 && CORR > BITS / 10 ** MLX5_PRE_FEC_BER_WARN_EXP )) && [[ "$SEV" == "$SEV_OK" ]]; then
-                SEV="$SEV_WARN"
+        # ConnectX-6 Lx has no rx_bits_phy: estimate the denominator from the link speed (#15)
+        BITS=$(window_line_bits "$IFACE")
+        if [[ -n "$CORR" && -n "$BITS" ]]; then
+            REL="~"
+            EVIDENCE+="; $MLX5_BITS_COUNTER not exposed: pre-FEC BER estimated from link speed x window"
+            # Judged only when every lane is NRZ; unknown lanes are only possible above 25G
+            SPEED=$(read_attr "$SYSFS_NET/$IFACE/speed") || SPEED=0
+            [[ "$SPEED" =~ ^[0-9]{1,7}$ ]] || SPEED=0
+            if [[ -z "$ACTIVE" ]] || (( 10#$SPEED / ACTIVE > SINGLE_LANE_MAX_SPEED )); then
+                JUDGE=false
+                EVIDENCE+=" (not judged: lanes above ${SINGLE_LANE_MAX_SPEED} Mb/s may be PAM4)"
             fi
+        else
+            EVIDENCE+="; $MLX5_BITS_COUNTER not exposed: pre-FEC BER not computed (deep mode mlxlink reports it)"
+        fi
+    else
+        RC=0; delta "$BKEY" || RC=$?; (( RC == 0 )) && BITS=$DELTA || BITS=""
+    fi
+    if [[ -n "$CORR" && -n "$BITS" ]] && (( BITS > 0 )); then
+        BER_VALUE="pre-FEC BER$REL$(fmt_sci "$CORR" "$BITS")"
+        # CORR/BITS > 10^-EXP without multiplying large counters
+        if $JUDGE && (( CORR > 0 && CORR > BITS / 10 ** MLX5_PRE_FEC_BER_WARN_EXP )) && [[ "$SEV" == "$SEV_OK" ]]; then
+            SEV="$SEV_WARN"
         fi
     fi
 
     # mlx5 exposes rx_err_lane_0..3_phy whatever the link width: only the lanes in use count, so a
     # single-lane link never looks "concentrated on lane 0" (#16)
-    ACTIVE=$(port_active_lanes "$IFACE")
     for NAME in "${!SNAP1[@]}"; do
         # shellcheck disable=SC2053
         [[ "$NAME" == "ets|$IFACE|"$MLX5_LANE_COUNTER_GLOB ]] || continue

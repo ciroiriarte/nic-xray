@@ -573,6 +573,124 @@ assert_eq "2-lane link: unused lane 3 ignored" "no" "$([[ "$(lane_hint unused3)"
 rm -f "$FIX/lanes_eth0"
 ets_write eth0 rx_corrected_bits_phy=0 rx_err_lane_0_phy=0 rx_err_lane_1_phy=0 rx_err_lane_2_phy=0 rx_err_lane_3_phy=0
 
+# Pre-FEC BER estimated from link speed x window when rx_bits_phy is absent (#15): 25G, 5.01 s
+printf '25000\n' > "$SYSFS_NET/eth0/speed"
+ber_est() { reset_results; snap_pair "$1"; check_mlx5_port 0; }
+corr_low()  { ets_write eth0 rx_corrected_bits_phy=2000; }
+corr_high() { ets_write eth0 rx_corrected_bits_phy=200000; }
+ets_write eth0
+ber_est corr_low
+assert_eq "estimated BER low: OK"     "OK" "$(sev_of mlx5.phy.errors eth0)"
+assert_eq "estimated BER value"       "pre-FEC BER~1.5e-08" "$(mlx5_rec REC_VALUE mlx5.phy.errors eth0)"
+assert_eq "estimated BER evidence"    "yes" "$([[ "$(mlx5_rec REC_EVIDENCE mlx5.phy.errors eth0)" == *"pre-FEC BER estimated from link speed x window"* ]] && echo yes)"
+ets_write eth0
+ber_est corr_high
+assert_eq "estimated BER>1e-6: WARN"  "WARN" "$(sev_of mlx5.phy.errors eth0)"
+printf -- '-1\n' > "$SYSFS_NET/eth0/speed"
+ets_write eth0
+ber_est corr_high
+assert_eq "no speed: BER not computed, OK" "OK" "$(sev_of mlx5.phy.errors eth0)"
+assert_eq "no speed: not-computed note" "yes" "$([[ "$(mlx5_rec REC_EVIDENCE mlx5.phy.errors eth0)" == *"pre-FEC BER not computed"* ]] && echo yes)"
+# PAM4 lanes are not judged: 100G without "Lanes:", and 2x50G; 4x25G NRZ is
+printf '100000\n' > "$SYSFS_NET/eth0/speed"
+corr_100g() { ets_write eth0 rx_corrected_bits_phy=800000; }
+ets_write eth0
+ber_est corr_100g
+assert_eq "100G, lanes unknown: estimate not judged" "OK" "$(sev_of mlx5.phy.errors eth0)"
+assert_eq "not-judged note" "yes" "$([[ "$(mlx5_rec REC_EVIDENCE mlx5.phy.errors eth0)" == *"(not judged: lanes above 25000 Mb/s may be PAM4)"* ]] && echo yes)"
+printf '2\n' > "$FIX/lanes_eth0"
+ets_write eth0
+ber_est corr_100g
+assert_eq "100G over 2 lanes (PAM4): not judged" "OK" "$(sev_of mlx5.phy.errors eth0)"
+printf '4\n' > "$FIX/lanes_eth0"
+ets_write eth0
+ber_est corr_100g
+assert_eq "100G over 4 NRZ lanes: judged, WARN" "WARN" "$(sev_of mlx5.phy.errors eth0)"
+rm -f "$FIX/lanes_eth0"
+printf '25000\n' > "$SYSFS_NET/eth0/speed"
+CLOCK_OK=false
+ets_write eth0
+ber_est corr_high
+assert_eq "bad clock: BER not estimated" "OK" "$(sev_of mlx5.phy.errors eth0)"
+CLOCK_OK=true
+
+# History floor (#15): no growth in the window, but high totals since boot -> WARN
+assert_eq "history rate"                "136344" "$(mlx5_history_rate 160341353 4233600)"
+assert_eq "history leading zeros"       "3600"   "$(mlx5_history_rate 0001000 1000)"
+RC=0; mlx5_history_rate 999 1 >/dev/null || RC=$?;        assert_eq "history below min count" "1" "$RC"
+RC=0; mlx5_history_rate 5000 2592000 >/dev/null || RC=$?; assert_eq "history below rate (5000 in 30 days)" "1" "$RC"
+assert_eq "history 20-digit total clamped" "yes" "$(mlx5_history_rate 18446744073709551615 100 >/dev/null && echo yes)"
+assert_eq "history divide-first branch" "360000000000000000" "$(mlx5_history_rate 1000000000000000 10)"
+assert_eq "history huge total, short uptime" "yes" "$(mlx5_history_rate 900000000000000000 1 >/dev/null && echo yes)"
+# The reported port: 49 days up, 160M symbol/CRC errors, none in this window
+hist_pair() {  # hist_pair <uptime-s> name=value...: same counters at T0 and T1, T1 at the given uptime
+    local UP="$1"
+    shift
+    reset_results
+    DL_SCRATCH=(); DL_ORDER=()
+    ets_write eth0 "$@"
+    printf '%d.00 0\n' $(( UP - 5 )) > "$FIX/uptime"
+    snapshot SNAP0 DL_SCRATCH
+    printf '%d.00 0\n' "$UP" > "$FIX/uptime"
+    snapshot SNAP1 DL_ORDER
+    check_mlx5_port 0
+}
+hist_pair 4233600 rx_symbol_err_phy=160341353 rx_crc_errors_phy=160341411 rx_corrected_bits_phy=900000000
+assert_eq "history: PHY WARN"           "WARN" "$(sev_of mlx5.phy.errors eth0)"
+assert_eq "history: frame WARN"         "WARN" "$(sev_of mlx5.frame.errors eth0)"
+assert_eq "history: PHY value"          "history: rx_symbol_err_phy ~136344/h window pre-FEC BER~0" "$(mlx5_rec REC_VALUE mlx5.phy.errors eth0)"
+assert_eq "history: unit"               "avg since boot" "$(mlx5_rec REC_UNIT mlx5.phy.errors eth0)"
+assert_eq "history: hint suggests longer window" "yes" "$([[ "$(mlx5_rec REC_HINT mlx5.frame.errors eth0)" == "None in this 5s window, but high totals since boot: bursty errors or a past incident. Watch with -I $TROUBLESHOOT_INTERVAL or longer, or -l deep for the link BER; the totals only reset at driver reload or reboot. Frame errors:"* ]] && echo yes)"
+assert_eq "history: threshold"          ">0 WARN, history>=60/h WARN" "$(mlx5_rec REC_THRESHOLD mlx5.frame.errors eth0)"
+assert_eq "history: other rules untouched" "OK" "$(sev_of mlx5.rx.starvation eth0)"
+# Corrected-bit growth in the window stays visible as context when the floor fires
+hist_ctx() { ets_write eth0 rx_symbol_err_phy=160341353 rx_corrected_bits_phy=900000050; }
+ets_write eth0 rx_symbol_err_phy=160341353 rx_corrected_bits_phy=900000000
+printf '4233595.00 0\n' > "$FIX/uptime"; reset_results; DL_SCRATCH=(); DL_ORDER=()
+snapshot SNAP0 DL_SCRATCH; hist_ctx; printf '4233600.00 0\n' > "$FIX/uptime"; snapshot SNAP1 DL_ORDER
+check_mlx5_port 0
+assert_eq "history: context kept" "yes" "$([[ "$(mlx5_rec REC_HINT mlx5.phy.errors eth0)" == *". Context: rx_corrected_bits_phy +50" ]] && echo yes)"
+# A counter reset stays UNKNOWN whatever the totals
+ets_write eth0 rx_crc_errors_phy=160341411
+crc_reset() { ets_write eth0 rx_crc_errors_phy=5000; }
+snap_pair crc_reset
+check_mlx5_port 0
+assert_eq "history: reset still UNKNOWN" "UNKNOWN" "$(sev_of mlx5.frame.errors eth0)"
+# Corrected bits alone (INFO) never trigger the floor
+hist_pair 4233600 rx_corrected_bits_phy=900000000
+assert_eq "history: INFO counter ignored" "OK" "$(sev_of mlx5.phy.errors eth0)"
+# A one-off burst long ago: 5000 errors over 30 days is below 60/h
+hist_pair 2592000 rx_crc_errors_phy=5000
+assert_eq "history: old burst stays OK" "OK" "$(sev_of mlx5.frame.errors eth0)"
+# A few link-training errors on a young host: below the minimum count
+hist_pair 600 rx_crc_errors_phy=12
+assert_eq "history: few errors stay OK" "OK" "$(sev_of mlx5.frame.errors eth0)"
+# Growth in the window still wins: CRIT, no history value
+ets_write eth0 rx_symbol_err_phy=160341353
+grow_hist() { ets_write eth0 rx_symbol_err_phy=160341356; }
+snap_pair grow_hist
+check_mlx5_port 0
+assert_eq "history: growth still CRIT"  "CRIT" "$(sev_of mlx5.phy.errors eth0)"
+assert_eq "history: growth value"       "rx_symbol_err_phy=+3" "$(mlx5_rec REC_VALUE mlx5.phy.errors eth0 | cut -d' ' -f1)"
+# Absolute mode keeps its own historical cap and hint
+INTERVAL=0
+reset_results
+ets_write eth0 rx_crc_errors_phy=160341411
+DL_ORDER=()
+snapshot SNAP1 DL_ORDER
+check_mlx5_port 0
+assert_eq "history: -I 0 unchanged"     "WARN rx_crc_errors_phy=160341411" "$(sev_of mlx5.frame.errors eth0) $(mlx5_rec REC_VALUE mlx5.frame.errors eth0)"
+INTERVAL=5
+# Unreadable clock: no uptime, no history floor
+reset_results
+ets_write eth0 rx_crc_errors_phy=160341411
+printf 'garbage\n' > "$FIX/uptime"
+snapshot SNAP0 DL_SCRATCH
+snapshot SNAP1 DL_ORDER
+check_mlx5_port 0
+assert_eq "history: no clock, no floor" "OK" "$(sev_of mlx5.frame.errors eth0)"
+ets_write eth0
+
 # --- Table filtering (-a/--all) ---
 USE_COLOR=false
 setup_colors
