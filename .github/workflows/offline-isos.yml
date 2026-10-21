@@ -7,6 +7,10 @@ on:
         description: Version string to embed in ISO filenames (defaults to tag or nic-xray.sh SCRIPT_VERSION)
         required: false
         type: string
+      release_tag:
+        description: Attach the ISOs to this existing release tag (e.g. v2.12.0); empty builds artifacts only
+        required: false
+        type: string
       with_graphviz:
         description: Include graphviz in the offline bundle
         required: false
@@ -91,10 +95,14 @@ jobs:
       - name: Resolve version
         id: version
         shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || '' }}
         run: |
           set -Eeuo pipefail
           if [[ -n "${{ inputs.version || '' }}" ]]; then
             version="${{ inputs.version }}"
+          elif [[ -n "$RELEASE_TAG" ]]; then
+            version="${RELEASE_TAG#v}"
           elif [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
             version="${GITHUB_REF_NAME#v}"
           elif [[ "${{ github.event_name }}" == "release" ]]; then
@@ -129,7 +137,7 @@ jobs:
 
   release-assets:
     name: Attach offline ISOs to release
-    if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v') || (inputs.release_tag || '') != ''
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -145,11 +153,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           # No checkout in this job: tell gh which repository to use
           GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag || '' }}
         shell: bash
         run: |
           set -Eeuo pipefail
           tag="${GITHUB_REF_NAME}"
-          if [[ "${{ github.event_name }}" == "release" ]]; then
+          if [[ -n "$RELEASE_TAG" ]]; then
+            tag="$RELEASE_TAG"
+          elif [[ "${{ github.event_name }}" == "release" ]]; then
             tag="${{ github.event.release.tag_name }}"
           fi
           gh release view "$tag" >/dev/null 2>&1 || \
