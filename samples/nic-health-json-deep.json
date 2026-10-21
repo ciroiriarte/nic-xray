@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "tool": "nic-health.sh",
-  "version": "2.12.0",
+  "version": "2.12.1",
   "host": "server-01.example.net",
   "collected_at": "2026-10-20T17:46:09Z",
   "level": "deep",
