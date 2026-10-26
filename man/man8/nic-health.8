@@ -381,7 +381,9 @@ and a summary line with the count per severity and the verdict.
 One row per result with columns: severity, scope, target, check_id, value,
 unit, threshold, evidence, hint, ref. Fields are quoted (RFC 4180).
 .SS JSON
-An object with schema_version, tool, version, host, collected_at, level,
+An object with schema_version, tool, version, host, collected_at, uptime_s
+(host uptime in seconds at collected_at), boot_id (kernel boot ID, changes on
+every reboot; both null if unreadable), level,
 lookback_min (0 when the look-back is off), mode
 .RB ( delta " or " absolute ),
 interval_s, elapsed_s (null if the clock was unreadable), capabilities (tool

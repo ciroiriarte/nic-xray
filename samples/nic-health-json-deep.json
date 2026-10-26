@@ -4,6 +4,8 @@
   "version": "2.12.2",
   "host": "server-01.example.net",
   "collected_at": "2026-10-20T17:46:09Z",
+  "uptime_s": 1987654,
+  "boot_id": "3f2a6c1e-8b4d-4e7f-9a10-5c6d7e8f9a0b",
   "level": "deep",
   "mode": "delta",
   "interval_s": 5,

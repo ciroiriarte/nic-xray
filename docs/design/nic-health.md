@@ -341,6 +341,8 @@ Explicit consent boundary. Never runs unless requested.
   "version": "x.y.z",
   "host": "…",
   "collected_at": "2026-10-19T12:00:00Z",
+  "uptime_s": 4844149,
+  "boot_id": "3f2a6c1e-8b4d-4e7f-9a10-5c6d7e8f9a0b",
   "interval_s": 5.01,
   "level": "basic",
   "lookback_min": 60,
@@ -351,6 +353,7 @@ Explicit consent boundary. Never runs unless requested.
 }
 ```
 
+- **`uptime_s` / `boot_id`:** host uptime in whole seconds and the kernel boot ID (`/proc/sys/kernel/random/boot_id`), both read at `collected_at`, `null` when unreadable or malformed. They let a later comparison turn since-boot totals into rates and tell a counter reset (new `boot_id`) from counter growth (`docs/design/nic-sweep.md` §7, P1). Additive: `schema_version` stays 1.
 - **CSV:** one row per result record (RFC 4180, reusing the `csv_escape` approach).
 
 ---

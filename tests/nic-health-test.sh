@@ -1257,6 +1257,58 @@ LOOKBACK_STATE=""
 # JSON header carries the window
 assert_eq "json lookback_min" "yes" "$(render_json | grep -q '"lookback_min": 60,' && echo yes)"
 
+# --- Host uptime and boot ID in the JSON envelope (nic-sweep design P1) ---
+BOOT_UUID="0f1e2d3c-4b5a-4968-8778-a6b5c4d3e2f1"
+PROC_BOOT_ID="$FIX/boot_id"
+printf '%s\n' "$BOOT_UUID" > "$PROC_BOOT_ID"
+assert_eq "boot_id read" "$BOOT_UUID" "$(read_boot_id)"
+printf 'not-a-uuid\n' > "$PROC_BOOT_ID"
+RC=0; OUT=$(read_boot_id) || RC=$?
+assert_eq "boot_id malformed fails" "1 " "$RC $OUT"
+: > "$PROC_BOOT_ID"
+RC=0; read_boot_id >/dev/null || RC=$?
+assert_eq "boot_id empty fails" "1" "$RC"
+rm -f "$PROC_BOOT_ID"
+RC=0; read_boot_id >/dev/null 2>&1 || RC=$?
+assert_eq "boot_id missing fails" "1" "$RC"
+
+printf '4844149.08 306790526.43\n' > "$FIX/uptime"
+assert_eq "uptime whole seconds" "4844149" "$(uptime_seconds)"
+printf 'garbage\n' > "$FIX/uptime"
+RC=0; uptime_seconds >/dev/null || RC=$?
+assert_eq "uptime seconds malformed fails" "1" "$RC"
+
+# Captured together; unknown sources leave the values empty
+printf '%s\n' "$BOOT_UUID" > "$PROC_BOOT_ID"
+printf '4844149.08 306790526.43\n' > "$FIX/uptime"
+capture_host_clock
+assert_eq "captured uptime and boot ID" "4844149 $BOOT_UUID" "$HOST_UPTIME_S $HOST_BOOT_ID"
+assert_eq "json uptime_s" "yes" "$(render_json | grep -q '"uptime_s": 4844149,' && echo yes)"
+assert_eq "json boot_id" "yes" "$(render_json | grep -q "\"boot_id\": \"$BOOT_UUID\"," && echo yes)"
+assert_eq "json order: collected_at, uptime_s, boot_id" "collected_at uptime_s boot_id" \
+    "$(render_json | grep -o -E '^  "(collected_at|uptime_s|boot_id)"' | tr -d ' "' | tr '\n' ' ' | sed 's/ $//')"
+
+PROC_BOOT_ID="$FIX/no_such_boot_id"
+printf 'garbage\n' > "$FIX/uptime"
+HOST_UPTIME_S="stale"; HOST_BOOT_ID="stale"
+capture_host_clock
+assert_eq "unknown uptime and boot ID are empty" "|" "$HOST_UPTIME_S|$HOST_BOOT_ID"
+assert_eq "json uptime_s null" "yes" "$(render_json | grep -q '"uptime_s": null,' && echo yes)"
+assert_eq "json boot_id null" "yes" "$(render_json | grep -q '"boot_id": null,' && echo yes)"
+if command -v python3 &>/dev/null; then
+    if render_json | python3 -I -c 'import json,sys; d=json.load(sys.stdin); assert d["uptime_s"] is None and d["boot_id"] is None and d["schema_version"] == 1' 2>/dev/null; then
+        (( ++PASS ))
+    else
+        (( ++FAIL )); echo "❌ render_json with unknown uptime/boot ID is not valid JSON"
+    fi
+fi
+assert_eq "CSV header unchanged" "severity,scope,target,check_id,value,unit,threshold,evidence,hint,ref" "$(render_csv | head -1)"
+
+# Strict shell: missing sources must not abort under set -e / set -u
+( set -euo pipefail; PROC_BOOT_ID="$FIX/no_such_boot_id"; PROC_UPTIME="$FIX/no_such_uptime"; capture_host_clock; echo "finished" ) > "$FIX/out" 2>&1
+assert_eq "set -euo pipefail with missing uptime/boot ID" "finished" "$(tail -1 "$FIX/out")"
+printf '4844149.08 306790526.43\n' > "$FIX/uptime"
+
 # --- Verdict precedence ---
 for CASE in "OK N/A:OK 0" "OK UNKNOWN:UNKNOWN 3" "WARN UNKNOWN:WARN 1" "WARN CRIT UNKNOWN:CRIT 2"; do
     read -ra REC_SEV <<< "${CASE%%:*}"

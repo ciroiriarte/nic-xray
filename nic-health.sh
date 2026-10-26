@@ -85,6 +85,9 @@ SYSFS_NET="/sys/class/net"
 SYSFS_PCI="/sys/bus/pci/devices"
 PCI_SUBSYSTEM="pci"
 PROC_UPTIME="/proc/uptime"
+# Changes on every boot; lets a later comparison tell a counter reset from counter growth
+PROC_BOOT_ID="/proc/sys/kernel/random/boot_id"
+BOOT_ID_PATTERN='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 
 # Sampling window (seconds); 0 = absolute totals since boot/driver load
 DEFAULT_INTERVAL=5
@@ -338,6 +341,9 @@ LOOKBACK_ERR=""
 DL_PORT_ERROR=""
 # false when /proc/uptime could not be read for either snapshot
 CLOCK_OK=true
+# Host uptime (whole seconds) and boot ID at collection time; empty when unreadable (JSON null)
+HOST_UPTIME_S=""
+HOST_BOOT_ID=""
 # Reporter order from the T0 snapshot; only passed by name, never read
 # shellcheck disable=SC2034
 DL_SCRATCH=()
@@ -505,6 +511,27 @@ uptime_cs() {
     else
         return 1
     fi
+}
+
+# Host uptime in whole seconds
+uptime_seconds() {
+    local CS
+    CS=$(uptime_cs) || return 1
+    printf '%d' $(( CS / CS_PER_SECOND ))
+}
+
+# Kernel boot ID (a new UUID on every boot); fails unless it is a well-formed UUID
+read_boot_id() {
+    local ID
+    ID=$(read_attr "$PROC_BOOT_ID") || return 1
+    [[ "$ID" =~ $BOOT_ID_PATTERN ]] || return 1
+    printf '%s' "$ID"
+}
+
+# Uptime and boot ID for the JSON envelope, taken at the collected_at instant
+capture_host_clock() {
+    HOST_UPTIME_S=$(uptime_seconds) || HOST_UPTIME_S=""
+    HOST_BOOT_ID=$(read_boot_id) || HOST_BOOT_ID=""
 }
 
 # Convert a PCIe speed string ("16.0 GT/s PCIe", "8 GT/s") to tenths of GT/s
@@ -2364,6 +2391,16 @@ render_json() {
     printf '  "version": "%s",\n' "$SCRIPT_VERSION"
     printf '  "host": "%s",\n' "$(json_escape "$HOSTNAME")"
     printf '  "collected_at": "%s",\n' "$COLLECTED_AT"
+    if [[ -n "$HOST_UPTIME_S" ]]; then
+        printf '  "uptime_s": %d,\n' "$HOST_UPTIME_S"
+    else
+        printf '  "uptime_s": null,\n'
+    fi
+    if [[ -n "$HOST_BOOT_ID" ]]; then
+        printf '  "boot_id": "%s",\n' "$HOST_BOOT_ID"
+    else
+        printf '  "boot_id": null,\n'
+    fi
     printf '  "level": "%s",\n' "$LEVEL"
     printf '  "lookback_min": %d,\n' "$LOOKBACK"
     if (( INTERVAL > 0 )); then
@@ -2455,6 +2492,7 @@ main() {
 
     preflight
     TZ=UTC0 printf -v COLLECTED_AT '%(%Y-%m-%dT%H:%M:%SZ)T' -1
+    capture_host_clock
 
     discover
 
