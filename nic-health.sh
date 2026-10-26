@@ -1570,32 +1570,60 @@ check_deep_port() {
         return 0
     fi
     SEV="$SEV_OK"; HINT=""; VALUE=""; EVIDENCE=""
+    local -a LANES
+    local LN M_MIN M_MAX RAW_MIN RAW_MAX OUT_LANES SET_LANES
     for KEY in "${DEEP_RANGE_KEYS[@]}"; do
         V="${DEEP_KV["$IFACE|$KEY"]:-}"
-        [[ "$V" =~ ^(-?[0-9.]+)\ \[(-?[0-9.]+)\.\.(-?[0-9.]+)\]$ ]] || continue
-        RAW="${BASH_REMATCH[1]}"; LO="${BASH_REMATCH[2]}"; HI="${BASH_REMATCH[3]}"
-        if ! { M_V=$(to_milli "$RAW") && M_LO=$(to_milli "$LO") && M_HI=$(to_milli "$HI"); }; then
-            continue
-        fi
+        # One value, or one per lane on multi-lane modules (QSFP28: "a,b,c,d [lo..hi]")
+        [[ "$V" =~ ^(-?[0-9.]+(,-?[0-9.]+)*)\ \[(-?[0-9.]+)\.\.(-?[0-9.]+)\]$ ]] || continue
+        RAW="${BASH_REMATCH[1]}"; LO="${BASH_REMATCH[3]}"; HI="${BASH_REMATCH[4]}"
+        { M_LO=$(to_milli "$LO") && M_HI=$(to_milli "$HI"); } || continue
+        IFS=',' read -ra LANES <<< "$RAW"
+        OUT_LANES=""; M_MIN=""; M_MAX=""
+        for (( LN = 0; LN < ${#LANES[@]}; LN++ )); do
+            M_V=$(to_milli "${LANES[LN]}") || continue 2
+            if [[ -z "$M_MIN" ]] || (( M_V < M_MIN )); then M_MIN=$M_V; RAW_MIN="${LANES[LN]}"; fi
+            if [[ -z "$M_MAX" ]] || (( M_V > M_MAX )); then M_MAX=$M_V; RAW_MAX="${LANES[LN]}"; fi
+            (( M_V < M_LO || M_V > M_HI )) && OUT_LANES+="lane $(( LN + 1 )) ${LANES[LN]}, "
+        done
         EVIDENCE+="$KEY=$V; "
-        VALUE+="${KEY%% *}=$RAW "
+        if (( ${#LANES[@]} > 1 )); then
+            VALUE+="${KEY%% *}=$RAW_MIN..$RAW_MAX "
+        else
+            VALUE+="${KEY%% *}=$RAW "
+        fi
         # No light is expected without a link: DEEP_NOLINK_EXEMPT_KEYS are shown, not judged
         if ! $LINK_UP && [[ " ${DEEP_NOLINK_EXEMPT_KEYS[*]} " == *" $KEY "* ]]; then
             EVIDENCE="${EVIDENCE%; } (not judged: no link); "
-        elif (( M_V < M_LO || M_V > M_HI )); then
+        elif [[ -n "$OUT_LANES" ]]; then
             SEV="$SEV_WARN"
-            HINT+="$KEY $RAW outside [$LO..$HI]; "
+            if (( ${#LANES[@]} > 1 )); then
+                HINT+="$KEY ${OUT_LANES%, } outside [$LO..$HI]; "
+            else
+                HINT+="$KEY $RAW outside [$LO..$HI]; "
+            fi
         fi
     done
     for KEY in "${DEEP_FLAG_KEYS[@]}"; do
         FLAG="${DEEP_KV["$IFACE|$KEY"]:-}"
-        [[ "$FLAG" =~ ^[0-9]+$ ]] || continue
+        # A single lane mask, or one flag per lane on multi-lane modules ("0,0,1,0")
+        [[ "$FLAG" =~ ^[0-9]+(,[0-9]+)*$ ]] || continue
         EVIDENCE+="$KEY=$FLAG; "
+        IFS=',' read -ra LANES <<< "$FLAG"
+        SET_LANES=""
+        for (( LN = 0; LN < ${#LANES[@]}; LN++ )); do
+            (( 10#${LANES[LN]} != 0 )) && SET_LANES+="$(( LN + 1 )),"
+        done
+        [[ -z "$SET_LANES" ]] && continue
         if ! $LINK_UP && [[ " ${DEEP_NOLINK_EXEMPT_KEYS[*]} " == *" $KEY "* ]]; then
-            (( 10#$FLAG != 0 )) && EVIDENCE="${EVIDENCE%; } (not judged: no link); "
-        elif (( 10#$FLAG != 0 )); then
+            EVIDENCE="${EVIDENCE%; } (not judged: no link); "
+        else
             SEV="$SEV_WARN"
-            HINT+="${KEY% \[per lane\]} set (lane mask $FLAG); "
+            if (( ${#LANES[@]} > 1 )); then
+                HINT+="${KEY% \[per lane\]} set on lane ${SET_LANES%,}; "
+            else
+                HINT+="${KEY% \[per lane\]} set (lane mask $FLAG); "
+            fi
         fi
     done
     [[ -n "$HINT" ]] && HINT="${HINT%; }: reseat or replace the module, check the peer optic and fiber"

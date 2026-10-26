@@ -893,6 +893,54 @@ reset_results; check_deep_port 0
 assert_eq "mstflint 4.26 has no Link Down Counter" "" "${DEEP_KV[eth0|Link Down Counter]:-}"
 assert_eq "mstflint 4.26 BER evidence" "Effective Physical BER=3E-9 Raw Physical BER=7E-7 Effective Physical Errors=44005346 Raw Physical Errors Per Lane=9503137852 since 9145.9 min" "$(mlx5_rec REC_EVIDENCE mlx5.deep.ber eth0)"
 assert_eq "mstflint 4.26 BER still WARN" "WARN" "$(sev_of mlx5.deep.ber eth0)"
+# Multi-lane module (QSFP28 100G SR4): per-lane bias/Rx/Tx and per-lane flags are judged per lane
+QSFP="$FIXTURES/mstlink-4.26-cx6dx-100g-sr4-qsfp28.txt"
+# shellcheck disable=SC2329
+mstlink() { cat "$QSFP"; }
+DEEP_KV=(); DEEP_ERR=(); DEEP_TOOL_USED=()
+deep_query mstlink eth0 0000:01:00.0
+reset_results; check_deep_port 0
+assert_eq "qsfp28 module OK" "OK" "$(sev_of mlx5.deep.module eth0)"
+assert_eq "qsfp28 value shows lane min..max" "Temperature=52 Voltage=3295.3 Bias=7.408..7.592 Rx=-1.445..-0.372 Tx=1.189..1.386" \
+    "$(mlx5_rec REC_VALUE mlx5.deep.module eth0)"
+assert_eq "qsfp28 evidence keeps every Rx lane" "yes" \
+    "$([[ "$(mlx5_rec REC_EVIDENCE mlx5.deep.module eth0)" == *"Rx Power Current [dBm]=-1.445,-0.405,-0.372,-1.284 [-14.089..3.398]"* ]] && echo yes)"
+assert_eq "qsfp28 evidence keeps lane flags" "yes" \
+    "$([[ "$(mlx5_rec REC_EVIDENCE mlx5.deep.module eth0)" == *"Tx Fault [per lane]=0,0,0,0; Rx LOS [per lane]=0,0,0,0"* ]] && echo yes)"
+# One weak lane is a WARN naming the lane
+sed -E 's/^(Rx Power Current \[dBm\] +: )-1.445,-0.405/\1-1.445,-15.2/' "$QSFP" > "$FIX/qsfp-weak.txt"
+# shellcheck disable=SC2329
+mstlink() { cat "$FIX/qsfp-weak.txt"; }
+DEEP_KV=(); DEEP_ERR=(); DEEP_TOOL_USED=()
+deep_query mstlink eth0 0000:01:00.0
+reset_results; check_deep_port 0
+assert_eq "qsfp28 weak lane WARN" "WARN" "$(sev_of mlx5.deep.module eth0)"
+assert_eq "qsfp28 weak lane hint" "Rx Power Current [dBm] lane 2 -15.2 outside [-14.089..3.398]: reseat or replace the module, check the peer optic and fiber" \
+    "$(mlx5_rec REC_HINT mlx5.deep.module eth0)"
+# A fault flag on one lane is a WARN naming the lane
+sed -E 's/^(Tx Fault \[per lane\] +: )0,0,0,0/\10,0,1,0/' "$QSFP" > "$FIX/qsfp-fault.txt"
+# shellcheck disable=SC2329
+mstlink() { cat "$FIX/qsfp-fault.txt"; }
+DEEP_KV=(); DEEP_ERR=(); DEEP_TOOL_USED=()
+deep_query mstlink eth0 0000:01:00.0
+reset_results; check_deep_port 0
+assert_eq "qsfp28 lane fault WARN" "WARN" "$(sev_of mlx5.deep.module eth0)"
+assert_eq "qsfp28 lane fault hint" "Tx Fault set on lane 3: reseat or replace the module, check the peer optic and fiber" \
+    "$(mlx5_rec REC_HINT mlx5.deep.module eth0)"
+# Without link: dark Rx lanes and Rx LOS on every lane are expected, not judged
+sed -E -e 's/^(Rx Power Current \[dBm\] +: ).*/\1-40,-40,-40,-40 [-14.089..3.398]/' \
+    -e 's/^(Rx LOS \[per lane\] +: )0,0,0,0/\11,1,1,1/' "$QSFP" > "$FIX/qsfp-dark.txt"
+# shellcheck disable=SC2329
+mstlink() { cat "$FIX/qsfp-dark.txt"; }
+printf 'down\n' > "$SYSFS_NET/eth0/operstate"
+DEEP_KV=(); DEEP_ERR=(); DEEP_TOOL_USED=()
+deep_query mstlink eth0 0000:01:00.0
+reset_results; check_deep_port 0
+assert_eq "qsfp28 no link: dark lanes not judged" "OK" "$(sev_of mlx5.deep.module eth0)"
+printf 'up\n' > "$SYSFS_NET/eth0/operstate"
+# shellcheck disable=SC2329
+mstlink() { cat "$FIXTURES/mstlink-4.26-cx6lx-25g-sr-ber-errors.txt"; }
+
 # A required counter that is missing is still flagged with "?"
 DEEP_KV=(["eth0|Effective Physical BER"]="3E-9" ["eth0|Raw Physical BER"]="7E-7" ["eth0|Identifier"]="N/A")
 DEEP_TOOL_USED=([eth0]=mstlink)

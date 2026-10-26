@@ -303,6 +303,9 @@ counter; MFT and newer mstflint do).
 .B mlx5.deep.module
 Module temperature, voltage, bias current or optical power outside the module's
 own range, or any lane with Tx fault, Rx LOS or CDR loss of lock \(-> WARN.
+Multi-lane modules (for example QSFP28 100G SR4) are judged lane by lane: the
+value shows the lowest and highest lane, the evidence lists every lane and the
+hint names the lane at fault.
 .TP
 .B mlx5.deep
 The query failed or timed out \(-> UNKNOWN. No deep tool installed \(-> N/A.
