@@ -1,0 +1,304 @@
+.\" Man page for nic-sweep.sh
+.\" Written in classic troff/groff format
+.TH NIC-SWEEP 8 "2026-10-26" "nic-sweep 2.13.0" "System Administration Commands"
+.SH NAME
+nic-sweep \- collect nic-health (and nic-xray) from every host of an inventory over SSH
+.SH SYNOPSIS
+.B nic-sweep.sh
+.BR \-f | \-\-inventory
+.I FILE
+.RI [ \-s | \-\-site
+.IR SITE ]...
+.RI [ \-J | \-\-jump
+.IR HOST ]
+.RI [ \-u | \-\-user
+.IR USER ]
+.RI [ \-p | \-\-parallel
+.IR N ]
+.RI [ \-T | \-\-timeout
+.IR SEC ]
+.RI [ \-o | \-\-output\-dir
+.IR DIR ]
+.RI [ \-l | \-\-level
+.IR basic | deep ]
+.RI [ \-I | \-\-interval
+.IR SEC ]
+.RB [ \-\-no\-xray ]
+.RB [ \-\-ship
+.IR PATH ]
+.RB [ \-\-accept\-new\-hostkeys ]
+.RI [ \-n | \-\-no\-color ]
+.RI [ \-v | \-\-version ]
+.RI [ \-h | \-\-help ]
+.SH DESCRIPTION
+.B nic-sweep.sh
+is the fleet companion of
+.BR nic-health.sh (8)
+and
+.BR nic-xray.sh (8).
+It reads an inventory, connects to each host over SSH (in parallel), runs
+.B nic-health \-O json
+and, where installed,
+.BR "nic-xray \-\-all \-\-output json" ,
+and writes one sweep directory per site:
+.PP
+.RS
+.nf
+DIR/<site>/<YYYYmmddTHHMMSSZ>/
+  sweep.json      how the sweep ran: version, options, inventory hash,
+                  start/end, host counts by status, verdict and nic-xray
+  MANIFEST.tsv    host, address, status, exit_code, duration_s, xray, verdict
+  merged.csv      every nic-health result, prefixed with site, hostname,
+                  collected_at, version, level, interval_s, uptime_s, boot_id
+  nodes/<host>.json       nic-health JSON, byte for byte
+  nodes/<host>.xray.json  nic-xray JSON (when nic-xray is installed)
+  nodes/<host>.err        stderr of both tools
+.fi
+.RE
+.PP
+The per-host JSON is the record of the sweep; every other file can be rebuilt
+from it.
+.B merged.csv
+always carries how the data was collected (tool version, level, window, time,
+uptime and boot ID), which a plain
+.B nic-health \-O csv
+does not.
+.PP
+The tool is read-only on the hosts: it never installs or changes anything.
+It never prompts: SSH runs with
+.B BatchMode=yes
+and the tools with
+.BR "sudo \-n" ;
+a host that would ask for a password is recorded as a failure instead.
+.SH OPTIONS
+.TP
+.BR \-f ", " \-\-inventory " " \fIFILE\fR
+Hosts to sweep (required), one per line:
+.IR site , host , address [, user ].
+.I host
+names the host in the sweep;
+.I address
+is what SSH connects to (name or IP).
+Blank lines, lines starting with
+.B #
+and a
+.B site,host,address,user
+header are ignored. Every field must match
+.B [A-Za-z0-9._-]+
+(the address may also contain
+.BR : );
+a line that does not, or a duplicate host within a site, is reported and skipped.
+.TP
+.BR \-s ", " \-\-site " " \fISITE\fR
+Only sweep this site. Repeatable. Default: every site in the inventory.
+.TP
+.BR \-J ", " \-\-jump " " \fIHOST\fR
+SSH jump host,
+.RI [ user @] host [: port ],
+passed to
+.BR "ssh \-J" .
+.TP
+.BR \-u ", " \-\-user " " \fIUSER\fR
+SSH user for inventory lines without one. Default: the user from your SSH
+configuration.
+.TP
+.BR \-p ", " \-\-parallel " " \fIN\fR
+Hosts swept at once (1\-256, default 8).
+.TP
+.BR \-T ", " \-\-timeout " " \fISEC\fR
+Wall-clock limit for nic-health on one host (1\-7200). Default: the interval plus
+300 seconds in deep mode, plus 120 seconds in basic mode. nic-xray has its own
+120-second limit.
+.TP
+.BR \-o ", " \-\-output\-dir " " \fIDIR\fR
+Root of the sweep tree (default
+.BR ./sweeps ).
+Directories are created with mode 0750 and files with 0640. An existing sweep
+directory is never overwritten.
+.TP
+.BR \-l ", " \-\-level " " \fIbasic\fR|\fIdeep\fR
+nic-health level (default
+.BR deep ).
+.TP
+.BR \-I ", " \-\-interval " " \fISEC\fR
+nic-health sampling window (0\-3600, default 30). A window of 30 seconds or more
+catches bursty link errors that a 5-second window misses.
+.TP
+.B \-\-no\-xray
+Do not collect nic-xray. By default it is collected on every host where
+.B nic-xray
+(or
+.BR nic-xray.sh )
+is on the remote PATH; hosts without it are recorded as
+.B absent
+in the manifest, not as a failure.
+.TP
+.BI \-\-ship " PATH"
+Send this local
+.B nic-health.sh
+to each host over the SSH connection, write it to a private temporary file under
+.BR /tmp ,
+run it with
+.B sudo \-n
+and delete it on exit (also on HUP, INT or TERM). For hosts without the package.
+The SSH user needs sudo rights for
+.BR "bash /tmp/nic-health.*" ,
+which amounts to unrestricted root; prefer the package where that is not
+acceptable. Without this option the
+remote
+.B nic-health
+(or
+.BR nic-health.sh )
+on the PATH is used.
+.TP
+.B \-\-accept\-new\-hostkeys
+Trust unknown host keys on first contact
+.RB ( StrictHostKeyChecking=accept-new ).
+By default your SSH host key policy applies.
+.TP
+.BR \-n ", " \-\-no\-color
+Disable color and the progress bar (both are off when output is not a terminal).
+.TP
+.BR \-v ", " \-\-version
+Print the version and exit.
+.TP
+.BR \-h ", " \-\-help
+Print the help and exit.
+.SH HOST STATUS
+.TP
+.B ok
+nic-health returned its JSON (any verdict).
+.TP
+.B ssh-fail
+SSH could not connect or authenticate (exit 255).
+.TP
+.B sudo-fail
+.B sudo \-n
+refused (a password or terminal would be needed, the command is not allowed),
+or sudo is not installed.
+.TP
+.B tool-missing
+Neither
+.B nic-health
+nor
+.B nic-health.sh
+is on the remote PATH.
+.TP
+.B timeout
+The host did not finish within
+.BR \-\-timeout .
+.TP
+.B bad-output
+Anything else: the output is not nic-health JSON with a known verdict (strict JSON:
+non-finite numbers such as
+.B \-inf
+are rejected even though
+.BR jq (1)
+accepts them), or the collection ended without a result.
+.PP
+nic-xray is recorded separately as
+.BR ok ,
+.B absent
+(not installed),
+.B failed
+(error or invalid JSON) or
+.B skipped
+(\fB\-\-no\-xray\fR, or the host was unreachable or timed out).
+.SH NOTES
+The remote commands are run by the SSH user's login shell, which must be a POSIX
+shell (sh, dash, bash, ksh, zsh); a csh or fish login shell yields
+.BR bad-output .
+Skipped inventory lines are reported when the sweep starts and counted in
+.BR sweep.json ;
+they do not change the exit status.
+The remote commands run with
+.BR LC_ALL=C ,
+so sudo messages can be classified. When the host has
+.BR timeout (1),
+the remote tool is limited to the local timeout minus 5 seconds, so a dropped
+SSH connection leaves no long-running root process. Interrupting
+.B nic-sweep.sh
+stops every running collection before it exits.
+.SH REQUIREMENTS
+.IP \(bu 2
+Bash 4.4 or newer on the operator host, run as an unprivileged user.
+.IP \(bu 2
+.BR ssh (1),
+.BR timeout (1),
+.BR jq (1),
+.BR sha256sum (1),
+.BR getopt (1).
+.IP \(bu 2
+On each host:
+.B nic-health
+(package) or
+.BR \-\-ship ,
+passwordless
+.B sudo
+for the SSH user to run it, and optionally
+.BR nic-xray .
+.SH EXIT STATUS
+Like nic-health, plus collection failures. A CRIT is never hidden behind an
+unreachable host.
+.TP
+.B 0
+Every host collected, all verdicts OK.
+.TP
+.B 1
+Every host collected, at least one WARN and no CRIT.
+.TP
+.B 2
+At least one CRIT, even if some hosts could not be collected.
+.TP
+.B 3
+No CRIT, but at least one host was not collected; or no WARN and at least one
+host reported UNKNOWN; or a usage error.
+.PP
+Precedence: CRIT > a host not collected > WARN > UNKNOWN > OK. Among verdicts this
+is the order nic-health uses.
+.SH EXAMPLES
+Inventory (one file can hold several sites):
+.PP
+.RS
+.nf
+site,host,address,user
+SITE1,node-ctrl-01,10.0.0.15
+SITE1,node-cmp-01,10.0.0.20,ops
+SITE2,node-ctrl-01,192.0.2.15
+.fi
+.RE
+.PP
+Sweep every site, deep mode, 30-second window:
+.PP
+.RS
+.B nic-sweep.sh \-f inventory.csv
+.RE
+.PP
+One site, through a jump host, 16 hosts at a time:
+.PP
+.RS
+.B nic-sweep.sh \-f inventory.csv \-s SITE1 \-J admin@jump.example \-p 16
+.RE
+.PP
+Hosts without the package: ship the local script:
+.PP
+.RS
+.B nic-sweep.sh \-f inventory.csv \-\-ship ./nic-health.sh
+.RE
+.PP
+Build an inventory from Juju machines of one model (site name supplied):
+.PP
+.RS
+.nf
+juju machines \-m openstack \-\-format json |
+  jq \-r '.machines[] | ["SITE1", .hostname, .["dns-name"]] | @csv' | tr \-d '"'
+.fi
+.RE
+.SH AUTHORS
+Ciro Iriarte <ciro.iriarte+software@gmail.com>
+.SH SEE ALSO
+.BR nic-health.sh (8),
+.BR nic-xray.sh (8),
+.BR ssh (1),
+.BR sudo (8),
+.BR jq (1)

@@ -15,6 +15,7 @@ Detailed physical network interface diagnostics for Linux.
 - [Usage](#-usage)
 - [Output Examples](#-output-examples)
 - [NIC Health Checks (nic-health.sh)](#-nic-health-checks-nic-healthsh)
+- [Fleet Sweeps (nic-sweep.sh)](#%EF%B8%8F-fleet-sweeps-nic-sweepsh)
 - [License](#-license)
 - [Contributing](#-contributing)
 - [Authors](#%EF%B8%8F-authors)
@@ -46,6 +47,8 @@ Supports multiple output formats: **table** (default, with dynamic column widths
 Originally developed for OpenStack node deployments, it is suitable for any Linux environment.
 
 > 🩺 **Companion:** [`nic-health.sh`](#-nic-health-checks-nic-healthsh) evaluates NIC hardware and data-path health (PCIe, AER, temperature, devlink, ConnectX counters, optional vendor-tool deep mode) and returns a Nagios-compatible verdict.
+>
+> 🛰️ **Fleet:** [`nic-sweep.sh`](#%EF%B8%8F-fleet-sweeps-nic-sweepsh) runs nic-health (and nic-xray) on every host of an inventory over SSH and writes one comparable sweep per site.
 
 ## 🔍 Features
 
@@ -308,6 +311,9 @@ sudo chmod +x /usr/local/sbin/nic-xray.sh
 # Companion health checks (optional)
 sudo cp nic-health.sh /usr/local/sbin/
 sudo chmod +x /usr/local/sbin/nic-health.sh
+# Fleet sweeps over SSH (optional, operator host only)
+sudo cp nic-sweep.sh /usr/local/bin/
+sudo chmod +x /usr/local/bin/nic-sweep.sh
 ```
 
 #### Man page
@@ -319,6 +325,7 @@ A man page is available under `man/man8/` for detailed reference (section 8: sys
 ```bash
 man -l man/man8/nic-xray.8
 man -l man/man8/nic-health.8
+man -l man/man8/nic-sweep.8
 ```
 
 **Install system-wide:**
@@ -352,6 +359,7 @@ A bash completion script (`completions/nic-xray.bash`) completes every option an
 ```bash
 source completions/nic-xray.bash
 source completions/nic-health.bash
+source completions/nic-sweep.bash
 ```
 
 **Install system-wide** (into `/etc/bash_completion.d/`, loaded by every new interactive shell):
@@ -894,6 +902,74 @@ Summary: ✅ 160 OK   ⚠️ 16 WARN   ❌ 4 CRIT   ❔ 0 UNKNOWN   ➖ 0 N/A   
 ```
 
 Bash completion: `completions/nic-health.bash` (installed with `make install-completion`, see [Bash completion](#bash-completion)).
+
+## 🛰️ Fleet Sweeps (`nic-sweep.sh`)
+
+`nic-sweep.sh` runs `nic-health` on every host of an inventory over SSH, in parallel, and collects `nic-xray` where it is installed. It runs on an operator or jump host as an unprivileged user.
+
+- 🔒 **Read-only and non-interactive.** It never installs or changes anything on the hosts. SSH runs with `BatchMode=yes` and the tools with `sudo -n`, so a host that would ask for a password is recorded as a failure instead of hanging the sweep.
+- 🧾 **Comparable sweeps.** One directory per site and run, with the per-host JSON kept byte for byte and a `merged.csv` that always records how the data was collected (tool version, level, window, time, uptime, boot ID).
+- 🚦 **Exit codes:** `0` all OK, `1` WARN, `2` CRIT (never hidden by an unreachable host), `3` a host not collected (or only UNKNOWN), or a usage error. Precedence: CRIT > not collected > WARN > UNKNOWN > OK.
+
+Design and rationale: [`docs/design/nic-sweep.md`](docs/design/nic-sweep.md). Full reference: `man -l man/man8/nic-sweep.8`.
+
+### 📋 Inventory
+
+```text
+site,host,address,user
+SITE1,node-ctrl-01,10.0.0.15
+SITE1,node-cmp-01,10.0.0.20,ops
+SITE2,node-ctrl-01,192.0.2.15
+```
+
+`host` names the host in the sweep; `address` is what SSH connects to; `user` is optional. Every field is validated (`[A-Za-z0-9._-]`, plus `:` in addresses); a line that fails, or a duplicate host, is reported and skipped. An inventory can be generated, for example from Juju:
+
+```bash
+juju machines -m openstack --format json \
+  | jq -r '.machines[] | ["SITE1", .hostname, .["dns-name"]] | @csv' | tr -d '"' > inventory.csv
+```
+
+### 🚀 Usage
+
+```bash
+nic-sweep.sh -f inventory.csv                              # every site, deep mode, 30 s window
+nic-sweep.sh -f inventory.csv -s SITE1 -J admin@jump -p 16 # one site via a jump host, 16 at a time
+nic-sweep.sh -f inventory.csv --ship ./nic-health.sh       # hosts without the package
+nic-sweep.sh -f inventory.csv -l basic -I 5 --no-xray      # quick passive sweep
+```
+
+| Option | Description |
+|---|---|
+| `-f`, `--inventory FILE` | Hosts to sweep (required): `site,host,address[,user]` |
+| `-s`, `--site SITE` | Only this site (repeatable; default: all) |
+| `-J`, `--jump HOST` | SSH jump host, `[user@]host[:port]` |
+| `-u`, `--user USER` | SSH user for lines without one (default: your SSH config) |
+| `-p`, `--parallel N` | Hosts at once, 1–256 (default 8) |
+| `-T`, `--timeout SEC` | Per-host limit (default: interval + 300 s deep, + 120 s basic) |
+| `-o`, `--output-dir DIR` | Sweep tree root (default `./sweeps`) |
+| `-l`, `--level LEVEL` / `-I`, `--interval SEC` | Passed to nic-health (default `deep`, `30`) |
+| `--no-xray` | Do not collect `nic-xray --all --output json` |
+| `--ship PATH` | Send a local `nic-health.sh` over SSH, run it from a temporary file, delete it. Needs sudo for `bash /tmp/nic-health.*`, effectively full root: prefer the package |
+| `--accept-new-hostkeys` | Trust unknown host keys on first contact |
+| `-n`, `--no-color` | Disable colors and the progress bar |
+| `-v`, `--version` / `-h`, `--help` | Version / usage |
+
+### 📁 Output
+
+```text
+sweeps/SITE1/20261026T170035Z/
+├── sweep.json            # version, options, inventory sha256, start/end, counts by status/verdict/nic-xray
+├── MANIFEST.tsv          # host  address  status  exit_code  duration_s  xray  verdict
+├── merged.csv            # site,hostname,collected_at,version,level,interval_s,uptime_s,boot_id + every result
+└── nodes/
+    ├── node-ctrl-01.json       # nic-health -O json, verbatim
+    ├── node-ctrl-01.xray.json  # nic-xray --all --output json (where installed)
+    └── node-ctrl-01.err
+```
+
+Host status: `ok`, `ssh-fail`, `sudo-fail`, `tool-missing`, `timeout`, `bad-output`; nic-xray: `ok`, `absent`, `failed`, `skipped`. Directories are created with mode 0750 and files with 0640, since sweeps hold host names, addresses and switch ports.
+
+**Requirements (operator host):** Bash 4.4+, `ssh`, `timeout`, `jq`, `sha256sum`, `getopt`. **On each host:** `nic-health` (or `--ship`) and passwordless `sudo` for it; `nic-xray` optional.
 
 ## 📄 License
 

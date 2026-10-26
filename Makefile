@@ -5,7 +5,7 @@ COMPDIR     ?= /etc/bash_completion.d
 SHELLCHECK  ?= shellcheck
 
 # Primary script and companions: each ships a man page (section 8) and a completion
-SCRIPTS     := nic-xray nic-health
+SCRIPTS     := nic-xray nic-health nic-sweep
 
 .PHONY: install-man uninstall-man install-completion uninstall-completion test lint
 
@@ -26,9 +26,10 @@ uninstall-completion:
 test:
 	bash tests/nic-health-test.sh
 	bash tests/nic-xray-test.sh
+	bash tests/nic-sweep-test.sh
 
 # Static analysis of the scripts and the test suite (needs shellcheck)
 lint:
 	@command -v $(SHELLCHECK) >/dev/null || { echo "lint: $(SHELLCHECK) not found; install shellcheck" >&2; exit 1; }
-	$(SHELLCHECK) nic-xray.sh nic-health.sh
-	$(SHELLCHECK) -x tests/nic-health-test.sh tests/nic-xray-test.sh
+	$(SHELLCHECK) nic-xray.sh nic-health.sh nic-sweep.sh
+	$(SHELLCHECK) -x tests/nic-health-test.sh tests/nic-xray-test.sh tests/nic-sweep-test.sh

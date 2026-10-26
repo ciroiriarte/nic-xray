@@ -5,8 +5,8 @@
 * `nic-xray.sh` is the primary script (inventory, topology, traffic metrics).
 * Companion scripts live alongside it in the repo root:
   * `nic-health.sh`: NIC hardware health checks per host (design: `docs/design/nic-health.md`).
-  * Planned: `nic-sweep.sh` (fleet collection over SSH) and `nic-report.py`
-    (single- and multi-site analysis and reports) (design: `docs/design/nic-sweep.md`).
+  * `nic-sweep.sh`: fleet collection over SSH (design: `docs/design/nic-sweep.md`).
+  * Planned: `nic-report.py` (single- and multi-site analysis and reports), same design.
 * Every rule in this file applies to each script. Where a rule names `nic-xray.sh`,
   read it as the script's own name (e.g. `--version` prints `nic-health.sh <version>`,
   man page `man/man8/nic-health.8`).
