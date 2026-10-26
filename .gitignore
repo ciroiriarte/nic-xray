@@ -3,3 +3,6 @@ samples/raw/
 
 # Obfuscation mapping (contains the real→fake translation table)
 samples/obfuscation-table.sed
+
+# Operator workspace: site data, reports, company themes (never published)
+/local/
