@@ -41,9 +41,9 @@
 #                 high totals since boot (>=1000, >=60/h over uptime) are WARN; pre-FEC BER is
 #                 estimated from link speed x window when rx_bits_phy is absent (#15)
 #
-# Version: 2.12.2
+# Version: 2.13.0
 
-SCRIPT_VERSION="2.12.2"
+SCRIPT_VERSION="2.13.0"
 SCRIPT_NAME="nic-health.sh"
 JSON_SCHEMA_VERSION=1
 DESIGN_REF="docs/design/nic-health.md"

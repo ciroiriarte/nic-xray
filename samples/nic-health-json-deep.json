@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "tool": "nic-health.sh",
-  "version": "2.12.2",
+  "version": "2.13.0",
   "host": "server-01.example.net",
   "collected_at": "2026-10-20T17:46:09Z",
   "uptime_s": 1987654,
