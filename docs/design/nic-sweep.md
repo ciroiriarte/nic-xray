@@ -80,7 +80,7 @@ Doing that in Bash means re-implementing a CSV parser and floating-point statist
 
 ```
 inventory.csv ──▶ nic-sweep.sh ──ssh──▶ host: sudo -n nic-health -O json -l deep -I 30
-                      │                       (when installed) sudo -n nic-xray --optics --lacp --output json
+                      │                       (when installed) sudo -n nic-xray --all --output json
                       ▼
                sweeps/<site>/<UTC>/      ◀── contract (§5.4)
                       │
@@ -129,7 +129,7 @@ nic-sweep.sh -f|--inventory FILE [-s|--site SITE]... [-J|--jump HOST] [-u|--user
 | `-T, --timeout` | interval + 120 s | Per-host wall-clock limit |
 | `-o, --output-dir` | `./sweeps` | Root of the sweep tree (§5.4) |
 | `-l, --level` / `-I, --interval` | `deep` / `30` | Passed to `nic-health`. 30 s, because shorter windows miss bursty link errors (see `nic-health.md` §5) |
-| `--no-xray` | off | Skip `nic-xray`. By default the sweep also collects `nic-xray --optics --lacp --output json` (LLDP peer, DOM, bonds) on every host where `nic-xray` is installed; hosts without it are recorded as `xray: absent` in the manifest, not as a failure |
+| `--no-xray` | off | Skip `nic-xray`. By default the sweep also collects `nic-xray --all --output json` (`--lacp --vlan --bmac --optics --physical`: LLDP peer, LACP, optics for every vendor, VLANs seen via LLDP, NUMA node and slot) on every host where `nic-xray` is installed; hosts without it are recorded as `xray: absent` in the manifest, not as a failure |
 | `--ship PATH` | off | Copy a local `nic-health.sh` to the host's `/tmp`, run it, delete it. For hosts without the package. Default: require `nic-health` (or `nic-health.sh`) on the remote `PATH` |
 | `--accept-new-hostkeys` | off | `StrictHostKeyChecking=accept-new`. Default leaves SSH's own policy in place |
 
@@ -230,7 +230,14 @@ A finding says *what* is wrong; a recommendation says *why* and *what to do*. Th
 | `phy_err_total`, `phy_err_rate_h_uptime` | port | Since-boot total; average per hour of uptime (P1) |
 | `carrier_changes`, `link_down_recent` | port | Since driver load; link-down messages in the look-back window |
 | `fec_mismatch`, `deep_opcode` | port | Module requires FEC that the link does not run; `mstlink`/`mlxlink` troubleshooting opcode |
-| `in_use`, `bond`, `bond_link_failures`, `has_traffic`, `peer` | port | Service impact (P3) and LLDP peer (`nic-xray`, collected by default) |
+| `in_use`, `bond_link_failures`, `has_traffic` | port | Service impact (P3, `nic-health`) |
+| `peer_switch`, `peer_port`, `peer_descr` | port | LLDP neighbour (`nic-xray`: `switch_name`, `port_name`, `port_descr`) |
+| `bond`, `lacp_aggregator`, `lacp_partner` | port | Bond membership and LACP state (`nic-xray`: `parent_bond`, `lacp_status`); `bond` falls back to P3 when `nic-xray` is absent |
+| `rx_dbm`, `tx_dbm`, `optics_status`, `module_type`, `module_vendor`, `lanes` | port | Optics for **every vendor** via `ethtool -m` (`nic-xray`: `optics.*`, per-lane values on QSFP). For ports where `nic-health` deep mode also reads the module, the deep value wins (§6.3.1, source precedence) |
+| `speed_mbps`, `mtu`, `vlans` | port | Negotiated speed, MTU and the VLANs the switch advertises over LLDP (`nic-xray`: `speed_duplex`, `mtu`, `vlan`) |
+| `numa_node`, `slot_label` | ASIC | Physical placement for work orders (`nic-xray`: `numa_node`, `pci_slot`) |
+| `bond_speed_mismatch`, `bond_mtu_mismatch`, `bond_lacp_split`, `bond_peer_switches` | bond | Derived across a bond's members: unequal speed or MTU, members on different LACP aggregators or partner MACs, and the set of switches the members reach |
+| `role_vlan_drift` | group | Same-role hosts in a site whose per-port VLAN sets differ from the role majority |
 | `pcie_below_cap` | ASIC | Trained below what card and slot support (not slot-limited) |
 | `role_share(check)` | group | Fraction of same-role hosts in the site failing the same check |
 | `sites_with(pattern)` | fleet | Sites where the same (role, check, port position) pattern appears |
@@ -265,6 +272,12 @@ A finding says *what* is wrong; a recommendation says *why* and *what to do*. Th
 | `FEC-MISMATCH` | `fec_mismatch` | Configuration → enable RS-FEC on the NIC and the switch port | 2 |
 | `SIG-INTEGRITY` | `deep_opcode` reports bad signal integrity | Lane/cable quality → inspect or replace the cable | 3 |
 | `PATTERN-CROSS-SITE` | `sites_with(pattern)` ≥ 2 | Systemic weakness (cabling standard, part batch) → audit that position at every site | 2 |
+| `LAG-SPLIT` | `bond_lacp_split` (members on different aggregators or partners) | Mis-cabled or misconfigured LAG: part of the bond is not aggregated → check the switch LAG/MC-LAG membership of `{peer_switch} {peer_port}` | 1 |
+| `BOND-SPEED-MISMATCH` | `bond_speed_mismatch` | A member negotiated a lower speed (wrong optic, autoneg, breakout mode) → check the optic type and switch port speed | 2 |
+| `BOND-MTU-MISMATCH` | `bond_mtu_mismatch` | Members with different MTU drop large frames on one path → align the MTU on the bond members | 2 |
+| `BOND-SINGLE-SWITCH` | bond meant to be redundant (≥ 2 members) and `bond_peer_switches` has one entry | No switch redundancy: losing that switch takes the bond down → re-patch one member to the second switch | 3 |
+| `VLAN-DRIFT` | `role_vlan_drift` | A host's switch port advertises a different VLAN set from its role peers → compare switch port configuration (only as reliable as the switch's LLDP VLAN TLVs) | 3 |
+| `OPT-WEAK-ANY-VENDOR` | `rx_delta_host_db` ≤ −5 on a port without `nic-health` deep data | Same diagnosis and action as `OPT-ATTEN-*`, for NICs without vendor tools (Intel, Broadcom, …) | as `OPT-ATTEN-*` |
 
 #### 6.3.2 Prioritisation
 
@@ -272,8 +285,12 @@ Every matched rule becomes one recommendation. They are sorted by a score built 
 
 1. **Base priority** from the rule (1 = act now … 4 = informational).
 2. **Activity:** growing in the window counts more than historical only.
-3. **Service impact (P3):** a bond member with link failures or traffic raises the priority; a port that is up but unused (no address, no upper device, no traffic) lowers it by one level. In the prototype, this put the flapping bond member first and the idle port with errors second, despite both being CRIT.
+3. **Service impact (P3 and `nic-xray`):** a bond member with link failures or traffic raises the priority; a port that is up but unused (no address, no upper device, no traffic) lowers it by one level. In the prototype, this put the flapping bond member first and the idle port with errors second, despite both being CRIT.
 4. **Breadth:** a cross-site pattern is listed once, linking the individual findings.
+
+**Source precedence.** When `nic-health` and `nic-xray` both report a value, `nic-health` wins for health data (link state, errors, deep module readings with thresholds and lane flags), and `nic-xray` fills in what `nic-health` does not collect (LLDP, LACP, VLANs, placement, optics on non-mlx5 or non-deep ports). The report's coverage section (A1) states, per site, how many ports had optics from deep mode, from `nic-xray`, or none.
+
+**Not covered by `nic-xray`:** bond link-failure counts and per-port traffic. `nic-xray --metrics` can sample live throughput, but it needs a sampling interval and is not part of the sweep's default command, so both stay P3 in `nic-health`.
 
 Matches on the same target are merged, so one port gives one recommendation that cites every rule that fired. A finding no rule explains is listed as "unexplained, needs review", so gaps in the catalog stay visible.
 
@@ -481,7 +498,7 @@ Like `nic-xray` diagrams (`Generated by nic-xray vX.Y.Z — © YEAR Ciro Iriarte
 | **4** | A4–A5 (baselines, outliers, within-site and cross-site patterns), `--baseline scope\|all`, HTML | Reproduces the prototype's findings on its obfuscated data, both as one five-site report and as five single-site reports |
 | **5** | PDF (WeasyPrint print stylesheet), `--per-site`, `--suppress`, themes (§6.8) and attribution (§6.9) | Visual check of cover, contents page numbers, landscape pages; the example theme renders; a theme without contrast fails `--strict-theme`; attribution is present in every format |
 | **6** | `nic-health` P2 (`metrics`) and P3 (service impact); extractors become a fallback for older JSON | Report output identical with and without P2 on the same sweep |
-| **7** | A8: facts, rule engine, starter catalog, prioritisation, template narrative | On the prototype's obfuscated data, the generated recommendations match the hand-written report's findings **and order** |
+| **7** | A8: facts (including `nic-xray`: LLDP, LACP, optics for every vendor, speed/MTU/VLAN, placement), rule engine, starter catalog, prioritisation, template narrative | On the prototype's obfuscated data, the generated recommendations match the hand-written report's findings **and order** |
 | **8** | A6 sweep comparison | Fixture pair with a reboot between sweeps |
 | **9** | AI brief and narrative merge (§6.7) | Number/ID checker rejects a narrative with an invented value |
 | **10** | Packaging, man pages, completions, README, samples; release on request | Tandem version bump |
