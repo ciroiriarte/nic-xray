@@ -9,3 +9,6 @@ samples/obfuscation-table.sed
 
 # oh-my-claudecode session state (local tooling, never published)
 .omc/
+
+# Python bytecode (nic-report.py tests)
+__pycache__/

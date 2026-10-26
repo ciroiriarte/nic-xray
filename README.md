@@ -16,6 +16,7 @@ Detailed physical network interface diagnostics for Linux.
 - [Output Examples](#-output-examples)
 - [NIC Health Checks (nic-health.sh)](#-nic-health-checks-nic-healthsh)
 - [Fleet Sweeps (nic-sweep.sh)](#%EF%B8%8F-fleet-sweeps-nic-sweepsh)
+- [Fleet Reports (nic-report.py)](#-fleet-reports-nic-reportpy)
 - [License](#-license)
 - [Contributing](#-contributing)
 - [Authors](#%EF%B8%8F-authors)
@@ -48,7 +49,7 @@ Originally developed for OpenStack node deployments, it is suitable for any Linu
 
 > 🩺 **Companion:** [`nic-health.sh`](#-nic-health-checks-nic-healthsh) evaluates NIC hardware and data-path health (PCIe, AER, temperature, devlink, ConnectX counters, optional vendor-tool deep mode) and returns a Nagios-compatible verdict.
 >
-> 🛰️ **Fleet:** [`nic-sweep.sh`](#%EF%B8%8F-fleet-sweeps-nic-sweepsh) runs nic-health (and nic-xray) on every host of an inventory over SSH and writes one comparable sweep per site.
+> 🛰️ **Fleet:** [`nic-sweep.sh`](#%EF%B8%8F-fleet-sweeps-nic-sweepsh) runs nic-health (and nic-xray) on every host of an inventory over SSH and writes one comparable sweep per site; [`nic-report.py`](#-fleet-reports-nic-reportpy) turns sweeps into single- or multi-site reports.
 
 ## 🔍 Features
 
@@ -314,6 +315,9 @@ sudo chmod +x /usr/local/sbin/nic-health.sh
 # Fleet sweeps over SSH (optional, operator host only)
 sudo cp nic-sweep.sh /usr/local/bin/
 sudo chmod +x /usr/local/bin/nic-sweep.sh
+# Reports from sweeps (optional, operator host only; Python 3.9+)
+sudo cp nic-report.py /usr/local/bin/
+sudo chmod +x /usr/local/bin/nic-report.py
 ```
 
 #### Man page
@@ -326,6 +330,7 @@ A man page is available under `man/man8/` for detailed reference (section 8: sys
 man -l man/man8/nic-xray.8
 man -l man/man8/nic-health.8
 man -l man/man8/nic-sweep.8
+man -l man/man8/nic-report.8
 ```
 
 **Install system-wide:**
@@ -360,6 +365,7 @@ A bash completion script (`completions/nic-xray.bash`) completes every option an
 source completions/nic-xray.bash
 source completions/nic-health.bash
 source completions/nic-sweep.bash
+source completions/nic-report.bash
 ```
 
 **Install system-wide** (into `/etc/bash_completion.d/`, loaded by every new interactive shell):
@@ -970,6 +976,31 @@ sweeps/SITE1/20261026T170035Z/
 Host status: `ok`, `ssh-fail`, `sudo-fail`, `tool-missing`, `timeout`, `bad-output`; nic-xray: `ok`, `absent`, `failed`, `skipped`. Directories are created with mode 0750 and files with 0640, since sweeps hold host names, addresses and switch ports.
 
 **Requirements (operator host):** Bash 4.4+, `ssh`, `timeout`, `jq`, `sha256sum`, `getopt`. **On each host:** `nic-health` (or `--ship`) and passwordless `sudo` for it; `nic-xray` optional.
+
+## 📊 Fleet Reports (`nic-report.py`)
+
+`nic-report.py` reads `nic-sweep` sweeps (and older hand-made nic-health CSV) and writes a report for **one site, several, or every site** of a sweep tree. It is offline and read-only, and the one Python script of the tools (Python 3.9+, standard library only).
+
+| Section | One site | Several sites |
+|---|---|---|
+| 1. Coverage and comparability | columns per role | columns per site |
+| 2. Verdicts | per role and per host | per site, then per role |
+| 3. Findings | by host | by site → host |
+
+Coverage counts hosts, ASICs, ports, ports with link, deep checks and FEC modes; lists every host not collected; and flags what limits a comparison (mixed nic-health versions or windows, different days, imported data without metadata, sites with no sweep at the requested date). Findings list every WARN/CRIT/UNKNOWN result with its evidence and hint.
+
+```bash
+nic-report.py -R sweeps                                    # latest sweep of every site
+nic-report.py -R sweeps -s SITE1                           # one site
+nic-report.py -R sweeps -s SITE1 -s SITE2 -a 2026-10-23    # as they were on a date (UTC)
+nic-report.py -R sweeps -i SITE9 old/SITE9/                # add an older CSV collection (one file per host)
+nic-report.py -R sweeps -O json -o report.json             # every computed value, for automation
+nic-report.py -R sweeps -r '^[^-]+-[^-]+-(?P<role>[a-z]+\d+[a-z]*)-\d+'             # roles from host names
+```
+
+Options: `-R`/`--sweep-root`, `-s`/`--site`, `-a`/`--at`, `-i`/`--import` (takes every following path: put sweep directories first or end it with `--`), `-r`/`--role-regex`, `-O`/`--output-format`, `-o`/`--output`, `-t`/`--title`, `-c`/`--classification`, `-v`/`--version`, `-h`/`--help`. Odd or damaged input ends in a `❌` message, never a traceback; a host whose result file is missing or malformed is listed as `unreadable-result` instead of failing the report. Data from nic-health older than 2.12.0 has no link state: ports are counted from link-flap records and ports with link shown as unknown.
+
+Exit status: `0` report written, `1` input error (unreadable input, unknown schema or site, a site selected twice, no data for the selection) or the output file cannot be written, `3` usage error. Design: [`docs/design/nic-sweep.md`](docs/design/nic-sweep.md) §6. HTML/PDF output, themes, baselines and recommendations follow in later phases.
 
 ## 📄 License
 

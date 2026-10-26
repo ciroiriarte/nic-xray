@@ -1,0 +1,191 @@
+.\" Man page for nic-report.py
+.\" Written in classic troff/groff format
+.TH NIC-REPORT 8 "2026-10-26" "nic-report 2.13.0" "System Administration Commands"
+.SH NAME
+nic-report \- single- and multi-site NIC health reports from nic-sweep sweeps
+.SH SYNOPSIS
+.B nic-report.py
+.RI [ SWEEP_DIR ...]
+.RI [ \-R | \-\-sweep\-root
+.IR DIR ]
+.RI [ \-s | \-\-site
+.IR SITE ]...
+.RI [ \-a | \-\-at
+.IR DATE ]
+.RI [ \-i | \-\-import
+.I SITE PATH
+.RI ...]...
+.RI [ \-r | \-\-role\-regex
+.IR RE ]
+.RI [ \-O | \-\-output\-format
+.IR md | json ]
+.RI [ \-o | \-\-output
+.IR FILE ]
+.RI [ \-t | \-\-title
+.IR TEXT ]
+.RI [ \-c | \-\-classification
+.IR TEXT ]
+.RI [ \-v | \-\-version ]
+.RI [ \-h | \-\-help ]
+.SH DESCRIPTION
+.B nic-report.py
+reads the sweeps written by
+.BR nic-sweep.sh (8)
+(and, for older collections, nic-health CSV files) and writes a report for one
+site, several sites, or every site of a sweep tree. The report has three
+sections:
+.TP
+.B Coverage and comparability
+Hosts, roles, NIC ASICs and ports, ports with link, deep checks evaluated, FEC
+modes, nic-health versions, sampling windows and collection dates; every host
+that was not collected; and caveats such as mixed tool versions, imported data
+without collection metadata, or sites with no sweep at the requested date.
+.TP
+.B Verdicts
+Hosts by verdict and the share of clean hosts, per site and per role.
+.TP
+.B Findings
+Every WARN, CRIT and UNKNOWN result, worst first, grouped by site and host, with
+its evidence and hint.
+.PP
+With one site the coverage table has a column per role and the verdicts list
+each host; with several sites the columns are sites. The tool is read-only and
+offline: it never contacts a host or the network.
+.PP
+It is the one Python script of the nic-xray tools (Python 3.9 or newer,
+standard library only).
+.SH OPTIONS
+.TP
+.I SWEEP_DIR
+A sweep directory
+.RI ( DIR / site / YYYYmmddTHHMMSSZ )
+to report on as is.
+.TP
+.BR \-R ", " \-\-sweep\-root " " \fIDIR\fR
+A nic-sweep tree. Selects the latest sweep of each site (or of each
+.BR \-\-site ).
+.TP
+.BR \-s ", " \-\-site " " \fISITE\fR
+Only this site of the tree. Repeatable. An unknown site is an error that lists
+the sites available.
+.TP
+.BR \-a ", " \-\-at " " \fIDATE\fR
+Per site, the latest sweep on or before
+.I DATE
+(UTC):
+.B YYYY-MM-DD
+(end of that day) or
+.BR YYYY-MM-DDTHH:MM[:SS]Z .
+Sites without such a sweep are listed as missing in the report.
+.TP
+.BR \-i ", " \-\-import " " "\fISITE PATH\fR ..."
+Legacy nic-health CSV for
+.IR SITE :
+files, or directories of
+.B *.csv
+files. One file per host (host name taken from the file name up to the first
+.B _
+or
+.BR . ),
+or merged files with
+.B site
+and
+.B hostname
+columns. CRLF line endings, leading blank lines and fields wrapped by a terminal
+capture are repaired. Imported data has no collection metadata, which the
+report notes. A host may come from one file only, and a file that adds no row
+for
+.I SITE
+is an error. Repeatable.
+.B \-\-import
+takes every following path: put
+.I SWEEP_DIR
+arguments before it, or end its list with
+.BR \-\- .
+.TP
+.BR \-r ", " \-\-role\-regex " " \fIRE\fR
+Derive each host's role from its name: the group named
+.B role
+(or the first group; a regex without a group is a usage error). Without it,
+roles are empty.
+.TP
+.BR \-O ", " \-\-output\-format " " \fImd\fR|\fIjson\fR
+Markdown (default) or JSON with every computed value.
+.TP
+.BR \-o ", " \-\-output " " \fIFILE\fR
+Write to
+.I FILE
+instead of standard output.
+.TP
+.BR \-t ", " \-\-title " " \fITEXT\fR
+Report title (default: "NIC Health: SITE" or "NIC Health: cross-site
+comparison (...)").
+.TP
+.BR \-c ", " \-\-classification " " \fITEXT\fR
+Classification label printed on the report.
+.TP
+.BR \-v ", " \-\-version
+Print the version and exit.
+.TP
+.BR \-h ", " \-\-help
+Print the help and exit.
+.PP
+A site may appear only once in a selection: a sweep directory and the same
+site from
+.B \-\-sweep\-root
+is an error. Under
+.BR \-\-sweep\-root ,
+a sweep whose
+.B sweep.json
+names another site than its directory is an error. Symbolic links in the tree
+are followed. Long options cannot be abbreviated.
+.SH NOTES
+A port counts as having link when nic-health reported its link state as
+.BR up .
+nic-health older than 2.12.0 records no link state: ports are then counted from
+the link-flap records and ports with link are shown as unknown, with a caveat.
+A collected host whose
+.BI nodes/ host .json
+is missing or malformed is listed with the hosts not collected (status
+.BR unreadable-result )
+instead of failing the report. The clean share is the share of collected hosts
+whose verdict is OK.
+.SH EXIT STATUS
+.TP
+.B 0
+Report written.
+.TP
+.B 1
+Input error: unreadable input, an unsupported sweep schema, an unknown site, a
+site selected twice, no data for the selection (for example
+.B \-\-at
+before every sweep); or the output file cannot be written.
+.TP
+.B 3
+Usage error.
+.SH EXAMPLES
+Latest sweep of every site, roles from host names like prd-site-ctrl2d-01:
+.PP
+.RS
+.nf
+nic-report.py \-R sweeps \-\-role\-regex '^[^\-]+\-[^\-]+\-(?P<role>[a\-z]+\\d+[a\-z]*)\-\\d+'
+.fi
+.RE
+.PP
+One site as it was on a date, as JSON:
+.PP
+.RS
+.B nic-report.py \-R sweeps \-s SITE1 \-a 2026-10-23 \-O json \-o site1.json
+.RE
+.PP
+Mix a sweep tree with an older hand-made collection:
+.PP
+.RS
+.B nic-report.py \-R sweeps \-i SITE9 old/SITE9/
+.RE
+.SH AUTHORS
+Ciro Iriarte <ciro.iriarte+software@gmail.com>
+.SH SEE ALSO
+.BR nic-sweep.sh (8),
+.BR nic-health.sh (8),
+.BR nic-xray.sh (8)

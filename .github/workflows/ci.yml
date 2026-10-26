@@ -59,6 +59,26 @@ jobs:
           bash --version | head -1
           make test
 
+  # nic-report.py supports Python 3.9+: run its tests on the oldest supported version
+  test-python39:
+    name: nic-report tests (Python 3.9)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Unit tests
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          python --version
+          python -m unittest discover -v -s tests -p 'test_nic_report.py'
+
   # The scripts support Bash 4.4 (SLES 15 ships it); run the suite there too, with GNU tools
   test-bash44:
     name: make test (Bash 4.4, SLES 15)
