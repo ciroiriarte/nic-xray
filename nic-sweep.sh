@@ -532,10 +532,29 @@ write_merged_csv() {
     } > "$DIR/merged.csv"
 }
 
-# Count of RESULT lines whose column COL equals VALUE
+# Count of result lines (stdin) whose column COL (1-based) equals VALUE; pure Bash, so a host without
+# awk cannot turn every count into 0. Result fields are never empty (placeholders use "-")
 count_col() {
-    local COL="$1" VALUE="$2"
-    awk -F'\t' -v c="$COL" -v v="$VALUE" '$c == v { n++ } END { print n + 0 }'
+    local COL="$1" VALUE="$2" LINE N=0
+    local -a F
+    while IFS= read -r LINE; do
+        [[ -n "$LINE" ]] || continue
+        IFS=$'\t' read -r -a F <<< "$LINE"
+        [[ "${F[COL - 1]:-}" == "$VALUE" ]] && (( ++N ))
+    done
+    echo "$N"
+}
+
+# Result lines (stdin) whose host was not collected
+not_collected() {
+    local LINE
+    local -a F
+    while IFS= read -r LINE; do
+        [[ -n "$LINE" ]] || continue
+        IFS=$'\t' read -r -a F <<< "$LINE"
+        [[ "${F[2]}" != "$ST_OK" ]] && printf '%s\n' "$LINE"
+    done
+    return 0
 }
 
 # JSON object of counts for column COL over the given values
@@ -558,7 +577,7 @@ results_exit_code() {
         echo "$EXIT_UNKNOWN"
     elif (( $(count_col 7 "CRIT" <<< "$RESULTS") > 0 )); then
         echo "$EXIT_CRIT"
-    elif (( $(awk -F'\t' -v ok="$ST_OK" '$3 != ok' <<< "$RESULTS" | grep -c . || true) > 0 )); then
+    elif [[ -n "$(not_collected <<< "$RESULTS")" ]]; then
         echo "$EXIT_UNKNOWN"
     elif (( $(count_col 7 "WARN" <<< "$RESULTS") > 0 )); then
         echo "$EXIT_WARN"
@@ -594,7 +613,7 @@ write_sweep_json() {
 }
 
 print_site_summary() {
-    local DIR="$1" SITE="$2" RESULTS TOTAL OKN S N LINE="" FAILED VLINE="" XLINE="" V COLOR
+    local DIR="$1" SITE="$2" RESULTS TOTAL OKN S N LINE="" VLINE="" XLINE="" V COLOR H A X
     RESULTS=$(site_results "$SITE")
     TOTAL=$(grep -c . <<< "$RESULTS" || true)
     OKN=$(count_col 3 "$ST_OK" <<< "$RESULTS")
@@ -614,8 +633,9 @@ print_site_summary() {
     done
     printf '%b📁 %s%b  %d hosts: %d collected%b · verdicts:%b · nic-xray:%s\n' "$BOLD" "$SITE" "$RESET_COLOR" \
         "$TOTAL" "$OKN" "$LINE" "${VLINE:- none}" "${XLINE:- none}"
-    FAILED=$(awk -F'\t' -v ok="$ST_OK" '$3 != ok { printf "   %s (%s): %s, exit %s\n", $1, $2, $3, $4 }' <<< "$RESULTS")
-    [[ -n "$FAILED" ]] && printf '%s\n' "$FAILED"
+    while IFS=$'\t' read -r H A S X _; do
+        printf '   %s (%s): %s, exit %s\n' "$H" "$A" "$S" "$X"
+    done < <(not_collected <<< "$RESULTS")
     printf '   %s\n' "$DIR"
 }
 

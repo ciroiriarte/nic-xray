@@ -189,8 +189,16 @@ sweep() {
 }
 RUN_N=0
 latest() { find "$OUT/$1" -mindepth 1 -maxdepth 1 -type d | head -1; }
-manifest_status() { awk -F'\t' -v h="$2" '$1 == h { print $3 }' "$(latest "$1")/MANIFEST.tsv"; }
-manifest_xray() { awk -F'\t' -v h="$2" '$1 == h { print $6 }' "$(latest "$1")/MANIFEST.tsv"; }
+# manifest_col <site> <host> <column>: one MANIFEST.tsv field (pure Bash: CI images may lack awk)
+manifest_col() {
+    local H A S X D XR V
+    while IFS=$'\t' read -r H A S X D XR V; do
+        [[ "$H" == "$2" ]] || continue
+        case "$3" in status) echo "$S" ;; xray) echo "$XR" ;; esac
+    done < "$(latest "$1")/MANIFEST.tsv"
+}
+manifest_status() { manifest_col "$1" "$2" status; }
+manifest_xray() { manifest_col "$1" "$2" xray; }
 
 # --- Full run: every status, two sites ---
 cat > "$FIX/inv-all.csv" <<'INV'
@@ -305,7 +313,7 @@ sweep "$FIX/inv-ok.csv" --no-xray
 assert_eq "--no-xray: nic-xray never called" "0" "$(grep -c 'nic-xray' "$STUB_LOG")"
 assert_eq "--no-xray: recorded as skipped" "skipped" "$(manifest_xray S1 ok)"
 sweep "$FIX/inv-ok.csv" -J jumpuser@jump.example:2222 --accept-new-hostkeys -u svc -l basic -I 5
-assert_eq "-J passed to ssh" "2" "$(grep -c -- '-J jumpuser@jump.example:2222' "$STUB_LOG" | awk '{print ($1>=2)?2:$1}')"
+assert_eq "-J passed to every ssh call" "yes" "$( (( $(grep -c -- '-J jumpuser@jump.example:2222' "$STUB_LOG") >= 2 )) && echo yes)"
 assert_eq "--accept-new-hostkeys" "1" "$(grep -m1 -c 'StrictHostKeyChecking=accept-new' "$STUB_LOG")"
 assert_eq "-u default user" "1" "$(grep -m1 -c -- '-l svc -- h-ok' "$STUB_LOG")"
 assert_eq "-l/-I reach nic-health" "1" "$(grep -m1 -c -- '-O json -l basic -I 5' "$STUB_LOG")"
