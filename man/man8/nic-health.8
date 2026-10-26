@@ -178,6 +178,9 @@ Each hwmon temperature sensor of the ASIC (deduplicated by label). At or above
 the critical threshold \(-> CRIT. Within 10 \(deC of critical, above a driver
 maximum that is lower than critical, or with the alarm flag set \(-> WARN.
 A sensor the firmware lists but cannot read (EBUSY) \(-> N/A.
+A critical or maximum threshold at or below 0 \(deC is ignored (mlx5 reports
+input 0, critical 0 for an empty module cage); a sensor left with no threshold
+and no alarm \(-> N/A.
 .TP
 .B generic.devlink.health.\fIREPORTER\fP
 devlink health reporters, device level (target: PCI function) and port level

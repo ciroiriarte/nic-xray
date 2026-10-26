@@ -363,6 +363,18 @@ assert_eq "temp alarm without thresholds WARN" "WARN" "$(sev_of generic.temperat
 assert_eq "temp no thresholds N/A"             "N/A"  "$(sev_of generic.temperature "0000:02:00 (noalarm)")"
 rm -f "$HWD"/temp[34]_*
 
+# Zero threshold is no threshold: mlx5 empty module cage reports input=0 crit=0 (seen on CX5)
+hwmon_write 0000:02:00.0 hwmon2 3 "emptycage" 0 0
+hwmon_write 0000:02:00.0 hwmon2 4 "zerocrit" 60000 0 55000
+reset_results
+check_temperature 0000:02:00
+assert_eq "temp empty cage (input=0 crit=0) N/A"  "N/A"  "$(sev_of generic.temperature "0000:02:00 (emptycage)")"
+EMPTY_HINT=""
+for I in "${!REC_SEV[@]}"; do [[ "${REC_TARGET[I]}" == "0000:02:00 (emptycage)" ]] && EMPTY_HINT="${REC_HINT[I]}"; done
+assert_eq "temp empty cage hint" "Sensor reads 0 with no threshold: empty module cage or module without temperature monitoring" "$EMPTY_HINT"
+assert_eq "temp crit=0 ignored, max still judged WARN" "WARN" "$(sev_of generic.temperature "0000:02:00 (zerocrit)")"
+rm -f "$HWD"/temp[34]_*
+
 # Strict shell: optional hwmon attributes missing must not abort under set -e
 ( set -euo pipefail; reset_results; check_temperature 0000:02:00; check_temperature 0000:03:00; echo "finished" ) > "$FIX/out" 2>&1
 assert_eq "set -euo pipefail with missing hwmon attrs" "finished" "$(tail -1 "$FIX/out")"

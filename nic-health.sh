@@ -1784,6 +1784,10 @@ check_temperature() {
                 fi
                 [[ "$CRIT" =~ ^-?[0-9]+$ ]] || CRIT=""
                 [[ "$MAX" =~ ^-?[0-9]+$ ]] || MAX=""
+                # A threshold at or below 0C is no threshold: mlx5 reports input=0 crit=0
+                # for an empty module cage, which would otherwise read as "at critical"
+                [[ -n "$CRIT" ]] && (( CRIT <= 0 )) && CRIT=""
+                [[ -n "$MAX" ]] && (( MAX <= 0 )) && MAX=""
 
                 # WARN point: margin below critical, or max when the driver sets it below critical.
                 # Some drivers report max above crit (e.g. ixgbe); such a max is ignored.
@@ -1798,6 +1802,8 @@ check_temperature() {
                     THRESH="alarm=1 WARN"
                     if [[ "$ALARM" == "1" ]]; then
                         SEV="$SEV_WARN"; HINT="Driver raised a temperature alarm for this sensor"
+                    elif (( IN == 0 )); then
+                        SEV="$SEV_NA"; THRESH="-"; HINT="Sensor reads 0 with no threshold: empty module cage or module without temperature monitoring"
                     else
                         SEV="$SEV_NA"; THRESH="-"; HINT="Driver exposes no max/crit threshold for this sensor"
                     fi
