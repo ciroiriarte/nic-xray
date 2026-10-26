@@ -9,9 +9,13 @@ import importlib.util
 import io
 import json
 import os
+import re
+import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -21,6 +25,13 @@ nr = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(nr)
 
 ROLE_RE = r"^[^-]+-[^-]+-(?P<role>[a-z]+\d+[a-z]*)-\d+"
+THEMES = os.path.join(REPO, "tests", "fixtures", "themes")
+EXAMPLE_THEME = os.path.join(THEMES, "example")
+try:
+    import weasyprint  # noqa: F401  # optional: PDF tests run only where it is installed
+    HAVE_WEASYPRINT = True
+except (ImportError, OSError):
+    HAVE_WEASYPRINT = False
 
 # Evidence strings in nic-health's formats (fictional values)
 EV_MODULE_25G = ("Temperature [C]=39 [-5..90]; Voltage [mV]=3325.3 [3080..3500]; Bias Current [mA]=5.500 [0.5..13]; "
@@ -972,6 +983,664 @@ class TestPhase4Rendering(Phase4Base):
         self.assertEqual(p.returncode, 0, p.stderr)
         with open(out, encoding="utf-8") as fh:
             self.assertIn("<title>NIC Health: SITE1</title>", fh.read())
+
+
+class Phase5Base(Phase4Base):
+    """Shared helpers for the Phase 5 tests (no tests of its own)."""
+
+    NOW = nr.datetime.datetime(2026, 10, 26, 12, 0, tzinfo=nr.datetime.timezone.utc)
+    NO_ENV_THEME = {nr.THEME_ENV: ""}
+
+    def analyse(self, argv):
+        args = nr.parse_args(argv + ["-r", ROLE_RE])
+        args.suppress_rules = nr.load_suppress(args.suppress) if args.suppress else None
+        sites, missing = nr.load_selection(args)
+        if args.suppress_rules:
+            nr.apply_suppress(sites, args.suppress_rules)
+        return nr.analyse(sites, missing, args, nr.load_baseline_sites(args, sites)), sites, missing, args
+
+    def write_json(self, name, doc):
+        path = os.path.join(self.tmp.name, name)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(doc if isinstance(doc, str) else json.dumps(doc))
+        return path
+
+    def cli(self, *argv, env=None):
+        p = subprocess.run([sys.executable, SCRIPT, *argv], capture_output=True, text=True,
+                           env={**os.environ, **(env or {})})
+        return p.returncode, p.stdout, p.stderr
+
+    def report(self, argv, fmt="md"):
+        args = nr.parse_args(argv + ["-r", ROLE_RE, "-O", fmt] + (["-o", os.path.join(self.tmp.name, "x.pdf")] if fmt == "pdf" else []))
+        with contextlib.redirect_stderr(io.StringIO()):
+            outputs = nr.build_outputs(args, self.NOW)
+        return outputs[0][1], args
+
+    def pcie_site(self, site="SITE1"):
+        """Three storage hosts: a PCIe WARN on two (a pattern) and a BER WARN on one."""
+        pcie = [rec("WARN", "asic", "0000:04:00", "generic.pcie.link", "2.5 GT/s x4", threshold="16.0 GT/s x4 (slot)")]
+        ber = [rec("WARN", "port", "eth0", "mlx5.deep.ber", "effective 3E-9", EV_BER, "Clean the optic")]
+        hosts = [("acme-s1-stoc2-01", [{"port": "eth0", "rx": -0.5}], {"extra": pcie + ber}),
+                 ("acme-s1-stoc2-02", [{"port": "eth0", "rx": -0.5}], {"extra": pcie}),
+                 ("acme-s1-stoc2-03", [{"port": "eth0", "rx": -0.5}], {})]
+        return write_sweep(self.root, site, "20261026T100000Z",
+                           [(h, "ok", "WARN" if kw else "OK", ports_doc(h, ps, **kw)) for h, ps, kw in hosts])
+
+    def theme_dir(self, doc=None, files=None):
+        """A copy of the example theme with theme.json fields replaced (None removes) and files added."""
+        d = tempfile.mkdtemp(dir=self.tmp.name)
+        for name in os.listdir(EXAMPLE_THEME):
+            shutil.copy(os.path.join(EXAMPLE_THEME, name), d)
+        with open(os.path.join(EXAMPLE_THEME, "theme.json"), encoding="utf-8") as fh:
+            base = json.load(fh)
+        base.update(doc or {})
+        with open(os.path.join(d, "theme.json"), "w", encoding="utf-8") as fh:
+            json.dump({k: v for k, v in base.items() if v is not None}, fh)
+        for name, data in (files or {}).items():
+            with open(os.path.join(d, name), "wb") as fh:
+                fh.write(data if isinstance(data, bytes) else data.encode())
+        return d
+
+
+class TestSuppress(Phase5Base):
+    RULES = {"schema_version": 1, "suppress": [
+        {"check_id": "mlx5.deep.ber", "match": "BER=3E-9", "reason": "Known nic-health BER issue (fictional)"},
+        {"check_id": "generic.pcie.link", "hosts": "stoc2-0[12]$", "sites": ["SITE1"], "reason": "BIOS fix scheduled"},
+        {"check_id": "generic.link.lookback", "reason": "Matches nothing here"}]}
+
+    def test_schema_validation(self):
+        bad = {"not a suppress object": [1],
+               "unknown key(s) extra": {"schema_version": 1, "suppress": [], "extra": 1},
+               "unsupported schema_version 2": {"schema_version": 2, "suppress": []},
+               "unsupported schema_version True": {"schema_version": True, "suppress": []},
+               "must be a list": {"schema_version": 1, "suppress": {}},
+               "rule 1: not an object": {"schema_version": 1, "suppress": ["x"]},
+               "rule 1: unknown key(s) checkid": {"schema_version": 1, "suppress": [{"checkid": "x", "reason": "r"}]},
+               "rule 1: missing 'reason'": {"schema_version": 1, "suppress": [{"check_id": "x"}]},
+               "'check_id' must be a non-empty string": {"schema_version": 1, "suppress": [{"check_id": 5, "reason": "r"}]},
+               "invalid 'match' regex": {"schema_version": 1, "suppress": [{"check_id": "x", "reason": "r", "match": "("}]},
+               "invalid 'hosts' regex": {"schema_version": 1, "suppress": [{"check_id": "x", "reason": "r", "hosts": "[a"}]},
+               "'sites' must be": {"schema_version": 1, "suppress": [{"check_id": "x", "reason": "r", "sites": ["a/b"]}]},
+               "rule 2": {"schema_version": 1, "suppress": [{"check_id": "x", "reason": "r"}, {"check_id": "x", "reason": ""}]},
+               "larger than 1024 KiB": " " * (nr.SUPPRESS_MAX + 1),
+               "recursion": "[" * 100000}
+        for n, (msg, doc) in enumerate(bad.items()):
+            path = self.write_json(f"s{n}.json", doc)
+            with self.assertRaises(nr.InputError, msg=msg) as cm:
+                nr.load_suppress(path)
+            self.assertIn(msg, str(cm.exception))
+        self.pcie_site()
+        rc, _, err = self.cli("-R", self.root, "-S", self.write_json("broken.json", "{"))
+        self.assertEqual(rc, 1, err)
+        self.assertNotIn("Traceback", err)
+
+    def test_effect_on_findings_verdicts_pcie_and_patterns(self):
+        self.pcie_site()
+        res, *_ = self.analyse(["-R", self.root])
+        self.assertEqual(len(res["findings"]), 3)
+        self.assertEqual(len(res["patterns"]["within_sites"]), 1)
+        self.assertIsNone(res["suppressed"])
+        res, *_ = self.analyse(["-R", self.root, "-S", self.write_json("s.json", self.RULES)])
+        self.assertEqual(res["findings"], [])
+        self.assertEqual(res["patterns"]["within_sites"], [])
+        self.assertEqual(res["baselines"]["pcie"]["below_capability"], [])
+        v = res["verdicts"][0]
+        self.assertEqual(v["by_verdict"], {"OK": 3, "WARN": 0, "CRIT": 0, "UNKNOWN": 0})
+        self.assertEqual(v["findings"], {"CRIT": 0, "WARN": 0, "UNKNOWN": 0})
+        detail = {h["host"]: h for h in v["hosts_detail"]}
+        self.assertEqual((detail["acme-s1-stoc2-01"]["verdict"], detail["acme-s1-stoc2-01"]["verdict_before"]), ("OK", "WARN"))
+        self.assertNotIn("verdict_before", detail["acme-s1-stoc2-03"])
+        sp = res["suppressed"]
+        self.assertEqual([r["count"] for r in sp["rules"]], [1, 2, 0])
+        self.assertEqual(len(sp["results"]), 3)                            # nothing silently dropped
+        self.assertTrue(any("Known issues suppressed" in c and "3 result(s) by 2 of 3 rule(s)" in c
+                            for c in res["coverage"]["caveats"]))
+
+    def test_first_matching_rule_wins(self):
+        self.pcie_site()
+        rules = {"schema_version": 1, "suppress": [
+            {"check_id": "generic.pcie.link", "reason": "first"},
+            {"check_id": "generic.pcie.link", "hosts": "stoc2", "reason": "second, also matching"}]}
+        res, *_ = self.analyse(["-R", self.root, "-S", self.write_json("s.json", rules)])
+        self.assertEqual([r["count"] for r in res["suppressed"]["rules"]], [2, 0])
+        self.assertEqual({r["rule"] for r in res["suppressed"]["results"]}, {1})
+
+    def test_verdict_recomputed_to_unknown(self):
+        extra = [rec("CRIT", "port", "eth0", "mlx5.phy.errors", "x", EV_PHY), rec("UNKNOWN", "asic", "0000:01:00", "generic.aer", "?")]
+        d = write_sweep(self.root, "SITE1", "20261026T100000Z",
+                        [("acme-s1-stop1d-01", "ok", "CRIT", ports_doc("acme-s1-stop1d-01", [{"port": "eth0", "rx": -0.5}], extra=extra))])
+        self.assertTrue(os.path.isdir(d))
+        rules = {"schema_version": 1, "suppress": [{"check_id": "mlx5.phy.errors", "reason": "r"}]}
+        res, *_ = self.analyse(["-R", self.root, "-S", self.write_json("s.json", rules)])
+        h = res["verdicts"][0]["hosts_detail"][0]
+        self.assertEqual((h["verdict"], h["verdict_before"]), ("UNKNOWN", "CRIT"))
+
+    def test_imported_hosts(self):
+        rules = {"schema_version": 1, "suppress": [{"check_id": "mlx5.nic.discards", "hosts": "stoc2-01$", "reason": "r"}]}
+        args = nr.parse_args(["-i", "SITE3", self.legacy_dir(), "-S", self.write_json("s.json", rules)])
+        args.suppress_rules = nr.load_suppress(args.suppress)
+        sites, missing = nr.load_selection(args)
+        nr.apply_suppress(sites, args.suppress_rules)
+        res = nr.analyse(sites, missing, args)
+        self.assertEqual(res["findings"], [])
+        h = {x["host"]: x for x in res["verdicts"][0]["hosts_detail"]}["acme-s3-stoc2-01"]
+        self.assertEqual((h["verdict"], h["verdict_before"]), ("OK", "WARN"))
+
+    def legacy_dir(self):
+        d = os.path.join(self.tmp.name, "legacy")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "acme-s3-stoc2-01_20261023T141935Z_nic-health.csv"), "w") as fh:
+            fh.write("severity,scope,target,check_id,value,unit,threshold,evidence,hint,ref\n"
+                     '"OK","port","eno1","generic.link.state","up","","","","",""\n'
+                     '"WARN","port","eno1","mlx5.nic.discards","rx_discards_phy=+7","","","rx_discards_phy=12818188 (+7)","",""\n')
+        return d
+
+    def test_patterns_from_suppressed_measurements_are_dropped(self):
+        hosts = []
+        for i in range(1, 4):
+            doc = ports_doc(f"acme-s1-stop1d-0{i}", [{"port": "eth0", "rx": -0.5, "carrier": 500}])
+            for r in doc["results"]:
+                if r["check_id"] == "generic.link.flaps":
+                    r["severity"] = "WARN"
+            hosts.append((f"acme-s1-stop1d-0{i}", "ok", "WARN", doc))
+        write_sweep(self.root, "SITE1", "20261026T100000Z", hosts)
+        res, *_ = self.analyse(["-R", self.root])
+        self.assertIn("link instability", [w["issue"] for w in res["patterns"]["within_sites"]])
+        rules = {"schema_version": 1, "suppress": [{"check_id": "generic.link.flaps", "reason": "known counter issue"}]}
+        res, *_ = self.analyse(["-R", self.root, "-S", self.write_json("s.json", rules)])
+        self.assertEqual(res["patterns"]["within_sites"], [])
+        self.assertEqual(len(res["baselines"]["flaps"]), 3)                 # measurements stay
+
+    def test_outlier_pattern_dropped_with_suppressed_module_check(self):
+        self.normal_site("SITE1", weak=-8.5)
+        self.normal_site("SITE2", weak=-8.0)
+        for site in ("site1", "site2"):                                    # nic-health flagged the weak module
+            d = os.path.join(self.root, site.upper(), "20261026T100000Z", "nodes", f"acme-{site}-stop1d-01.json")
+            with open(d) as fh:
+                doc = json.load(fh)
+            next(r for r in doc["results"] if r["check_id"] == "mlx5.deep.module" and r["target"] == "eth0")["severity"] = "WARN"
+            with open(d, "w") as fh:
+                json.dump(doc, fh)
+        res, *_ = self.analyse(["-R", self.root])
+        self.assertIn(nr.OUTLIER_KIND, [a["issue"] for a in res["patterns"]["across_sites"]])
+        rules = {"schema_version": 1, "suppress": [{"check_id": "mlx5.deep.module", "reason": "r"}]}
+        res, *_ = self.analyse(["-R", self.root, "-S", self.write_json("s.json", rules)])
+        self.assertNotIn(nr.OUTLIER_KIND, [a["issue"] for a in res["patterns"]["across_sites"]])
+        self.assertEqual(len(res["baselines"]["rx_outliers"]), 2)
+
+    def test_filters_hosts_sites_and_match(self):
+        self.pcie_site()
+        rules = {"schema_version": 1, "suppress": [
+            {"check_id": "generic.pcie.link", "hosts": "stoc2-02$", "reason": "one host"},
+            {"check_id": "generic.pcie.link", "sites": ["SITE9"], "reason": "other site"},
+            {"check_id": "mlx5.deep.ber", "match": "^eth9$", "reason": "other port"}]}
+        res, *_ = self.analyse(["-R", self.root, "-S", self.write_json("s.json", rules)])
+        self.assertEqual([(r["host"], r["check_id"]) for r in res["suppressed"]["results"]],
+                         [("acme-s1-stoc2-02", "generic.pcie.link")])
+        self.assertEqual(len(res["findings"]), 2)
+        rules["suppress"] = [{"check_id": "mlx5.deep.ber", "match": "^eth0$", "reason": "target"}]
+        res, *_ = self.analyse(["-R", self.root, "-S", self.write_json("t.json", rules)])
+        self.assertEqual(len(res["suppressed"]["results"]), 1)              # regex found in the target
+
+    def test_match_searches_bounded_evidence(self):
+        long_ev = "x" * nr.EVIDENCE_MATCH_MAX + " MARKER"
+        d = write_sweep(self.root, "SITE1", "20261026T100000Z", [("acme-s1-stop1d-01", "ok", "WARN", ports_doc(
+            "acme-s1-stop1d-01", [{"port": "eth0", "rx": -0.5}], extra=[rec("WARN", "port", "eth0", "x.check", "v", long_ev),
+                                                                        rec("WARN", "port", "eth1", "x.check", "v", "MARKER")]))])
+        self.assertTrue(os.path.isdir(d))
+        rules = {"schema_version": 1, "suppress": [{"check_id": "x.check", "match": "MARKER", "reason": "r"}]}
+        res, *_ = self.analyse(["-R", self.root, "-S", self.write_json("s.json", rules)])
+        self.assertEqual([r["target"] for r in res["suppressed"]["results"]], ["eth1"])
+
+    def test_warnings_for_unused_rules_and_unselected_sites(self):
+        self.pcie_site()
+        rc, _, err = self.cli("-R", self.root, "-S", self.write_json("s.json", self.RULES))
+        self.assertEqual(rc, 0, err)
+        self.assertIn("suppress rule 3 (generic.link.lookback) matched nothing", err)
+        rules = {"schema_version": 1, "suppress": [{"check_id": "generic.pcie.link", "sites": ["SITE1", "SITE7"], "reason": "r"}]}
+        rc, _, err = self.cli("-R", self.root, "-S", self.write_json("t.json", rules))
+        self.assertIn("suppress rule 1: site SITE7 is not in the selection", err)
+        self.assertNotIn("matched nothing", err)
+
+    def test_section_in_every_format(self):
+        self.pcie_site()
+        path = self.write_json("s.json", self.RULES)
+        md, _ = self.report(["-R", self.root, "-S", path])
+        self.assertIn("## 6. Suppressed known issues", md)
+        self.assertIn("| #1 | `mlx5.deep.ber` | `BER=3E-9` |", md)
+        self.assertIn("| acme-s1-stoc2-01 | eth0 | mlx5.deep.ber | **WARN** | **OK** (was WARN) | #1 |", md)
+        self.assertIn("| acme-s1-stoc2-01 | stoc2 | ok | **OK** (was WARN) |", md)
+        self.assertIn("patterns built from a suppressed check are dropped", md)
+        page, _ = self.report(["-R", self.root, "-S", path], "html")
+        self.assertIn("Suppressed known issues</h2>", page)
+        self.assertIn('<td><span class="sev sev-OK">OK</span> (was WARN)</td>', page)
+        doc = json.loads(self.report(["-R", self.root, "-S", path], "json")[0])
+        self.assertEqual(doc["suppressed"]["rules"][0]["reason"], "Known nic-health BER issue (fictional)")
+        self.assertEqual(doc["suppressed"]["results"][0]["host_verdict_before"], "WARN")
+        self.assertEqual(doc["selection"]["suppress"], path)
+        md, _ = self.report(["-R", self.root])
+        self.assertNotIn("Suppressed known issues", md)
+
+
+class TestUntrustedText(Phase5Base):
+    def test_no_fake_badges(self):
+        fake = [rec("WARN", "port", "**CRIT**", "x.check", "**CRIT** value", "evidence **CRIT** here", "hint **OK**"),
+                rec("WARN", "asic", "0000:04:00", "generic.pcie.link", "**CRIT**", threshold="CRIT")]
+        self.site("SITE1", [("acme-s1-stop1d-01", [{"port": "eth0", "rx": -0.5}], {"extra": fake})])
+        page, _ = self.report(["-R", self.root], "html")
+        self.assertNotIn('class="sev sev-CRIT"', page)
+        self.assertIn("∗∗CRIT∗∗ value", page)
+        self.assertIn("<td>CRIT</td>", page)                                # bare text in a cell stays text
+        self.assertIn('<span class="sev sev-WARN">WARN</span>', page)       # report-built badges still work
+        self.assertEqual(nr.md_cell("a*b"), "a∗b")
+        self.assertEqual(nr.md_cell(nr._badge("OK")), "**OK**")
+
+    def test_control_and_bidi_characters_removed(self):
+        self.assertEqual(nr.md_inline("a‮b\x1b[31mc⁦d\x85e\tf\ng"), "ab[31mcde f g")
+        self.assertEqual(nr.md_cell("x‮y"), "xy")
+        evil = [rec("WARN", "port", "eth‮0", "x.check", "v\x07", "ev⁧il\x00", "")]
+        self.site("SITE1", [("acme-s1-stop1d-01", [{"port": "eth0", "rx": -0.5}], {"extra": evil})])
+        md, _ = self.report(["-R", self.root])
+        self.assertIsNone(nr.CONTROL_RE.search(md))
+        self.assertIn("`eth0`", md)
+
+    def test_rate_display(self):
+        self.assertEqual([nr._rate(v) for v in (None, 0.00412, 3.14159, 99.94, 100.0, 412000.0)],
+                         [None, "0.00412", "3.14", "99.9", "100", "412,000"])
+
+
+class TestPerSite(Phase5Base):
+    def test_files_and_outliers_agree_with_combined(self):
+        self.normal_site("SITE1", weak=-8.5)
+        self.normal_site("SITE2", weak=-6.0)
+        out = os.path.join(self.tmp.name, "rep.json")
+        rc, stdout, err = self.cli("-R", self.root, "-r", ROLE_RE, "-O", "json", "-o", out, "-P")
+        self.assertEqual((rc, stdout), (0, ""), err)
+        with open(out) as fh:
+            combined = json.load(fh)
+        for site in ("SITE1", "SITE2"):
+            with open(os.path.join(self.tmp.name, f"rep-{site}.json")) as fh:
+                one = json.load(fh)
+            self.assertFalse(one["multi_site"])
+            self.assertEqual([s["site"] for s in one["selection"]["sites"]], [site])
+            self.assertEqual(one["baselines"]["baseline"]["sites"], ["SITE1", "SITE2"])       # same population
+            self.assertEqual(one["baselines"]["rx_outliers"],
+                             [o for o in combined["baselines"]["rx_outliers"] if o["site"] == site])
+            self.assertEqual(one["baselines"]["rx_by_module_type"], combined["baselines"]["rx_by_module_type"])
+        self.assertEqual(len(combined["baselines"]["rx_outliers"]), 2)
+        md = os.path.join(self.tmp.name, "rep.md")
+        rc, _, err = self.cli("-R", self.root, "-o", md, "--per-site", "-t", "Q4")
+        self.assertEqual(rc, 0, err)
+        with open(os.path.join(self.tmp.name, "rep-SITE2.md"), encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertTrue(text.startswith("# 🩺 Q4 · SITE2\n"))
+        self.assertIn("Baseline: the sites of the combined report (SITE1, SITE2;", text)
+
+    def test_with_baseline_all(self):
+        self.site("SITE1", [(f"acme-s1-stop1d-0{i}", [{"port": "eth0", "rx": -6.5}], {}) for i in range(1, 4)])
+        self.normal_site("SITE2")
+        self.normal_site("SITE3", weak=-8.5)
+        out = os.path.join(self.tmp.name, "b.json")
+        rc, _, err = self.cli("-R", self.root, "-s", "SITE1", "-s", "SITE3", "-b", "all", "-O", "json", "-o", out, "-P")
+        self.assertEqual(rc, 0, err)
+        with open(out) as fh:
+            combined = json.load(fh)
+        for site in ("SITE1", "SITE3"):
+            with open(os.path.join(self.tmp.name, f"b-{site}.json")) as fh:
+                one = json.load(fh)
+            self.assertEqual(one["baselines"]["baseline"]["sites"], ["SITE1", "SITE2", "SITE3"])
+            self.assertEqual(one["baselines"]["rx_outliers"],
+                             [o for o in combined["baselines"]["rx_outliers"] if o["site"] == site])
+        self.assertFalse(os.path.exists(os.path.join(self.tmp.name, "b-SITE2.json")))     # baseline only
+        self.assertEqual(len(combined["baselines"]["rx_outliers"]), 4)
+
+    def test_single_site_writes_no_duplicate(self):
+        self.normal_site("SITE1")
+        out = os.path.join(self.tmp.name, "one.md")
+        rc, _, err = self.cli("-R", self.root, "-o", out, "-P")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("one site selected", err)
+        self.assertEqual(sorted(os.listdir(self.tmp.name)), ["one.md", "sweeps"])
+
+    def test_needs_output_and_names_are_safe(self):
+        self.normal_site("SITE1")
+        rc, _, err = self.cli("-R", self.root, "-P")
+        self.assertEqual(rc, 3, err)
+        self.assertEqual(nr.per_site_path("/x/r.d/rep.html", "S-1"), "/x/r.d/rep-S-1.html")
+        self.assertEqual(nr.per_site_path("rep", "S1"), "rep-S1")
+        with self.assertRaises(nr.InputError):
+            nr.per_site_path("rep.md", "../x")
+
+
+class TestOutputFiles(Phase5Base):
+    def test_mode_and_symlink_replaced_not_followed(self):
+        self.normal_site("SITE1")
+        victim = os.path.join(self.tmp.name, "victim.txt")
+        with open(victim, "w") as fh:
+            fh.write("keep me")
+        out = os.path.join(self.tmp.name, "r.md")
+        os.symlink(victim, out)
+        old = os.umask(0o002)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(nr.main(["-R", self.root, "-o", out]), 0)
+        finally:
+            os.umask(old)
+        self.assertFalse(os.path.islink(out))
+        with open(victim) as fh:
+            self.assertEqual(fh.read(), "keep me")
+        self.assertEqual(os.stat(out).st_mode & 0o777, 0o640)
+        self.assertEqual([f for f in os.listdir(self.tmp.name) if f.endswith(".tmp")], [])
+
+    def test_unwritable_target_leaves_nothing(self):
+        self.normal_site("SITE1")
+        self.normal_site("SITE2")
+        out = os.path.join(self.tmp.name, "missing-dir", "r.md")
+        rc, _, err = self.cli("-R", self.root, "-o", out, "-P")
+        self.assertEqual(rc, 1, err)
+        self.assertIn("does not exist or is not writable", err)
+        ro = os.path.join(self.tmp.name, "ro")
+        os.mkdir(ro, 0o500)
+        self.addCleanup(os.chmod, ro, 0o700)
+        if os.access(ro, os.W_OK):
+            self.skipTest("running with privileges that ignore directory permissions")
+        rc, _, err = self.cli("-R", self.root, "-o", os.path.join(ro, "r.md"), "-P")
+        self.assertEqual(rc, 1, err)
+        self.assertEqual(os.listdir(ro), [])
+
+    def test_failed_write_removes_temp_files(self):
+        out = os.path.join(self.tmp.name, "a.md")
+        os.mkdir(os.path.join(self.tmp.name, "b.md"))
+        with self.assertRaises(nr.InputError):
+            nr.write_outputs([(out, "x"), (os.path.join(self.tmp.name, "b.md"), "y")])
+        self.assertEqual(sorted(os.listdir(self.tmp.name)), ["b.md"])
+
+
+class TestThemes(Phase5Base):
+    def test_example_theme_loads_and_brands_html(self):
+        theme = nr.load_theme(EXAMPLE_THEME)
+        self.assertEqual((theme["name"], theme["warnings"], theme["notices"]), ("example", [], []))
+        self.assertTrue(theme["logos"]["header"].startswith("data:image/png;base64,"))
+        self.assertTrue(theme["logos"]["cover"].startswith("data:image/svg+xml;base64,"))
+        self.normal_site("SITE1")
+        page, _ = self.report(["-R", self.root, "-T", EXAMPLE_THEME], "html")
+        self.assertIn('<img class="cover-logo" alt="Example Corp" src="data:image/png;base64,', page)
+        self.assertIn("thead th{background:#DDE3EA;color:#0B1F44}", page)
+        self.assertIn('"Example Sans",' + nr.FONT_FALLBACK, page)
+        self.assertIn("Example Corp internal · Generated by", page.split("<footer>")[1])     # theme classification
+        self.assertNotIn("http://", page.replace('xmlns="http://www.w3.org/2000/svg"', ""))
+        self.assertNotIn("<script", page)
+        page, _ = self.report(["-R", self.root, "-T", EXAMPLE_THEME, "-c", "CLI label"], "html")
+        self.assertIn("CLI label · Generated by", page.split("<footer>")[1])                 # -c wins
+        md, args = self.report(["-R", self.root, "-T", EXAMPLE_THEME])
+        self.assertNotIn("Example Corp", md)                                                   # md ignores themes
+        self.assertIsNone(args.theme_data)
+        doc = json.loads(self.report(["-R", self.root, "-T", EXAMPLE_THEME], "json")[0])
+        self.assertNotIn("theme", doc)
+        self.assertIsNone(doc["classification"])
+
+    def test_environment_and_empty_theme_option(self):
+        self.normal_site("SITE1")
+        rc, out, err = self.cli("-R", self.root, "-O", "json", env={nr.THEME_ENV: "/etc/hostname"})
+        self.assertEqual(rc, 0, err)                                         # json never reads the theme
+        rc, out, err = self.cli("-R", self.root, "-O", "html", env={nr.THEME_ENV: EXAMPLE_THEME})
+        self.assertEqual(rc, 0, err)
+        self.assertIn('class="cover-logo"', out)
+        rc, out, err = self.cli("-R", self.root, "-O", "html", "-T", "", env={nr.THEME_ENV: EXAMPLE_THEME})
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn('class="cover-logo"', out)                          # -T '' overrides the environment
+
+    def test_invalid_themes(self):
+        colors = nr.load_theme(EXAMPLE_THEME)["colors"]
+        cases = {"colors.primary must be #RRGGBB": ({"colors": {**colors, "primary": "blue"}}, {}),
+                 "unknown key(s) source": ({"source": "x"}, {}),
+                 "missing name": ({"name": None}, {}),
+                 "'name' must be letters": ({"name": "my theme"}, {}),
+                 "'name' must be letters, digits": ({"name": "ex‮ample"}, {}),
+                 "unsupported schema_version": ({"schema_version": 2}, {}),
+                 "not a plain file name": ({"logos": {"cover": "../logo-light.png"}}, {}),
+                 "not a plain file name in": ({"logos": {"cover": "/etc/hostname"}}, {}),
+                 "not a PNG, JPEG or SVG": ({"logos": {"cover": "fake.png"}}, {"fake.png": b"GIF89a....."}),
+                 "is larger than 512 KiB": ({"logos": {"cover": "big.png"}},
+                                            {"big.png": b"\x89PNG\r\n\x1a\n" + b"0" * nr.LOGO_MAX_BYTES}),
+                 "names an emoji font": ({"fonts": {"body": ["Noto Color Emoji"]}}, {}),
+                 "fonts.body must be a list": ({"fonts": {"body": ['A";}body{x']}}, {}),
+                 "'org' must be a non-empty string": ({"org": "‮\x07"}, {}),
+                 "unknown key(s) in 'labels'": ({"labels": {"footer": "x"}}, {})}
+        for msg, (doc, files) in cases.items():
+            with self.assertRaises(nr.InputError, msg=msg) as cm:
+                nr.load_theme(self.theme_dir(doc, files))
+            self.assertIn(msg, str(cm.exception))
+        d = self.theme_dir()
+        with open(os.path.join(d, "theme.json"), "w") as fh:
+            fh.write("[" * 50000)
+        with self.assertRaisesRegex(nr.InputError, "recursion"):
+            nr.load_theme(d)
+
+    def test_text_fields_cleaned(self):
+        theme = nr.load_theme(self.theme_dir({"org": "Ex‮ample\x07 Corp", "labels": {"classification": "In⁦ternal\n"}}))
+        self.assertEqual((theme["org"], theme["labels"]["classification"]), ("Example Corp", "Internal"))
+
+    def test_extra_css_is_ignored_with_a_notice(self):
+        self.normal_site("SITE1")
+        d = self.theme_dir(files={"extra.css": ".sev-CRIT{color:#00ff00}"})
+        self.assertEqual(nr.load_theme(d)["notices"], ["theme 'example': extra.css is not supported and is ignored"])
+        rc, out, err = self.cli("-R", self.root, "-O", "html", "-T", d)
+        self.assertEqual(rc, 0, err)
+        self.assertIn("extra.css is not supported and is ignored", err)
+        self.assertNotIn("#00ff00", out)
+
+    def test_symlink_escaping_the_theme_folder(self):
+        outside = os.path.join(self.tmp.name, "outside.png")
+        shutil.copy(os.path.join(EXAMPLE_THEME, "logo-light.png"), outside)
+        d = self.theme_dir({"logos": {"cover": "link.png"}})
+        os.symlink(outside, os.path.join(d, "link.png"))
+        with self.assertRaisesRegex(nr.InputError, "points outside the theme folder"):
+            nr.load_theme(d)
+
+    def test_contrast_warning_and_strict_failure(self):
+        self.assertAlmostEqual(nr.contrast_ratio("#000000", "#ffffff"), 21.0)
+        self.normal_site("SITE1")
+        low = os.path.join(THEMES, "low-contrast")
+        rc, out, err = self.cli("-R", self.root, "-O", "html", "-T", low)
+        self.assertEqual(rc, 0, err)
+        self.assertIn("⚠️  theme 'low-contrast': primary on white contrast is", err)
+        self.assertIn("</html>", out)
+        rc, _, err = self.cli("-R", self.root, "-O", "html", "-T", low, "-X")
+        self.assertEqual(rc, 1, err)
+        self.assertIn("(--strict-theme)", err)
+        self.assertNotIn("Traceback", err)
+        rc, _, err = self.cli("-R", self.root, "-O", "html", "-T", EXAMPLE_THEME, "--strict-theme")
+        self.assertEqual((rc, err), (0, ""))
+        rc, _, err = self.cli("-R", self.root, "-O", "html", "-X", env=self.NO_ENV_THEME)
+        self.assertEqual(rc, 3, err)                                          # -X without a theme
+        rc, _, err = self.cli("-R", self.root, "-O", "json", "-T", low, "-X")
+        self.assertEqual(rc, 3, err)                                          # -X with a format that ignores themes
+        rc, _, err = self.cli("-R", self.root, "-O", "html", "-T", os.path.join(self.tmp.name, "none"))
+        self.assertEqual(rc, 1, err)
+
+    def test_fixed_colours_for_severity_attribution_and_classification(self):
+        for (lt, dk) in nr.SEV_COLORS.values():                              # the lock repeats HTML_CSS's colours
+            for colour in lt + dk:
+                self.assertIn(colour, nr.HTML_CSS)
+        theme = nr.load_theme(os.path.join(THEMES, "low-contrast"))
+        for paged in (False, True):
+            css = nr.theme_css(theme, paged)
+            for var in ("--crit", "--warn", "--ok", "--na", "--muted", "--bg", "--fg"):
+                self.assertNotIn(var + ":", css)
+            for sel in (".attrib", "footer", ".run-class", ".cover-class", ".meta"):
+                self.assertNotIn(sel + "{", css.replace(nr.LOCKED_CSS, ""))
+            self.assertIn(nr.LOCKED_CSS, css)
+        self.assertIn(".cover .attrib,.cover-class{background:#0b1220;color:#f3f5f8", nr.PRINT_CSS)
+        self.assertEqual(nr.theme_css(None, False), "")
+
+
+class TestAttribution(Phase5Base):
+    def test_every_text_format(self):
+        self.normal_site("SITE1")
+        line = nr.attribution(self.NOW)
+        md, _ = self.report(["-R", self.root])
+        self.assertEqual(md.rstrip().splitlines()[-1], line)
+        doc = json.loads(self.report(["-R", self.root], "json")[0])
+        self.assertEqual((doc["generator"]["tool"], doc["generator"]["version"]), (nr.SCRIPT_NAME, nr.SCRIPT_VERSION))
+        page, _ = self.report(["-R", self.root, "-T", EXAMPLE_THEME], "html")
+        title_block = page.split('<header class="cover">')[1].split("</header>")[0]
+        self.assertIn(f'<p class="attrib">{line}</p>', title_block)
+        self.assertIn(line, page.split("<footer>")[1])
+        self.assertIn(f'<meta name="generator" content="{nr.SCRIPT_NAME} {nr.SCRIPT_VERSION}">', page)
+
+
+FILE_SVG = ('<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="96" height="24">'
+            '<rect width="20" height="20" fill="#fff"/><image href="file://{0}" xlink:href="file://{0}" width="96" height="24"/></svg>')
+
+
+class TestWriteSpecialTargets(unittest.TestCase):
+    """An existing target that is not a regular file is written to, never replaced."""
+
+    def test_fifo_target_is_written_not_replaced(self):
+        with tempfile.TemporaryDirectory() as d:
+            fifo = os.path.join(d, "p")
+            os.mkfifo(fifo)
+            got = {}
+
+            def reader():
+                with open(fifo, "rb") as fh:
+                    got["data"] = fh.read()
+            th = threading.Thread(target=reader, daemon=True)     # never hangs the suite if nothing writes
+            th.start()
+            nr.write_outputs([(fifo, "report\n")])
+            th.join(10)
+            self.assertEqual(got.get("data"), b"report\n")
+            self.assertTrue(stat.S_ISFIFO(os.stat(fifo).st_mode))
+            self.assertEqual([f for f in os.listdir(d) if f.endswith(".tmp")], [])
+
+    def test_dev_null_target(self):
+        nr.write_outputs([(os.devnull, "report\n")])
+        self.assertTrue(stat.S_ISCHR(os.stat(os.devnull).st_mode))
+
+
+class TestPDF(Phase5Base):
+    def test_pdf_needs_output_file(self):
+        self.normal_site("SITE1")
+        rc, out, err = self.cli("-R", self.root, "-O", "pdf")
+        self.assertEqual((rc, out), (3, ""))
+        self.assertIn("give -o FILE", err)
+
+    def test_missing_weasyprint_is_a_clear_input_error(self):
+        self.normal_site("SITE1")
+        saved = sys.modules.get("weasyprint", "absent")
+        sys.modules["weasyprint"] = None                                    # import weasyprint now fails
+        try:
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = nr.main(["-R", self.root, "-O", "pdf", "-o", os.path.join(self.tmp.name, "r.pdf")])
+        finally:
+            if saved == "absent":
+                del sys.modules["weasyprint"]
+            else:
+                sys.modules["weasyprint"] = saved
+        self.assertEqual(rc, 1)
+        self.assertIn("python3-weasyprint", err.getvalue())
+        self.assertFalse(os.path.exists(os.path.join(self.tmp.name, "r.pdf")))
+
+    def test_rendering_failure_is_an_input_error(self):
+        self.normal_site("SITE1")
+        failing = nr.argparse.Namespace(default_url_fetcher=None,
+                                        HTML=lambda **kw: nr.argparse.Namespace(write_pdf=lambda: 1 / 0))
+        args = nr.parse_args(["-R", self.root, "-O", "pdf", "-o", "x.pdf"])
+        sites, missing = nr.load_selection(args)
+        res = nr.analyse(sites, missing, args)
+        saved = nr._weasyprint
+        nr._weasyprint = lambda: failing
+        try:
+            with self.assertRaisesRegex(nr.InputError, "PDF rendering failed: ZeroDivisionError"):
+                nr.render_pdf(res, sites, missing, args, self.NOW)
+        finally:
+            nr._weasyprint = saved
+
+    def test_fetcher_without_url_fetcher_class(self):
+        fake = nr.argparse.Namespace(default_url_fetcher=lambda url: ("fetched", url))
+        fetch = nr.local_fetcher(fake)
+        self.assertEqual(fetch("data:,x"), ("fetched", "data:,x"))
+        with self.assertRaises(ValueError):
+            fetch("https://example.invalid/logo.png")
+
+    def test_paged_html_structure(self):
+        for site in ("SITE1", "SITE2", "SITE3", "SITE4", "SITE5"):
+            self.normal_site(site, weak=-8.5)
+        args = nr.parse_args(["-R", self.root, "-r", ROLE_RE, "-c", "confidential <site> data", "-T", EXAMPLE_THEME])
+        args.theme_data = nr.load_theme(EXAMPLE_THEME)
+        sites, missing = nr.load_selection(args)
+        page = nr.render_html(nr.analyse(sites, missing, args), sites, missing, args, self.NOW, paged=True)
+        self.assertIn('<nav class="toc"><h2>Contents</h2><ol><li><a href="#sec-1">1. Coverage and comparability</a>', page)
+        self.assertIn('<div class="run-class">confidential &lt;site&gt; data</div>', page)
+        self.assertIn('<p class="cover-class">confidential &lt;site&gt; data</p>', page)
+        self.assertIn('<div class="run-title">NIC Health · Example Corp</div>', page)
+        self.assertIn('<div class="run-logo"><img alt="Example Corp" src="data:image/png;base64,', page)
+        self.assertIn('<img class="cover-logo" alt="Example Corp" src="data:image/svg+xml;base64,', page)
+        wide = page.split('<section class="wide">')[1].split("</section>")[0]
+        self.assertTrue(wide.startswith('<h2 id="sec-5">5. Patterns</h2>'))           # the table's lead moves with it
+        self.assertIn("<strong>Across sites:</strong>", wide)
+        self.assertIn("target-counter(attr(href), page)", page)
+        self.assertNotIn("Noto Color Emoji", page)
+        self.assertNotIn('class="wide"', nr.render_html(nr.analyse(sites, missing, args), sites, missing, args, self.NOW))
+
+    @unittest.skipUnless(HAVE_WEASYPRINT, "WeasyPrint not installed")
+    def test_landscape_page_for_wide_table(self):
+        for site in ("SITE1", "SITE2", "SITE3", "SITE4", "SITE5"):
+            self.normal_site(site, weak=-8.5)
+        args = nr.parse_args(["-R", self.root, "-r", ROLE_RE])
+        sites, missing = nr.load_selection(args)
+        doc = weasyprint.HTML(string=nr.render_html(nr.analyse(sites, missing, args), sites, missing, args, self.NOW,
+                                                    paged=True)).render()
+        self.assertEqual(doc.metadata.generator, f"{nr.SCRIPT_NAME} {nr.SCRIPT_VERSION}")
+        sizes = [(round(pg.width), round(pg.height)) for pg in doc.pages]
+        self.assertLess(sizes[0][0], sizes[0][1])                           # A4 portrait cover...
+        self.assertIn((sizes[0][1], sizes[0][0]), sizes)                    # ...and a landscape page for a wide table
+
+    @unittest.skipUnless(HAVE_WEASYPRINT, "WeasyPrint not installed")
+    def test_cli_pdf_metadata_contents_and_every_page(self):
+        if not (shutil.which("pdfinfo") and shutil.which("pdftotext")):
+            self.skipTest("pdfinfo/pdftotext (poppler-utils) not installed: PDF text checks need them")
+        for site in ("SITE1", "SITE2", "SITE3", "SITE4", "SITE5"):
+            self.normal_site(site, weak=-8.5)
+        out = os.path.join(self.tmp.name, "r.pdf")
+        rc, stdout, err = self.cli("-R", self.root, "-r", ROLE_RE, "-O", "pdf", "-o", out, "-c", "confidential site data",
+                                   "-T", EXAMPLE_THEME, "-P")
+        self.assertEqual((rc, stdout, err), (0, "", ""))
+        self.assertTrue(os.path.isfile(os.path.join(self.tmp.name, "r-SITE3.pdf")))
+        info = subprocess.run(["pdfinfo", out], capture_output=True, text=True).stdout
+        self.assertRegex(info, rf"Creator:\s+{nr.SCRIPT_NAME} {nr.SCRIPT_VERSION}")
+        self.assertRegex(info, r"Author:\s+Example Corp")
+        pages = subprocess.run(["pdftotext", "-layout", out, "-"], capture_output=True, text=True).stdout.split("\f")[:-1]
+        self.assertIn("Generated by nic-report v" + nr.SCRIPT_VERSION, pages[0])               # cover
+        self.assertIn("confidential site data", pages[0])
+        self.assertIn("Generated by nic-report v" + nr.SCRIPT_VERSION, pages[-1])              # closing footer
+        toc = re.findall(r"^\s*(\d+\. [A-Za-z ]+?) \.{3,}\s*(\d+)\s*$", pages[1], re.M)
+        self.assertEqual([t for t, _ in toc], ["1. Coverage and comparability", "2. Verdicts", "3. Findings",
+                                               "4. Baselines and outliers", "5. Patterns"])
+        for title, number in toc:                                            # heading and running header on its page
+            self.assertGreaterEqual(pages[int(number) - 1].count(title), 2, (title, number))
+        for n, pg in enumerate(pages[1:], 2):                               # every page after the cover
+            self.assertIn("confidential site data", pg, n)
+            self.assertIn(f"Page {n} of {len(pages)}", pg)
+            self.assertIn("NIC Health · Example Corp", pg)
+
+    @unittest.skipUnless(HAVE_WEASYPRINT, "WeasyPrint not installed")
+    def test_fetcher_blocks_files_referenced_by_svg_logos(self):
+        self.normal_site("SITE1")
+
+        def images(*theme):
+            out = os.path.join(self.tmp.name, f"i{len(os.listdir(self.tmp.name))}.pdf")
+            rc, _, err = self.cli("-R", self.root, "-O", "pdf", "-o", out, *theme, env=self.NO_ENV_THEME)
+            self.assertEqual(rc, 0, err)
+            with open(out, "rb") as fh:
+                return fh.read().count(b"/Subtype /Image")
+        base = images()                                                      # emoji glyph bitmaps, if any
+        self.assertGreater(images("-T", EXAMPLE_THEME), base)                # control: the PNG header logo
+        png = os.path.join(EXAMPLE_THEME, "logo-light.png")
+        d = self.theme_dir({"logos": {"cover": "file.svg", "header": "file.svg"}}, {"file.svg": FILE_SVG.format(png)})
+        self.assertEqual(images("-T", d), base)                              # file:// inside the SVG not loaded
 
 
 if __name__ == "__main__":

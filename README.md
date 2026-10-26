@@ -315,7 +315,7 @@ sudo chmod +x /usr/local/sbin/nic-health.sh
 # Fleet sweeps over SSH (optional, operator host only)
 sudo cp nic-sweep.sh /usr/local/bin/
 sudo chmod +x /usr/local/bin/nic-sweep.sh
-# Reports from sweeps (optional, operator host only; Python 3.9+)
+# Reports from sweeps (optional, operator host only; Python 3.9+, WeasyPrint for PDF)
 sudo cp nic-report.py /usr/local/bin/
 sudo chmod +x /usr/local/bin/nic-report.py
 ```
@@ -979,7 +979,7 @@ Host status: `ok`, `ssh-fail`, `sudo-fail`, `tool-missing`, `timeout`, `bad-outp
 
 ## 📊 Fleet Reports (`nic-report.py`)
 
-`nic-report.py` reads `nic-sweep` sweeps (and older hand-made nic-health CSV) and writes a report for **one site, several, or every site** of a sweep tree. It is offline and read-only, and the one Python script of the tools (Python 3.9+, standard library only).
+`nic-report.py` reads `nic-sweep` sweeps (and older hand-made nic-health CSV) and writes a report for **one site, several, or every site** of a sweep tree. It is offline and read-only, and the one Python script of the tools (Python 3.9+, standard library only). **PDF** needs WeasyPrint (`python3-weasyprint`, or `pip install weasyprint`), imported only for `-O pdf`.
 
 | Section | One site | Several sites |
 |---|---|---|
@@ -988,6 +988,7 @@ Host status: `ok`, `ssh-fail`, `sudo-fail`, `tool-missing`, `timeout`, `bad-outp
 | 3. Findings | by host | by site → host |
 | 4. Baselines and outliers | the site's own medians (or the fleet's with `-b all`) | medians across the selected sites |
 | 5. Patterns | same issue on the same port/ASIC across hosts of a role | also: same issue on the same role at two or more sites |
+| 6. Suppressed known issues (with `-S`) | rules, reasons, counts and every suppressed result | same |
 
 Coverage counts hosts, ASICs, ports, ports with link, deep checks and FEC modes; lists every host not collected; and flags what limits a comparison (mixed nic-health versions or windows, different days, imported data without metadata, sites with no sweep at the requested date). Findings list every WARN/CRIT/UNKNOWN result with its evidence and hint. Baselines are computed over ports with link: receive power per module type, outliers (at least `-d` dB, default 5, below the median **and** a robust median/MAD score of 3.5; multi-lane modules are their own type, judged by the lowest lane), errors since boot, carrier changes above `-f` (default 100), discards, temperatures and PCIe links below capability. Patterns group related checks into one issue (symbol/CRC/BER → "link errors") and need `-r` for roles; without it a site's hosts form one group and the report says so.
 
@@ -999,11 +1000,22 @@ nic-report.py -R sweeps -i SITE9 old/SITE9/                # add an older CSV co
 nic-report.py -R sweeps -O json -o report.json             # every computed value, for automation
 nic-report.py -R sweeps -s SITE3 -b all -O html -o s3.html # one site against the fleet's medians, as HTML
 nic-report.py -R sweeps -r '^[^-]+-[^-]+-(?P<role>[a-z]+\d+[a-z]*)-\d+'             # roles from host names
+nic-report.py -R sweeps -O pdf -o fleet.pdf -c 'confidential site data'                 # PDF (WeasyPrint)
+nic-report.py -R sweeps -O pdf -o fleet.pdf -P             # plus fleet-SITE1.pdf, fleet-SITE2.pdf, ... (same baseline)
+nic-report.py -R sweeps -S known-issues.json               # leave known tool issues out, listed in section 6
+nic-report.py -R sweeps -T ~/themes/acme -X -O html -o fleet.html                       # branded; strict contrast check
 ```
 
-Options: `-R`/`--sweep-root`, `-s`/`--site`, `-a`/`--at`, `-i`/`--import` (takes every following path: put sweep directories first or end it with `--`), `-r`/`--role-regex`, `-b`/`--baseline scope|all`, `-d`/`--rx-delta-db`, `-f`/`--flap-min`, `-O`/`--output-format md|json|html`, `-o`/`--output`, `-t`/`--title`, `-c`/`--classification`, `-v`/`--version`, `-h`/`--help`. Odd or damaged input ends in a `❌` message, never a traceback; a host whose result file is missing or malformed is listed as `unreadable-result` instead of failing the report. Data from nic-health older than 2.12.0 has no link state: ports are counted from link-flap records and ports with link shown as unknown.
+- 📄 **PDF:** A4 cover (title, data, classification, logo with a theme, attribution), contents with page numbers, a page break before each section, a running header with the section name, "Page N of M" and the classification on every page, landscape pages only for tables too wide for portrait.
+- 🙈 **`-S`/`--suppress FILE`** (known tool issues): `{"schema_version": 1, "suppress": [{"check_id": "mlx5.deep.ber", "match": "BER=3E-9", "hosts": "^prd-site1-", "sites": ["SITE1"], "reason": "…"}]}`. `check_id` (exact) and `reason` are required; `match` is a regex searched in the target and the evidence, `hosts` a regex on the host name. Matching WARN/CRIT/UNKNOWN results leave the findings, verdict counts, PCIe list and patterns, a host's verdict is recomputed from its remaining results (`OK (was WARN)`), and everything suppressed is listed in its own section and in the JSON: nothing is dropped silently. Baselines and outlier lists are measurements and stay; patterns built from a suppressed check are dropped. `match` searches the first 4096 characters of the evidence; keep rules simple and anchored (a host writes its own evidence, which is why every suppressed result is listed). Unknown keys or bad regexes are errors; a rule that matches nothing is reported on stderr.
+- 🗂️ **`-P`/`--per-site`:** with `-o FILE.ext`, also `FILE-SITE.ext` per site, single-site layout, with the combined report's baseline so outliers agree.
+- 💾 **Output files** are written atomically (temp file in the same directory, then renamed) with mode `0640` less the umask; a symlink at the target is replaced, not followed.
+- 🎨 **Themes** (`-T`/`--theme DIR` or `NIC_REPORT_THEME`; `-T ''` for none): `theme.json` with brand colours, fonts, logos (PNG/JPEG/SVG, embedded as `data:` URIs) and labels (header title, classification; `-c` overrides it). HTML and PDF only: Markdown and JSON never read a theme. No free-form CSS: a theme cannot change content, severity colours, classification or attribution, which keep fixed colours (an `extra.css` file is ignored with a warning). Contrast below 4.5:1 is a warning, an error with `-X`/`--strict-theme`. Example: [`tests/fixtures/themes/example/`](tests/fixtures/themes/example/); keep real company themes outside the repo.
+- 🏷️ **Attribution:** `Generated by nic-report vX.Y.Z — © YEAR Ciro Iriarte · timestamp` in every format (Markdown last line, HTML title block and footer, PDF cover and closing footer, JSON `generator`, PDF Creator).
 
-Exit status: `0` report written, `1` input error (unreadable input, unknown schema or site, a site selected twice, no data for the selection) or the output file cannot be written, `3` usage error. Design: [`docs/design/nic-sweep.md`](docs/design/nic-sweep.md) §6. HTML is one self-contained page (inline style, no scripts or remote resources). PDF, themes and recommendations follow in later phases.
+Options: `-R`/`--sweep-root`, `-s`/`--site`, `-a`/`--at`, `-i`/`--import` (takes every following path: put sweep directories first or end it with `--`), `-r`/`--role-regex`, `-b`/`--baseline scope|all`, `-d`/`--rx-delta-db`, `-f`/`--flap-min`, `-S`/`--suppress`, `-O`/`--output-format md|json|html|pdf`, `-o`/`--output`, `-P`/`--per-site`, `-T`/`--theme`, `-X`/`--strict-theme`, `-t`/`--title`, `-c`/`--classification`, `-v`/`--version`, `-h`/`--help`. Odd or damaged input ends in a `❌` message, never a traceback; a host whose result file is missing or malformed is listed as `unreadable-result` instead of failing the report. Data from nic-health older than 2.12.0 has no link state: ports are counted from link-flap records and ports with link shown as unknown.
+
+Exit status: `0` report written, `1` input error (unreadable input, unknown schema or site, a site selected twice, no data for the selection, an invalid suppress file or theme, low theme contrast with `-X`, WeasyPrint missing or failing for `-O pdf`) or an output file cannot be written, `3` usage error (including `-O pdf` or `-P` without `-o`). Design: [`docs/design/nic-sweep.md`](docs/design/nic-sweep.md) §6. HTML is one self-contained page (inline style, no scripts or remote resources); the PDF engine is limited to `data:` URIs, so neither ever reaches the network. Recommendations follow in a later phase.
 
 ## 📄 License
 

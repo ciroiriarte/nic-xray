@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "name": "low-contrast",
+  "org": "Example Corp",
+  "colors": { "primary_dark": "#C8D2E0", "primary": "#9DB7DA", "accent": "#C9DAF0",
+              "link_dark": "#7FB3E8", "header_bg": "#DDE3EA", "header_fg": "#B8C2CE" }
+}

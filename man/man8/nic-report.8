@@ -23,10 +23,16 @@ nic-report \- single- and multi-site NIC health reports from nic-sweep sweeps
 .IR DB ]
 .RI [ \-f | \-\-flap\-min
 .IR N ]
+.RI [ \-S | \-\-suppress
+.IR FILE ]
 .RI [ \-O | \-\-output\-format
-.IR md | json | html ]
+.IR md | json | html | pdf ]
 .RI [ \-o | \-\-output
 .IR FILE ]
+.RI [ \-P | \-\-per\-site ]
+.RI [ \-T | \-\-theme
+.IR DIR ]
+.RI [ \-X | \-\-strict\-theme ]
 .RI [ \-t | \-\-title
 .IR TEXT ]
 .RI [ \-c | \-\-classification
@@ -39,7 +45,8 @@ reads the sweeps written by
 .BR nic-sweep.sh (8)
 (and, for older collections, nic-health CSV files) and writes a report for one
 site, several sites, or every site of a sweep tree. The report has five
-sections:
+sections, plus a sixth with
+.BR \-\-suppress :
 .TP
 .B Coverage and comparability
 Hosts, roles, NIC ASICs and ports, ports with link, deep checks evaluated, FEC
@@ -74,13 +81,25 @@ errors are "link errors"; flaps and link-downs "link instability"). Without
 .BR \-\-role\-regex ,
 a site's hosts form one group and cross-site patterns are not computed; the
 report says so.
+.TP
+.B Suppressed known issues
+With
+.BR \-\-suppress :
+each rule with its reason and how many results it matched, and every
+suppressed result (host, target, check, severity, rule). Nothing is dropped
+silently.
 .PP
 With one site the coverage table has a column per role and the verdicts list
 each host; with several sites the columns are sites. The tool is read-only and
 offline: it never contacts a host or the network.
 .PP
 It is the one Python script of the nic-xray tools (Python 3.9 or newer,
-standard library only).
+standard library only; WeasyPrint, optional, for PDF). Every report names the
+tool, version and time that generated it: in the title block and the footer
+(HTML), at the bottom of the cover and in the closing footer (PDF), as the last
+line (Markdown), as a
+.B generator
+object (JSON), and as the PDF Creator.
 .SH OPTIONS
 .TP
 .I SWEEP_DIR
@@ -163,21 +182,83 @@ List ports with at least
 .I N
 (default 100) carrier changes since driver load.
 .TP
-.BR \-O ", " \-\-output\-format " " \fImd\fR|\fIjson\fR|\fIhtml\fR
-Markdown (default), JSON with every computed value, or HTML: one self-contained
-page (inline style, no scripts or remote resources; light and dark themes).
+.BR \-S ", " \-\-suppress " " \fIFILE\fR
+Known tool issues to leave out (see
+.BR "SUPPRESS FILE" ).
+Matching WARN, CRIT and UNKNOWN results leave the findings, the verdict counts,
+the PCIe list and the patterns, and are listed in their own section; a host
+whose results were suppressed gets its verdict recomputed as the worst
+remaining severity, shown as for example
+.BR "OK (was WARN)" .
+Baselines and outlier lists are measurements and stay; patterns built from a
+suppressed check are dropped. A rule that matches nothing, or names a site not
+in the selection, is reported on standard error.
+.TP
+.BR \-O ", " \-\-output\-format " " \fImd\fR|\fIjson\fR|\fIhtml\fR|\fIpdf\fR
+Markdown (default), JSON with every computed value, HTML: one self-contained
+page (inline style, no scripts or remote resources; light and dark themes), or
+PDF through WeasyPrint (needs
+.BR \-o ):
+A4 with a cover page, contents with page numbers, a page break before each
+section, a running header with the section name, "Page N of M" and the
+classification label on every page, and landscape pages for tables too wide
+for portrait (rows over 150 characters or 10 or more columns).
 .TP
 .BR \-o ", " \-\-output " " \fIFILE\fR
 Write to
 .I FILE
-instead of standard output.
+instead of standard output. Every file is written to a temporary file in the
+same directory with mode 0640 (less the umask) and then renamed over
+.IR FILE ,
+so a reader never sees a partial report and a symbolic link at
+.I FILE
+is replaced, not followed. All target directories are checked before anything
+is written. An existing
+.I FILE
+that is not a regular file (for example
+.B /dev/null
+or a named pipe) is written to directly instead.
+.TP
+.BR \-P ", " \-\-per\-site
+With
+.BR "\-o FILE.ext" ,
+also write
+.BI FILE\- SITE .ext
+for each selected site, in the same format: a single-site report whose
+baselines use the same population as the combined report (the selected sites,
+or the whole tree with
+.BR "\-b all" ),
+so outliers agree. Without
+.B \-o
+it is a usage error; with one site selected only the report itself is
+written, with a note on standard error.
+.TP
+.BR \-T ", " \-\-theme " " \fIDIR\fR
+Brand the HTML and PDF output with the theme in
+.I DIR
+(see
+.BR THEMES ).
+Default:
+.BR NIC_REPORT_THEME ;
+.B \-T \(aq\(aq
+means no theme, overriding the environment. Markdown and JSON never read a
+theme.
+.TP
+.BR \-X ", " \-\-strict\-theme
+A theme colour pair with a contrast below 4.5:1 is an error instead of a
+warning. Needs a theme and
+.B \-O html
+or
+.BR pdf ;
+otherwise it is a usage error.
 .TP
 .BR \-t ", " \-\-title " " \fITEXT\fR
 Report title (default: "NIC Health: SITE" or "NIC Health: cross-site
 comparison (...)").
 .TP
 .BR \-c ", " \-\-classification " " \fITEXT\fR
-Classification label printed on the report.
+Classification label printed on the report (on every PDF page). Overrides the
+theme's label.
 .TP
 .BR \-v ", " \-\-version
 Print the version and exit.
@@ -214,6 +295,97 @@ is missing or malformed is listed with the hosts not collected (status
 .BR unreadable-result )
 instead of failing the report. The clean share is the share of collected hosts
 whose verdict is OK.
+.SH SUPPRESS FILE
+A JSON object:
+.PP
+.RS
+.nf
+{"schema_version": 1, "suppress": [
+  {"check_id": "mlx5.deep.ber", "match": "BER=3E\-9",
+   "hosts": "^prd\-site1\-", "sites": ["SITE1"],
+   "reason": "nic\-health BER reporting issue on firmware X"}]}
+.fi
+.RE
+.PP
+.B check_id
+(exact) and
+.B reason
+are required.
+.B match
+is a regular expression searched in the result's target and in its evidence;
+.B hosts
+a regular expression searched in the host name;
+.B sites
+a non-empty list of site names. A result is suppressed by the first rule whose
+given keys all match. Unknown keys, wrong types, empty strings, invalid regular
+expressions and files over 1 MiB are input errors that name the rule.
+.PP
+.B match
+searches the target and the first 4096 characters of the evidence. Keep rules
+simple and anchored. The evidence is written by the host that was checked, so a
+host could word it to match a rule: that is why every suppressed result is
+listed in the report.
+.SH THEMES
+A theme folder holds
+.B theme.json
+and optionally logo files:
+.PP
+.RS
+.nf
+{"schema_version": 1, "name": "example", "org": "Example Corp",
+ "colors": {"primary_dark": "#0B1F44", "primary": "#1F4E99",
+            "accent": "#4A90D9", "link_dark": "#7FB3E8",
+            "header_bg": "#DDE3EA", "header_fg": "#0B1F44"},
+ "fonts": {"heading": ["Brand Sans Light"], "body": ["Brand Sans"]},
+ "logos": {"cover": "logo-dark.svg", "header": "logo-light.png"},
+ "labels": {"header_title": "NIC Health", "classification": "Internal"}}
+.fi
+.RE
+.PP
+.BR schema_version ,
+.BR name ,
+.B org
+and all six
+.B colors
+(#RRGGBB) are required, and
+.B name
+is letters, digits,
+.BR . ,
+.B _
+and
+.BR \- ;
+unknown keys are errors. Control and bidirectional-override characters are
+removed from the organisation and the labels. Fonts are named, never
+shipped; the built-in fallbacks are always appended and an emoji font may not be
+named. Logos are plain file names inside the folder (no paths, no symbolic link
+leading outside), PNG, JPEG or SVG by content, at most 512 KiB, and are embedded
+as
+.B data:
+URIs: the cover logo is for the dark PDF cover, the header logo for the HTML
+title and the PDF page header; the PDF engine loads nothing but these
+.B data:
+URIs, so a reference inside an SVG logo is not followed.
+.PP
+There is no free-form CSS: a theme cannot change content, severity colours,
+classification or attribution. A theme changes brand colours (headings, table
+headers, section rules, the cover background), fonts, logos, the header title
+and the classification label. Rewording is impossible; the severity badges, the
+attribution line and the classification keep fixed colours (on the PDF cover,
+on fixed bands), and the PDF Creator always carries the generator. An
+.B extra.css
+file in the folder is ignored with a warning.
+Contrast is checked for primary on white, header_fg on header_bg and white on
+primary_dark; below 4.5:1 is a warning, or an error with
+.BR \-\-strict\-theme .
+An example lives in
+.B tests/fixtures/themes/example
+of the source tree.
+.SH ENVIRONMENT
+.TP
+.B NIC_REPORT_THEME
+Theme folder for HTML and PDF output when
+.B \-\-theme
+is not given.
 .SH EXIT STATUS
 .TP
 .B 0
@@ -223,7 +395,12 @@ Report written.
 Input error: unreadable input, an unsupported sweep schema, an unknown site, a
 site selected twice, no data for the selection (for example
 .B \-\-at
-before every sweep); or the output file cannot be written.
+before every sweep), an invalid suppress file or theme, a theme contrast
+below 4.5:1 with
+.BR \-\-strict\-theme ,
+or WeasyPrint missing or failing for
+.BR "\-O pdf" ;
+or an output file cannot be written.
 .TP
 .B 3
 Usage error.
@@ -252,6 +429,17 @@ One small site, outliers judged against the whole fleet, as an HTML page:
 .PP
 .RS
 .B nic-report.py \-R sweeps \-s SITE3 \-b all \-O html \-o site3.html
+.RE
+One PDF per site plus the combined one, branded, known issues suppressed:
+.PP
+.RS
+.B nic-report.py \-R sweeps \-S known.json \-T ~/themes/acme \-O pdf \-o fleet.pdf \-P
+.RE
+.PP
+Check a theme strictly before using it:
+.PP
+.RS
+.B nic-report.py \-R sweeps \-s SITE1 \-T ~/themes/acme \-X \-O html \-o site1.html
 .RE
 .SH AUTHORS
 Ciro Iriarte <ciro.iriarte+software@gmail.com>

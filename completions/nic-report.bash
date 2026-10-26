@@ -7,7 +7,7 @@ _nic_report() {
 	_init_completion -s || return
 
 	case "$prev" in
-		-R|--sweep-root)
+		-R|--sweep-root|-T|--theme)
 			_filedir -d
 			return
 			;;
@@ -15,8 +15,12 @@ _nic_report() {
 			_filedir
 			return
 			;;
+		-S|--suppress)
+			_filedir json
+			return
+			;;
 		-O|--output-format)
-			COMPREPLY=($(compgen -W "md json html" -- "$cur"))
+			COMPREPLY=($(compgen -W "md json html pdf" -- "$cur"))
 			return
 			;;
 		-b|--baseline)
@@ -65,8 +69,12 @@ _nic_report() {
 			-b --baseline
 			-d --rx-delta-db
 			-f --flap-min
+			-S --suppress
 			-O --output-format
 			-o --output
+			-P --per-site
+			-T --theme
+			-X --strict-theme
 			-t --title
 			-c --classification
 		"

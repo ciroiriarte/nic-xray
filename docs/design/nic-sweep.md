@@ -211,7 +211,7 @@ Each `nic-health` result becomes one row, enriched with its collection context:
 | A4 | **Fleet baselines and outliers** | Per metric over **ports with link only** (dark spares read about −40 dBm and would skew everything): min, p5, median, max. Outliers by robust score (median/MAD) **and** an absolute floor, e.g. Rx ≥ 5 dB below the median for the same module compliance. Also: highest error totals since boot (with rate per hour of uptime once P1 lands), carrier changes ≥ N, discards, PCIe below capability vs slot-limited. |
 | A5 | **Cross-site patterns** | Group findings and outliers by (role, check, port position such as bond member / breakout lane) across sites. Prototype example: the same low-Rx bond leg on the same storage role at two sites. Implemented as: within a site, the same issue on the same port/ASIC in ≥ 2 collected hosts of a role; across sites, the same issue on the same role at ≥ 2 sites (ports may differ). Related checks form one issue family (symbol/CRC/BER → "link errors"; flaps and link-downs → "link instability"). Multi-site reports show both. Without roles a site's hosts form one group and cross-site patterns are skipped, with a note. Outliers: ≥ `-d` dB below the module type's median **and** robust z ≤ −3.5 (margin alone when MAD = 0); one fact pass over the baseline population so a port's module type is the same in baseline and report. |
 | A6 | **Sweep comparison** | Two sweeps of one site: new, resolved and persisting findings; counter growth between sweeps, reset when `boot_id` changed (P1). |
-| A7 | **Known tool issues** | Optional `--suppress FILE` (JSON list of `check_id` + match), reported in its own section so nothing is silently dropped. |
+| A7 | **Known tool issues** | Optional `--suppress FILE`: `{"schema_version": 1, "suppress": [{"check_id", "reason", "match"?, "hosts"?, "sites"?}]}` (`match`: regex searched in the target and the first 4096 characters of the evidence; `hosts`: regex on the host name; unknown keys or bad regexes are input errors; unused rules and unselected sites are warned about). Matching WARN/CRIT/UNKNOWN results leave findings, verdict counts, the PCIe list and patterns; a host's verdict is recomputed as its worst remaining severity and shown as adjusted. Baselines and outlier lists are measurements and stay; patterns built from a suppressed check are dropped. Reported in its own section (rule, reason, count, every result) and in JSON, so nothing is silently dropped; coverage notes that suppression was applied. |
 | A8 | **Diagnosis and recommendations** | Evaluates the rule catalog (§6.3.1) over per-port, per-host and per-group facts, ranks the matches (§6.3.2) and writes the recommendations and executive summary (§6.3.3). |
 
 Thresholds are options with defaults (`--rx-delta-db 5`, `--flap-min 100`, …) or a JSON config file. TOML is skipped because `tomllib` needs Python 3.11.
@@ -317,9 +317,9 @@ The executive summary and the recommendations are built from **templates filled 
 ```
 nic-report.py [-O md|html|pdf|json] [-o|--output FILE] [-i|--import SITE PATH...]...
               [-r|--role-regex RE] [-d|--rx-delta-db DB] [-f|--flap-min N] [--config FILE]
-              [--suppress FILE] [--rules FILE] [--per-site] [--compare OLD NEW]
+              [-S|--suppress FILE] [--rules FILE] [-P|--per-site] [--compare OLD NEW]
               [-R|--sweep-root DIR] [-s|--site SITE]... [-a|--at DATE] [-b|--baseline scope|all]
-              [--theme DIR] [--ai-brief FILE] [--audience engineer|management|field]
+              [-T|--theme DIR] [-X|--strict-theme] [--ai-brief FILE] [--audience engineer|management|field]
               [--narrative FILE] [--strict-narrative]
               [-t|--title TEXT] [-c|--classification TEXT] [-v|--version] [-h|--help]
               [SWEEP_DIR...]
@@ -392,8 +392,7 @@ Organisations can brand the HTML and PDF output without forking the tool or putt
 mytheme/
 ├── theme.json       # required
 ├── logo-light.png   # logo for light backgrounds (page header, HTML title)
-├── logo-dark.png    # logo for dark backgrounds (PDF cover)
-└── extra.css        # optional, last-resort overrides
+└── logo-dark.png    # logo for dark backgrounds (PDF cover)
 ```
 
 ```json
@@ -409,16 +408,18 @@ mytheme/
 }
 ```
 
-- **What a theme can change:** brand colours (cover, headings, links, table headers, section rules), font families (with the built-in fallbacks always appended), logos and placement (PDF cover, running page header, HTML title), organisation name, header title and classification label. `extra.css` is appended last.
+- **What a theme can change:** brand colours (cover, headings, links, table headers, section rules), font families (with the built-in fallbacks always appended), logos and placement (PDF cover, running page header, HTML title), organisation name, header title and classification label. Markdown and JSON never read a theme.
+- **No free-form CSS:** a theme can't change content, severity colours, classification or attribution. (A block-listed `extra.css` was tried and dropped: CSS alone can relabel a badge, replace page margin boxes or hide text, and no allow-list fixes that while `color` exists.) An `extra.css` file in the folder is ignored with a warning.
 - **What a theme cannot change:**
   - the **severity colours** (CRIT, WARN, OK, N/A, UNKNOWN), which stay distinct and readable regardless of brand palette,
   - the report structure and content,
-  - the attribution line (§6.9).
+  - the attribution line (§6.9) and the classification label's visibility: severity badges, attribution and classification keep fixed colours (on the PDF cover, on fixed bands).
 - **Checks when loading:**
   - required keys and `#RRGGBB` colours are validated;
   - text contrast is checked (primary on white, header text on header background, white on the cover colour), and a ratio below 4.5:1 is a warning (with `--strict-theme`, an error);
   - logo files must be PNG, JPEG or SVG and are embedded as `data:` URIs inside `<img>`, so the output stays one self-contained file and an SVG logo cannot run script;
-  - `extra.css` may not contain `@import` or `url()` pointing outside the theme folder.
+  - `name` is restricted to `[A-Za-z0-9._-]`; control and bidi characters are removed from `org` and the labels; files are read with a size bound and must stay inside the theme folder (no symlink escape);
+  - the PDF engine fetches `data:` URIs only, so a reference inside an SVG logo is never followed.
 - **Fonts:** a theme names fonts and does not ship them. WeasyPrint uses what is installed on the host, so list a metric-compatible free fallback (e.g. Carlito for Calibri). Embedding a commercial font in a PDF is subject to its licence, which is the operator's responsibility. Never list the emoji font explicitly (see §6.4).
 - **Prototype:** a theme built from a corporate slide template (theme colours from `ppt/theme/theme1.xml`, logos from `ppt/media/`) produced the expected cover, page header and table styling with this schema, without code changes beyond the loader.
 
@@ -434,7 +435,7 @@ Like `nic-xray` diagrams (`Generated by nic-xray vX.Y.Z — © YEAR Ciro Iriarte
   - JSON: a `generator` object (`tool`, `version`, `generated_at`),
   - HTML and PDF metadata: `<meta name="generator">`, which WeasyPrint writes to the PDF Creator field.
 - **Data provenance next to it:** the `nic-health` versions and sweep timestamps the report was built from (already in A1), so a reader can tell the analysis tool from the collection tool.
-- **Not themeable:** a theme can restyle the line (colour, font) to fit the page but cannot hide or reword it.
+- **Not themeable:** rewording is impossible; the line keeps a fixed colour (on the PDF cover, a fixed band) and only follows the theme's body font. The PDF Creator always carries the generator.
 
 ---
 
@@ -464,7 +465,7 @@ Like `nic-xray` diagrams (`Generated by nic-xray vX.Y.Z — © YEAR Ciro Iriarte
 - **Host keys:** the SSH policy is left unchanged by default; `--accept-new-hostkeys` is explicit.
 - **`--ship`:** the script arrives on the SSH connection's stdin and is written to a `mktemp` file under `/tmp` (0600, created exclusively, owned by the SSH user), removed by a remote trap on EXIT, HUP, INT and TERM. It never writes outside `/tmp` and never touches the package manager. It needs sudo rights for `bash /tmp/nic-health.*`, which amounts to unrestricted root for that user: documented, and the package is preferred where that is not acceptable.
 - **Reports hold sensitive inventory** (host names, switch ports, addresses). HTML and PDF embed no remote resources, and the classification label is printed on every PDF page. Sweep directories are created with mode 0750.
-- **Themes are untrusted input:** `theme.json` is validated, logos are embedded as images only, and `extra.css` cannot load remote resources (§6.8).
+- **Themes are untrusted input:** `theme.json` is validated, logos are embedded as images only (the PDF engine fetches `data:` URIs only), and there is no free-form CSS (§6.8). Report files are written atomically with mode 0640.
 - **`nic-report.py` never makes network calls**, including for the AI summary: it only writes a brief and reads a narrative file (§6.7). The brief contains the same sensitive inventory as the report, and sending it anywhere is the operator's explicit action.
 
 ---
@@ -498,7 +499,7 @@ Like `nic-xray` diagrams (`Generated by nic-xray vX.Y.Z — © YEAR Ciro Iriarte
 | **2** | `nic-sweep.sh`: inventory, parallel SSH, layout §5.4, manifest, exit codes, progress bar | Test suite with a stubbed `ssh` covers every host status ✅ (98 tests); real sweep on a 17-host fleet ✅ (packaged and `--ship` modes; caught invalid `nic-xray` 2.12.1 JSON on 3 hosts) |
 | **3** | `nic-report.py` core: loaders (sweep + legacy import), site selection (`-R`, `-s`, `--at`), record model, extractors, A1–A3 in single- and multi-site layouts, Markdown and JSON | Unit tests over fixtures, including the CRLF/blank-line import, unknown site, `--at` with a missing site ✅ (67 tests incl. malformed input and the real `samples/`; CI job on Python 3.9; the SLES container's Python 3.6 skips them); five-site real-data run matches the prototype's coverage and verdict counts ✅ |
 | **4** | A4–A5 (baselines, outliers, within-site and cross-site patterns), `--baseline scope\|all`, HTML | Reproduces the prototype's findings, both as one five-site report and as five single-site reports ✅ (checked on the real five-site data, kept outside the repo; fictional fixtures in the tests: both low-Rx outliers, the cross-site storage-role pattern, the 3-of-4 PCIe and discard pattern, the flap and FEC patterns; single-site deltas match the prototype's 6.7 and 8.7 dB; 94 tests) |
-| **5** | PDF (WeasyPrint print stylesheet), `--per-site`, `--suppress`, themes (§6.8) and attribution (§6.9) | Visual check of cover, contents page numbers, landscape pages; the example theme renders; a theme without contrast fails `--strict-theme`; attribution is present in every format |
+| **5** | PDF (WeasyPrint print stylesheet), `--per-site`, `--suppress`, themes (§6.8) and attribution (§6.9) | Visual check of cover, contents page numbers, landscape pages ✅ (fictional four-site fixture, with and without the example theme: contents numbers match the section pages, the wide cross-site table gets a landscape page, header, "Page N of M" and classification on every page); the example theme renders ✅; a theme without contrast fails `--strict-theme` ✅; attribution is present in every format ✅ (PDF checked through Creator and extracted text: contents numbers equal the section pages, running header, classification and "Page N of M" on every page; reports written atomically with mode 0640; 132 tests, PDF tests skipped where WeasyPrint or poppler-utils is missing) |
 | **6** | `nic-health` P2 (`metrics`) and P3 (service impact); extractors become a fallback for older JSON | Report output identical with and without P2 on the same sweep |
 | **7** | A8: facts (including `nic-xray`: LLDP, LACP, optics for every vendor, speed/MTU/VLAN, placement), rule engine, starter catalog, prioritisation, template narrative | On the prototype's obfuscated data, the generated recommendations match the hand-written report's findings **and order** |
 | **8** | A6 sweep comparison | Fixture pair with a reboot between sweeps |

@@ -4,8 +4,9 @@
 # Description: Companion to nic-xray.sh, nic-health.sh and nic-sweep.sh. Reads nic-sweep sweeps
 #              (and legacy nic-health CSV) for one site, several or all, and writes a report:
 #              coverage and comparability, verdicts, every finding with its evidence, fleet
-#              baselines and outliers, and patterns within and across sites (Markdown, JSON, HTML).
-#              Read-only, offline: never contacts a host or the network.
+#              baselines and outliers, patterns within and across sites, and known issues suppressed
+#              on request (Markdown, JSON, HTML, PDF). Read-only, offline: never contacts a host or
+#              the network.
 #              Design: docs/design/nic-sweep.md (§6)
 #
 # Author: Ciro Iriarte <ciro.iriarte+software@gmail.com>
@@ -13,6 +14,7 @@
 #
 # Requirements:
 #   - Python 3.9 or newer, standard library only (the one Python script in the repo: CLAUDE.md §2)
+#   - Optional: WeasyPrint, imported only for -O pdf (python3-weasyprint or pip install weasyprint)
 #
 # Change Log:
 #   - 2026-10-26: Phase 3 of docs/design/nic-sweep.md: sweep and legacy CSV loaders, site
@@ -20,20 +22,28 @@
 #                 verdicts (A2) and findings (A3) in single- and multi-site layouts; Markdown and JSON
 #   - 2026-10-26: Phase 4: baselines and outliers (A4) over ports with link, patterns within and across
 #                 sites (A5), --baseline scope|all, self-contained HTML output
+#   - 2026-10-26: Phase 5: PDF via WeasyPrint (cover, contents with page numbers, running header and
+#                 footer with the classification, landscape pages for wide tables), --suppress (A7),
+#                 --per-site, themes (--theme, NIC_REPORT_THEME, --strict-theme) and attribution
 #
 # Version: 2.13.0
 """nic-report.py: single- and multi-site reports from nic-sweep sweeps and legacy nic-health CSV."""
 
 import argparse
+import base64
 import collections
+import contextlib
 import csv
 import datetime
 import glob
 import html
 import json
+import logging
 import math
 import os
 import re
+import secrets
+import stat
 import statistics
 import sys
 
@@ -69,6 +79,9 @@ HOST_CLOCK_MIN_VERSION = "2.13.0"     # uptime_s, boot_id in the JSON envelope
 BER_UNDERFLOW = 1e-30                 # below this a BER is a "zero" placeholder (e.g. 15E-255)
 NOT_AVAILABLE = ("", "-", "n/a", "N/A")
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+# C0/C1 controls (tab, newline and the like are folded to spaces instead) and bidi overrides/isolates,
+# which could make untrusted text display differently from what it is
+CONTROL_RE = re.compile("[\x00-\x08\x0e-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
 SWEEP_TS_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$")
 AT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?Z?)?$")
 # Terminal captures wrapped long fields with a run of spaces between two non-space characters (legacy
@@ -108,6 +121,47 @@ ISSUE_FAMILY = {"mlx5.phy.errors": "link errors (symbol/CRC/BER)", "mlx5.frame.e
                 "generic.link.flaps": "link instability",
                 FLAP_KIND: "link instability", "mlx5.link.phy_down": "link instability"}
 PCIE_BELOW = "PCIe below capability"
+
+# Known tool issues (design §6.3 A7): --suppress FILE
+SUPPRESS_SCHEMA_VERSION = 1
+SUPPRESS_TOP_KEYS = ("schema_version", "suppress")
+SUPPRESS_REQUIRED = ("check_id", "reason")
+SUPPRESS_OPTIONAL = ("match", "hosts", "sites")
+SUPPRESS_MAX = 1024 * 1024      # bytes of a --suppress file
+EVIDENCE_MATCH_MAX = 4096       # characters of target/evidence a 'match' regex searches (host-controlled text)
+CELL_PIPE = "¦"                 # '|' inside a code span in a table cell (a real '|' would split the cell)
+TEMP_NAME_BYTES = 8             # random bytes in an output temp file name
+
+# Themes (design §6.8): --theme DIR or the environment; brand colours, fonts, logos and labels only
+THEME_ENV = "NIC_REPORT_THEME"
+THEME_SCHEMA_VERSION = 1
+THEME_FILE = "theme.json"
+THEME_CSS_FILE = "extra.css"            # not supported: free-form CSS could change content (design §6.8)
+THEME_REQUIRED = ("schema_version", "name", "org", "colors")
+THEME_OPTIONAL = ("fonts", "logos", "labels")
+THEME_COLORS = ("primary_dark", "primary", "accent", "link_dark", "header_bg", "header_fg")
+THEME_FONT_KEYS = ("heading", "body")
+THEME_LOGO_KEYS = ("cover", "header")       # cover: for dark backgrounds (PDF cover); header: for light ones
+THEME_LABEL_KEYS = ("header_title", "classification")
+COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
+FONT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$")
+EMOJI_FONT_RE = re.compile(r"emoji", re.I)  # never named explicitly (design §6.4): fontconfig falls back to it
+MAX_FONTS = 8
+MAX_LABEL = 200
+THEME_JSON_MAX = 64 * 1024
+LOGO_MAX_BYTES = 512 * 1024
+MIN_CONTRAST = 4.5                          # WCAG AA for normal text
+WHITE = "#ffffff"
+LOGO_MAGIC = ((b"\x89PNG\r\n\x1a\n", "image/png"), (b"\xff\xd8\xff", "image/jpeg"))
+SVG_SNIFF_BYTES = 4096
+FONT_FALLBACK = '"Liberation Sans","DejaVu Sans",sans-serif'
+
+# PDF (design §6.4)
+PDF_PACKAGE_HINT = "python3-weasyprint, or pip install weasyprint"
+REPORT_MODE = 0o640             # report files hold host names and switch ports (umask still applies)
+WIDE_ROW_CHARS = 150            # a table whose Markdown row is longer than this gets a landscape page...
+WIDE_COLS = 10                  # ...and so does one with this many columns
+WIDE_LEAD_MAX = 2               # paragraphs before a wide table that move with it (plus its heading)
 
 
 class InputError(Exception):
@@ -297,6 +351,7 @@ class Host:
         self.raw_results = []           # result dicts as read (sweep JSON or CSV rows)
         self.records = []               # normalised records (finalize)
         self.problem = None             # why a collected host's result could not be read
+        self.verdict_before = None      # verdict before --suppress recomputed it (only when it did)
 
     @property
     def collected(self):
@@ -353,11 +408,15 @@ def sweep_stamp_dt(stamp):
         return None
 
 
-def read_json(path):
+def read_json(path, limit=None):
+    """A JSON document; with limit, a file larger than limit bytes is an input error (read bounded)."""
     try:
-        with open(path, encoding="utf-8") as fh:
-            return json.load(fh)
-    except (OSError, ValueError) as exc:
+        with open(path, "rb") as fh:
+            data = fh.read() if limit is None else fh.read(limit + 1)
+        if limit is not None and len(data) > limit:
+            raise InputError(f"{path}: larger than {limit // 1024} KiB")
+        return json.loads(data.decode("utf-8"))
+    except (OSError, ValueError, RecursionError) as exc:      # RecursionError: absurdly deep nesting
         raise InputError(f"{path}: {exc}") from exc
 
 
@@ -647,6 +706,110 @@ def load_baseline_sites(args, sites):
     return sites + extra
 
 
+# --------------------------------------------------------------------------------- suppression (A7)
+
+def load_suppress(path):
+    """Rules of a --suppress file; any deviation from the schema is an input error naming the rule."""
+    doc = read_json(path, SUPPRESS_MAX)
+    if not isinstance(doc, dict):
+        raise InputError(f"{path}: not a suppress object")
+    unknown = sorted(set(doc) - set(SUPPRESS_TOP_KEYS))
+    if unknown:
+        raise InputError(f"{path}: unknown key(s) {', '.join(unknown)}")
+    if type(doc.get("schema_version")) is not int or doc["schema_version"] != SUPPRESS_SCHEMA_VERSION:
+        raise InputError(f"{path}: unsupported schema_version {doc.get('schema_version')!r} "
+                         f"(expected {SUPPRESS_SCHEMA_VERSION})")
+    if not isinstance(doc.get("suppress"), list):
+        raise InputError(f"{path}: 'suppress' must be a list of rules")
+    rules = []
+    for n, raw in enumerate(doc["suppress"], 1):
+        where = f"{path}: suppress rule {n}"
+        if not isinstance(raw, dict):
+            raise InputError(f"{where}: not an object")
+        unknown = sorted(set(raw) - set(SUPPRESS_REQUIRED) - set(SUPPRESS_OPTIONAL))
+        if unknown:
+            raise InputError(f"{where}: unknown key(s) {', '.join(unknown)}")
+        rule = {"rule": n}
+        for key in SUPPRESS_REQUIRED + ("match", "hosts"):
+            if key not in raw:
+                if key in SUPPRESS_REQUIRED:
+                    raise InputError(f"{where}: missing '{key}'")
+                rule[key] = None
+                continue
+            if not (isinstance(raw[key], str) and raw[key].strip()):
+                raise InputError(f"{where}: '{key}' must be a non-empty string")
+            rule[key] = raw[key]
+        for key in ("match", "hosts"):
+            try:
+                rule[key + "_re"] = re.compile(rule[key]) if rule[key] is not None else None
+            except re.error as exc:
+                raise InputError(f"{where}: invalid '{key}' regex: {exc}") from exc
+        sites = raw.get("sites")
+        if sites is not None and not (isinstance(sites, list) and sites
+                                      and all(isinstance(x, str) and NAME_RE.match(x) for x in sites)):
+            raise InputError(f"{where}: 'sites' must be a non-empty list of site names")
+        rule["sites"] = sites
+        rules.append(rule)
+    return rules
+
+
+def _suppress_rule(rules, host, r):
+    """First rule matching a record: same check, regex found in its target or (bounded) evidence, host and site."""
+    for rule in rules:
+        if rule["check_id"] != r["check_id"]:
+            continue
+        if rule["match_re"] and not (rule["match_re"].search(r["target"][:EVIDENCE_MATCH_MAX])
+                                     or rule["match_re"].search(r["evidence"][:EVIDENCE_MATCH_MAX])):
+            continue
+        if rule["hosts_re"] and not rule["hosts_re"].search(host.name):
+            continue
+        if rule["sites"] and host.site not in rule["sites"]:
+            continue
+        return rule
+    return None
+
+
+def apply_suppress(sites, rules):
+    """Mark WARN/CRIT/UNKNOWN records matched by a rule; a host with any marked record gets its verdict
+    recomputed as the worst remaining severity (the original, when it changed, is kept in verdict_before)."""
+    for site in sites:
+        for host in site.hosts.values():
+            hit = False
+            for r in host.records:
+                rule = _suppress_rule(rules, host, r) if r["severity"] in FINDING_SEVERITIES else None
+                if rule:
+                    r["suppressed"] = rule["rule"]
+                    hit = True
+            if hit and host.collected:
+                verdict = worst_verdict(_active(host.records))
+                if verdict != host.verdict:
+                    host.verdict_before, host.verdict = host.verdict, verdict
+
+
+def _active(records):
+    return [r for r in records if not r.get("suppressed")]
+
+
+def suppressed_summary(sites, rules, path):
+    """A7 section: every rule with its reason and count, and every suppressed result."""
+    if rules is None:
+        return None
+    hits = [r for s in sites for h in sorted(s.hosts.values(), key=lambda h: h.name) for r in h.records
+            if r.get("suppressed")]
+    count = collections.Counter(r["suppressed"] for r in hits)
+    hosts = {(h.site, h.name): h for s in sites for h in s.hosts.values()}
+    adjusted = [{"site": h.site, "host": h.name, "verdict": h.verdict, "verdict_before": h.verdict_before}
+                for s in sites for h in sorted(s.hosts.values(), key=lambda h: h.name) if h.verdict_before]
+    return {"file": path,
+            "rules": [{k: rule[k] for k in ("rule", "check_id", "match", "hosts", "sites", "reason")}
+                      | {"count": count.get(rule["rule"], 0)} for rule in rules],
+            "results": [{"site": r["site"], "host": r["host"], "target": r["target"], "check_id": r["check_id"],
+                         "severity": r["severity"], "rule": r["suppressed"],
+                         "host_verdict": hosts[(r["site"], r["host"])].verdict,
+                         "host_verdict_before": hosts[(r["site"], r["host"])].verdict_before} for r in hits],
+            "verdicts_adjusted": adjusted}
+
+
 # --------------------------------------------------------------------------------- analyses
 
 def _group_key(multi, host):
@@ -735,26 +898,27 @@ def verdicts(sites):
         def summary(hs):
             col = [h for h in hs if h.collected]
             v = collections.Counter(h.verdict for h in col)
-            sev = collections.Counter(r["severity"] for h in col for r in h.records)
+            sev = collections.Counter(r["severity"] for h in col for r in _active(h.records))
             return {"hosts": len(hs), "collected": len(col),
                     "by_verdict": {k: v.get(k, 0) for k in VERDICTS},
                     "clean": v.get("OK", 0), "clean_pct": round(100.0 * v.get("OK", 0) / len(col), 1) if col else None,
                     "findings": {k: sev.get(k, 0) for k in FINDING_SEVERITIES}}
         entry = {"site": site.site, **summary(hosts),
                  "roles": [{"role": role, **summary(hs)} for role, hs in by_role.items()]}
-        entry["hosts_detail"] = [{"host": h.name, "role": h.role, "status": h.status, "verdict": h.verdict}
+        entry["hosts_detail"] = [{"host": h.name, "role": h.role, "status": h.status, "verdict": h.verdict,
+                                  **({"verdict_before": h.verdict_before} if h.verdict_before else {})}
                                  for h in hosts]
         out.append(entry)
     return out
 
 
 def findings(sites):
-    """A3: every WARN/CRIT/UNKNOWN record, worst first, grouped by site -> host -> target."""
+    """A3: every WARN/CRIT/UNKNOWN record not suppressed, worst first, grouped by site -> host -> target."""
     rank = {s: i for i, s in enumerate(SEVERITIES)}
     out = []
     for site in sites:
         for host in sorted(site.hosts.values(), key=lambda h: h.name):
-            for r in host.records:
+            for r in _active(host.records):
                 if r["severity"] in FINDING_SEVERITIES:
                     out.append(r)
     out.sort(key=lambda r: (r["site"], r["host"], rank.get(r["severity"], 9), r["target"], r["check_id"]))
@@ -905,7 +1069,7 @@ def pcie_summary(sites):
     below, limited = [], collections.Counter()
     for s in sites:
         for h in s.hosts.values():
-            for r in h.records:
+            for r in _active(h.records):
                 if r["check_id"] != PCIE_LINK:
                     continue
                 if r["severity"] == "WARN":
@@ -923,10 +1087,15 @@ def patterns(sites, a4, pcie, multi):
     for r in findings(sites):
         if r["severity"] in ("CRIT", "WARN"):
             events.append((r["site"], r["role"], ISSUE_FAMILY.get(r["check_id"], r["check_id"]), r["target"], r["host"]))
+    # A4 lists are measurements and stay, but a pattern built from a suppressed check is dropped
+    suppressed = {(r["site"], r["host"], r["check_id"], r["target"]) for s in sites for h in s.hosts.values()
+                  for r in h.records if r.get("suppressed")}
     for o in a4["rx_outliers"]:
-        events.append((o["site"], o["role"], OUTLIER_KIND, o["port"], o["host"]))
+        if (o["site"], o["host"], "mlx5.deep.module", o["port"]) not in suppressed:
+            events.append((o["site"], o["role"], OUTLIER_KIND, o["port"], o["host"]))
     for f in a4["flaps"]:
-        events.append((f["site"], f["role"], ISSUE_FAMILY[FLAP_KIND], f["port"], f["host"]))
+        if (f["site"], f["host"], LINK_FLAPS, f["port"]) not in suppressed:
+            events.append((f["site"], f["role"], ISSUE_FAMILY[FLAP_KIND], f["port"], f["host"]))
     events = sorted(set(events))
     has_roles = any(h.role for s in sites for h in s.hosts.values())
     # Without roles, a site's hosts form one group (within-site patterns still work); across sites needs roles
@@ -961,13 +1130,134 @@ def analyse(sites, missing, args=None, baseline_sites=None):
     a4 = baselines_and_outliers(report_ports, baseline_ports, args)
     pcie = pcie_summary(sites)
     population = sorted({s.site for s in (baseline_sites or sites)})
-    a4["baseline"] = {"scope": args.baseline, "sites": population,
+    a4["baseline"] = {"scope": args.baseline, "sites": population, "report_sites": sorted(selected),
                       "ports_with_rx": sum(1 for p in baseline_ports if _usable_rx(p)),
                       "excluded": getattr(args, "baseline_excluded", [])}
     a4["pcie"] = pcie
-    return {"multi_site": multi, "coverage": coverage(sites, missing, multi),
+    cov = coverage(sites, missing, multi)
+    supp = suppressed_summary(sites, getattr(args, "suppress_rules", None), getattr(args, "suppress", None))
+    if supp:
+        used = sum(1 for x in supp["rules"] if x["count"])
+        adjusted = ", ".join(f"{x['site']}/{x['host']} ({x['verdict_before']} → {x['verdict']})"
+                             for x in supp["verdicts_adjusted"])
+        cov["caveats"].append(f"Known issues suppressed with {supp['file']}: {len(supp['results'])} result(s) by "
+                              f"{used} of {len(supp['rules'])} rule(s), listed in their own section"
+                              + (f"; verdicts recomputed from the remaining results: {adjusted}" if adjusted else "") + ".")
+    return {"multi_site": multi, "coverage": cov,
             "verdicts": verdicts(sites), "findings": findings(sites), "baselines": a4,
-            "patterns": patterns(sites, a4, pcie, multi)}
+            "patterns": patterns(sites, a4, pcie, multi), "suppressed": supp}
+
+
+# --------------------------------------------------------------------------------- themes (§6.8)
+
+def _luminance(color):
+    """WCAG relative luminance of #RRGGBB."""
+    def channel(c):
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = (int(color[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+
+
+def contrast_ratio(fg, bg):
+    hi, lo = sorted((_luminance(fg), _luminance(bg)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _theme_file(real_dir, name, what, limit):
+    """Bytes of a file named in (or fixed by) the theme, which must stay inside the theme folder."""
+    if not (isinstance(name, str) and NAME_RE.match(name)):
+        raise InputError(f"theme {what}: {name!r} is not a plain file name in the theme folder")
+    real = os.path.realpath(os.path.join(real_dir, name))
+    if os.path.commonpath([real, real_dir]) != real_dir:
+        raise InputError(f"theme {what}: {name} points outside the theme folder")
+    if not os.path.isfile(real):
+        raise InputError(f"theme {what}: {name}: no such file in {real_dir}")
+    try:
+        with open(real, "rb") as fh:
+            data = fh.read(limit + 1)
+    except OSError as exc:
+        raise InputError(f"theme {what}: {exc}") from exc
+    if len(data) > limit:
+        raise InputError(f"theme {what}: {name} is larger than {limit // 1024} KiB")
+    return data
+
+
+def _logo_uri(data, what):
+    """data: URI of a PNG, JPEG or SVG logo, recognised by its first bytes (never by its name)."""
+    mime = next((m for magic, m in LOGO_MAGIC if data.startswith(magic)), None)
+    head = data[:SVG_SNIFF_BYTES].lstrip(b"\xef\xbb\xbf").lstrip()
+    if mime is None and (head.startswith(b"<svg") or head.startswith(b"<?xml")) and b"<svg" in head:
+        mime = "image/svg+xml"
+    if mime is None:
+        raise InputError(f"theme {what}: not a PNG, JPEG or SVG image")
+    return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+
+
+def _theme_section(doc, key, allowed, where):
+    sec = doc.get(key, {})
+    if not isinstance(sec, dict):
+        raise InputError(f"{where}: '{key}' must be an object")
+    unknown = sorted(set(sec) - set(allowed))
+    if unknown:
+        raise InputError(f"{where}: unknown key(s) in '{key}': {', '.join(unknown)}")
+    return sec
+
+
+def load_theme(path):
+    """Validated theme: colours, fonts, logos as data: URIs, labels; contrast warnings and other notices."""
+    if not os.path.isdir(path):
+        raise InputError(f"theme {path}: not a directory")
+    real_dir = os.path.realpath(path)
+    where = os.path.join(path, THEME_FILE)
+    try:
+        doc = json.loads(_theme_file(real_dir, THEME_FILE, "file", THEME_JSON_MAX).decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
+        raise InputError(f"{where}: {exc}") from exc
+    if not isinstance(doc, dict):
+        raise InputError(f"{where}: not a theme object")
+    unknown = sorted(set(doc) - set(THEME_REQUIRED) - set(THEME_OPTIONAL))
+    missing = [k for k in THEME_REQUIRED if k not in doc]
+    if unknown or missing:
+        raise InputError(f"{where}: " + "; ".join(([f"unknown key(s) {', '.join(unknown)}"] if unknown else [])
+                                                  + ([f"missing {', '.join(missing)}"] if missing else [])))
+    if type(doc["schema_version"]) is not int or doc["schema_version"] != THEME_SCHEMA_VERSION:
+        raise InputError(f"{where}: unsupported schema_version {doc['schema_version']!r} (expected {THEME_SCHEMA_VERSION})")
+    if not (isinstance(doc["name"], str) and NAME_RE.match(doc["name"]) and len(doc["name"]) <= MAX_LABEL):
+        raise InputError(f"{where}: 'name' must be letters, digits, '.', '_' or '-', not {doc['name']!r}")
+    if not (isinstance(doc["org"], str) and CONTROL_RE.sub("", doc["org"]).strip() and len(doc["org"]) <= MAX_LABEL):
+        raise InputError(f"{where}: 'org' must be a non-empty string of up to {MAX_LABEL} characters")
+    colors = _theme_section(doc, "colors", THEME_COLORS, where)
+    for key in THEME_COLORS:
+        if not (isinstance(colors.get(key), str) and COLOR_RE.match(colors[key])):
+            raise InputError(f"{where}: colors.{key} must be #RRGGBB, not {colors.get(key)!r}")
+    fonts = _theme_section(doc, "fonts", THEME_FONT_KEYS, where)
+    for key, names in fonts.items():
+        if not (isinstance(names, list) and len(names) <= MAX_FONTS
+                and all(isinstance(n, str) and FONT_RE.match(n) for n in names)):
+            raise InputError(f"{where}: fonts.{key} must be a list of up to {MAX_FONTS} font family names "
+                             "(letters, digits, space, . _ -)")
+        if any(EMOJI_FONT_RE.search(n) for n in names):
+            raise InputError(f"{where}: fonts.{key} names an emoji font; leave it out, fontconfig falls back to it")
+    labels = _theme_section(doc, "labels", THEME_LABEL_KEYS, where)
+    for key, text in labels.items():
+        if not (isinstance(text, str) and CONTROL_RE.sub("", text).strip() and len(text) <= MAX_LABEL):
+            raise InputError(f"{where}: labels.{key} must be a non-empty string of up to {MAX_LABEL} characters")
+    logos = {key: _logo_uri(_theme_file(real_dir, name, f"logo {key}", LOGO_MAX_BYTES), f"logo {key} ({name})")
+             for key, name in _theme_section(doc, "logos", THEME_LOGO_KEYS, where).items()}
+    notices = []
+    if os.path.lexists(os.path.join(path, THEME_CSS_FILE)):
+        notices.append(f"theme {doc['name']!r}: {THEME_CSS_FILE} is not supported and is ignored")
+    warnings = []
+    for fg, bg, what in ((colors["primary"], WHITE, "primary on white"),
+                         (colors["header_fg"], colors["header_bg"], "header_fg on header_bg"),
+                         (WHITE, colors["primary_dark"], "white on primary_dark")):
+        ratio = contrast_ratio(fg, bg)
+        if ratio < MIN_CONTRAST:
+            warnings.append(f"theme {doc['name']!r}: {what} contrast is {ratio:.2f}:1, below {MIN_CONTRAST}:1")
+    return {"name": doc["name"], "org": " ".join(CONTROL_RE.sub("", doc["org"]).split()),
+            "colors": {k: colors[k] for k in THEME_COLORS}, "fonts": {k: list(fonts.get(k, [])) for k in THEME_FONT_KEYS},
+            "logos": logos, "labels": {k: " ".join(CONTROL_RE.sub("", v).split()) for k, v in labels.items()},
+            "warnings": warnings, "notices": notices}
 
 
 # --------------------------------------------------------------------------------- rendering
@@ -978,14 +1268,34 @@ def attribution(now):
     return f"Generated by nic-report v{SCRIPT_VERSION} — © {now.year} {AUTHOR} · {stamp}"
 
 
+class _MD(str):
+    """Markdown the report built itself (severity badges, code spans): md_cell keeps its markup."""
+
+
+def _plain(v):
+    """Untrusted text on one line, without control or bidi characters."""
+    return " ".join(CONTROL_RE.sub("", str(v)).split())
+
+
 def md_cell(v):
-    text = "—" if v is None or v == "" else str(v)
-    return text.replace("|", "/").replace("\n", " ")
+    if isinstance(v, _MD):
+        return v.replace("|", "/")
+    # '*' neutralised: untrusted text must not turn into bold or a severity badge
+    return "—" if v is None or v == "" else _plain(v).replace("*", "∗").replace("|", "/")
 
 
 def md_inline(v):
-    """Untrusted text inside Markdown prose or a code span: one line, no backticks."""
-    return " ".join(str(v).split()).replace("`", "'")
+    """Untrusted text inside Markdown prose or a code span: one line, no backticks, no markup."""
+    return _plain(v).replace("`", "'").replace("*", "∗")
+
+
+def _badge(v):
+    """A severity or verdict the report computed, shown as a badge (HTML); untrusted text never becomes one."""
+    return _MD(f"**{v}**") if v in SEVERITIES else v
+
+
+def _verdict_cell(verdict, before):
+    return _MD(f"**{verdict}** (was {before})") if before else _badge(verdict)
 
 
 def md_table(head, rows):
@@ -1007,7 +1317,7 @@ def render_md(result, sites, missing, args, now):
     sources = []
     for s in sites:
         if s.source == "sweep":
-            sources.append(f"{s.site} sweep {s.stamp}")
+            sources.append(f"{s.site} sweep {md_inline(s.stamp)}")
         else:
             sources.append(f"{s.site} imported CSV")
     md += [f"- **Prepared:** {now.strftime('%Y-%m-%d')} · **Sites:** {len(sites)}"
@@ -1043,7 +1353,7 @@ def render_md(result, sites, missing, args, now):
                         [[h["site"], h["host"], h["status"], h["exit_code"],
                           md_inline(h["problem"]) if h["problem"] else None] for h in cov["not_collected"]]), ""]
     if cov["caveats"]:
-        md += ["**Caveats**", ""] + [f"- {c}" for c in cov["caveats"]] + [""]
+        md += ["**Caveats**", ""] + [f"- {md_inline(c)}" for c in cov["caveats"]] + [""]
 
     # 2. Verdicts
     md += ["## 2. Verdicts", ""]
@@ -1060,7 +1370,8 @@ def render_md(result, sites, missing, args, now):
                           f"{r['clean_pct']}%" if r["clean_pct"] is not None else None] for r in v["roles"]]), ""]
         if not multi:
             md += [md_table(["Host", "Role", "Status", "Verdict"],
-                            [[h["host"], h["role"], h["status"], h["verdict"]] for h in v["hosts_detail"]]), ""]
+                            [[h["host"], h["role"], h["status"], _verdict_cell(h["verdict"], h.get("verdict_before"))]
+                             for h in v["hosts_detail"]]), ""]
 
     # 3. Findings
     md += ["## 3. Findings", ""]
@@ -1087,6 +1398,7 @@ def render_md(result, sites, missing, args, now):
         md.append("")
     md += render_md_baselines(result, multi)
     md += render_md_patterns(result, multi)
+    md += render_md_suppressed(result, multi)
     md += ["---", "", attribution(now), ""]
     return "\n".join(md)
 
@@ -1095,14 +1407,27 @@ def _f(v, digits=2):
     return None if v is None else f"{v:.{digits}f}"
 
 
+def _rate(v):
+    """A rate for display: thousands separators from 100 up, else 3 significant digits (JSON keeps the float)."""
+    if v is None:
+        return None
+    return f"{v:,.0f}" if v >= 100 else f"{v:.3g}"
+
+
 def _where(o, multi):
     return f"{o['site']} {o['host']}" if multi else o["host"]
 
 
 def render_md_baselines(result, multi):
     b = result["baselines"]
+    if b["baseline"]["scope"] == "all":
+        population = "every site of the sweep tree"
+    elif b["baseline"]["sites"] == b["baseline"]["report_sites"]:
+        population = "the sites in this report"
+    else:
+        population = "the sites of the combined report"           # --per-site: same medians as the combined one
     md = ["## 4. Baselines and outliers", "",
-          f"Over ports with link. Baseline: {'every site of the sweep tree' if b['baseline']['scope'] == 'all' else 'the sites in this report'}"
+          f"Over ports with link. Baseline: {population}"
           f" ({', '.join(b['baseline']['sites'])}; {b['baseline']['ports_with_rx']} ports with an Rx reading)."
           + "".join(f" {x['site']} left out of the baseline: {md_inline(x['reason'])}." for x in b["baseline"]["excluded"]), "",
           "### 4.1 Receive power by module type", ""]
@@ -1132,14 +1457,14 @@ def render_md_baselines(result, multi):
                      + ", ".join(f"{_where(o, multi)} {o['port']} ({_f(o['rx_dbm'])} dBm, limit {_f(o['low_limit_dbm'], 1)})"
                                  for o in b["rx_near_low_limit"]) + ".")
     for n in notes:
-        md += [n, ""]
+        md += [md_inline(n), ""]
     md += ["### 4.3 Transmit power by module type", ""]
     md += [md_table(["Module type", "Ports", "Min", "Median", "Max"],
                     [[t, st["ports"], _f(st["min"]), _f(st["median"]), _f(st["max"])]
                      for t, st in b["tx_by_module_type"].items()]) if b["tx_by_module_type"] else "No Tx baseline.", ""]
     md += ["### 4.4 Link errors since boot", "", "Uncorrectable symbol errors (rx_symbol_err_phy) since boot.", ""]
     md += [md_table(["Host", "Port", "Role", "Symbol errors", "In window", "Per hour of uptime"],
-                    [[_where(e, multi), e["port"], e["role"], f"{e['total']:,}", e["window"], e["per_hour"]]
+                    [[_where(e, multi), e["port"], e["role"], f"{e['total']:,}", e["window"], _rate(e["per_hour"])]
                      for e in b["errors_since_boot"]]) + (f"\n\n{b['errors_ports']} ports with errors; the {TOP_N} highest shown."
                                                          if b["errors_ports"] > TOP_N else "")
            if b["errors_since_boot"] else "No port with symbol errors since boot.", ""]
@@ -1153,7 +1478,7 @@ def render_md_baselines(result, multi):
            if b["discards"] else "No port with receive discards since boot.", ""]
     md += ["### 4.7 Module temperature and PCIe", ""]
     hot = b["hottest_modules"]
-    md += [("Hottest modules: " + ", ".join(f"{_where(t, multi)} {t['port']} {t['temp_c']:g} °C" for t in hot) + ". ")
+    md += [("Hottest modules: " + md_inline(", ".join(f"{_where(t, multi)} {t['port']} {t['temp_c']:g} °C" for t in hot)) + ". ")
            if hot else ""]
     md[-1] += (f"{len(b['modules_near_high_limit'])} module(s) within {TEMP_MARGIN_C} °C of their own high limit."
                if b["modules_near_high_limit"] else f"No module within {TEMP_MARGIN_C} °C of its own high limit.")
@@ -1201,6 +1526,33 @@ def render_md_patterns(result, multi):
     return md
 
 
+def _code(v):
+    """A code span the report builds around untrusted text ('*' is literal inside it)."""
+    return _MD(f"`{_plain(v).replace('`', chr(39)).replace('|', CELL_PIPE)}`") if v else None
+
+
+def render_md_suppressed(result, multi):
+    sp = result.get("suppressed")
+    if not sp:
+        return []
+    md = ["## 6. Suppressed known issues", "",
+          f"Rules from {md_inline(sp['file'])}. Matching results are left out of the findings, verdicts, PCIe list and "
+          "patterns above (baselines and outlier lists are measurements and stay; patterns built from a suppressed "
+          "check are dropped), and listed here.", "",
+          md_table(["Rule", "Check", "Match (target or evidence)", "Hosts", "Sites", "Reason", "Suppressed"],
+                   [[f"#{x['rule']}", _code(x["check_id"]), _code(x["match"]), _code(x["hosts"]), ", ".join(x["sites"] or []),
+                     md_inline(x["reason"]), x["count"]] for x in sp["rules"]]) if sp["rules"] else "The file has no rule.",
+          ""]
+    if sp["results"]:
+        md += [md_table(["Host", "Target", "Check", "Severity", "Host verdict", "Rule"],
+                        [[_where(x, multi), x["target"], x["check_id"], _badge(x["severity"]),
+                          _verdict_cell(x["host_verdict"], x["host_verdict_before"]), f"#{x['rule']}"]
+                         for x in sp["results"]]), ""]
+    else:
+        md += ["No result matched.", ""]
+    return md
+
+
 HTML_CSS = """
 :root{--bg:#fff;--fg:#1d2330;--muted:#5b6475;--line:#dfe3ea;--panel:#f6f8fb;--accent:#2457c5;--code:#eef1f6;
 --crit:#c62828;--crit-bg:#fdecec;--warn:#9a5b00;--warn-bg:#fdf3e1;--ok:#1b7f3b;--ok-bg:#e8f6ed;--na:#5b6475;--na-bg:#eef0f4}
@@ -1220,9 +1572,65 @@ thead th{background:var(--panel);white-space:nowrap}tbody tr:last-child td{borde
 .sev-CRIT{color:var(--crit);background:var(--crit-bg)}.sev-WARN{color:var(--warn);background:var(--warn-bg)}
 .sev-OK{color:var(--ok);background:var(--ok-bg)}.sev-UNKNOWN,.sev-NA{color:var(--na);background:var(--na-bg)}
 footer{margin-top:40px;color:var(--muted);font-size:.8rem;border-top:1px solid var(--line);padding-top:10px}
+.attrib{color:var(--muted);font-size:.78rem;margin:8px 0 0}.cover-logo{display:block;height:44px;margin:0 0 14px}
 @media (max-width:640px){h1{font-size:1.35rem}main{padding:18px 16px 40px}}
 @media print{body{font-size:10pt}.tbl{overflow:visible}tr{break-inside:avoid}h2{break-after:avoid}}
 """
+# Severity badge colours (light, dark), as in HTML_CSS. Themes set brand colours only and never these; with a
+# theme they are also locked with !important, as is the visibility of the attribution (design §6.8)
+SEV_COLORS = {"CRIT": (("#c62828", "#fdecec"), ("#ff8a80", "#3a1d1f")), "WARN": (("#9a5b00", "#fdf3e1"), ("#f3c969", "#352c16")),
+              "OK": (("#1b7f3b", "#e8f6ed"), ("#7ed69a", "#16301f")), "UNKNOWN": (("#5b6475", "#eef0f4"), ("#a7afc0", "#232833")),
+              "NA": (("#5b6475", "#eef0f4"), ("#a7afc0", "#232833"))}
+DARK = ':root:not([data-theme="light"])'
+LOCKED_CSS = ("\n.sev{display:inline-block!important;visibility:visible!important;opacity:1!important}\n"
+              + "".join(f".sev-{k}{{color:{lt[0]}!important;background:{lt[1]}!important}}" for k, (lt, _) in SEV_COLORS.items())
+              + "\n@media (prefers-color-scheme:dark){"
+              + "".join(f"{DARK} .sev-{k}{{color:{dk[0]}!important;background:{dk[1]}!important}}" for k, (_, dk) in SEV_COLORS.items())
+              + "}\n.attrib,footer{display:block!important;visibility:visible!important;opacity:1!important}\n"
+              ".attrib::before,.attrib::after,footer::before,footer::after{content:none!important}\n")
+# Paged media for -O pdf (design §6.4): cover, contents with page numbers, running header with the section,
+# "Page N of M" and the classification on every page, landscape named pages for wide tables
+PRINT_CSS = """
+@page{size:A4;margin:20mm 16mm 18mm;font-family:%(font)s;
+ @top-left{content:element(runtitle)}
+ @top-right{content:string(section);font-size:8pt;color:#5b6475}
+ @bottom-left{content:element(runclass)}
+ @bottom-right{content:"Page " counter(page) " of " counter(pages);font-size:8pt;color:#5b6475}}
+@page :first{margin:0;@top-left{content:none}@top-center{content:none}@top-right{content:none}
+ @bottom-left{content:none}@bottom-right{content:none}}
+@page wide{size:A4 landscape;margin:16mm 14mm 16mm}
+:root{--bg:#fff;--fg:#1d2330;--panel:#f3f5f8;--line:#d5dae2;--cover-from:#1f3f8f;--cover-to:#2457c5}
+.run-title{position:running(runtitle);font-size:8pt;color:#5b6475}
+.run-class{position:running(runclass);font-size:7.5pt;color:#5b6475}
+.run-logo{position:running(runlogo)}.run-logo img{height:7mm}
+body{font-family:%(font)s;font-size:9.6pt;line-height:1.45}
+code{font-family:"Liberation Mono","DejaVu Sans Mono",monospace}
+main{max-width:none;padding:0}
+.cover{height:297mm;margin:0;padding:60mm 22mm 0;border:0;position:relative;break-after:page;color:#fff;
+ background:linear-gradient(180deg,var(--cover-from) 0,var(--cover-to) 100%%)}
+.cover h1{font-size:28pt;line-height:1.15;color:#fff;margin:0 0 14mm}
+.cover .meta{color:#e6ecfa;font-size:11pt}.cover .meta li{margin:2.5mm 0}
+.cover code{background:rgba(255,255,255,.16);color:#fff}
+.cover .cover-logo{height:24mm;margin:0 0 18mm}
+.cover .attrib,.cover-class{background:#0b1220;color:#f3f5f8;padding:2mm 3mm;font-size:8pt;margin:0}
+.cover .attrib{position:absolute;left:22mm;right:22mm;bottom:14mm}
+.cover-class{position:absolute;left:22mm;right:22mm;top:14mm;font-weight:700}
+.toc{break-after:page}
+.toc h2{font-size:16pt;margin:0 0 8mm;padding-bottom:3mm;border-bottom:2px solid var(--accent)}
+.toc ol{list-style:none;padding:0;margin:0}.toc li{margin:3.5mm 0;font-size:11pt}
+.toc a{color:var(--fg);text-decoration:none}
+.toc a::after{content:leader(".") target-counter(attr(href), page);color:var(--muted)}
+h2{break-before:page;string-set:section content(text);font-size:15pt;margin:0 0 5mm;border-bottom:2px solid var(--accent)}
+h3{break-after:avoid;margin:7mm 0 3mm}
+p,li{orphans:3;widows:3}
+.tbl{overflow:visible;border:0;border-radius:0}
+table{font-size:8.6pt;border:1px solid var(--line)}
+thead{display:table-header-group}
+tr{break-inside:avoid}
+th,td{padding:4.5px 7px}
+.wide{page:wide}
+footer{font-size:7.5pt;break-inside:avoid}
+""" % {"font": FONT_FALLBACK}
 # Lines that start a block in markdown_to_html (everything else continues a paragraph)
 BLOCK_START_RE = re.compile(r"^(#{1,3} |\||- |---$)")
 SEV_BADGES = {"CRIT": "CRIT", "WARN": "WARN", "OK": "OK", "UNKNOWN": "UNKNOWN", "N/A": "NA"}
@@ -1244,15 +1652,13 @@ def _html_inline(text):
 
 
 def _html_cell(text, tag):
-    t = text.strip()
-    if tag == "td" and t in SEV_BADGES:
-        return f'<td><span class="sev sev-{SEV_BADGES[t]}">{t}</span></td>'
-    return f"<{tag}>{_html_inline(t)}</{tag}>"
+    return f"<{tag}>{_html_inline(text.strip())}</{tag}>"
 
 
-def markdown_to_html(md):
-    """The report's Markdown subset (headings, meta list, tables, lists, paragraphs, rules) to HTML."""
-    lines, out, i = md.split("\n"), [], 0
+def markdown_to_html(md, paged=False):
+    """The report's Markdown subset (headings, meta list, tables, lists, paragraphs, rules) to HTML. Section
+    headings get ids (sec-N) for the PDF contents; paged, a wide table moves to a landscape page with its lead."""
+    lines, out, i, sections = md.split("\n"), [], 0, 0
     split_row = lambda row: row.strip().strip("|").split("|")  # noqa: E731
     while i < len(lines):
         ln = lines[i]
@@ -1262,7 +1668,10 @@ def markdown_to_html(md):
         m = re.match(r"^(#{1,3}) (.*)", ln)
         if m:
             level = len(m.group(1))
-            out.append(f"<h{level}>{_html_inline(m.group(2))}</h{level}>")
+            if level == 2:
+                sections += 1
+            ident = f' id="sec-{sections}"' if level == 2 else ""
+            out.append(f"<h{level}{ident}>{_html_inline(m.group(2))}</h{level}>")
             i += 1
             if level == 1:
                 items = []
@@ -1280,7 +1689,15 @@ def markdown_to_html(md):
                 i += 1
             head = "".join(_html_cell(c, "th") for c in split_row(rows[0]))
             body = "".join("<tr>" + "".join(_html_cell(c, "td") for c in split_row(r)) + "</tr>" for r in rows[2:])
-            out.append(f'<div class="tbl"><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>')
+            table = f'<div class="tbl"><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>'
+            if paged and (max(len(r) for r in rows) > WIDE_ROW_CHARS or len(split_row(rows[0])) >= WIDE_COLS):
+                lead = []
+                while out and out[-1].startswith("<p>") and len(lead) < WIDE_LEAD_MAX:
+                    lead.insert(0, out.pop())
+                if out and re.match(r"<h[23][ >]", out[-1]):
+                    lead.insert(0, out.pop())
+                table = f'<section class="wide">{"".join(lead)}{table}</section>'
+            out.append(table)
             continue
         if ln.startswith("- "):
             items = []
@@ -1305,18 +1722,94 @@ def markdown_to_html(md):
     return "\n".join(out)
 
 
-def render_html(result, sites, missing, args, now):
-    """One self-contained page: inline CSS, no scripts, fonts or remote resources (design §6.4)."""
+def theme_css(theme, paged):
+    """Brand colours and fonts of a theme, then the locked rules. Severity badges, the attribution and the
+    classification keep fixed colours (the cover's sit on fixed bands), so theme values cannot hide them."""
+    if not theme:
+        return ""
+    c, f = theme["colors"], theme["fonts"]
+    body = ",".join([f'"{n}"' for n in f["body"]] + [FONT_FALLBACK])       # built-in fallbacks always last
+    head = ",".join([f'"{n}"' for n in f["heading"] + f["body"]] + [FONT_FALLBACK])
+    css = (f"\n:root{{--accent:{c['primary']}}}\n@media (prefers-color-scheme:dark){{{DARK}{{--accent:{c['link_dark']}}}}}\n"
+           f"body{{font-family:{body}}}h1,h2,h3{{font-family:{head}}}h1,h2{{color:{c['primary_dark']}}}"
+           f"h2{{border-bottom-color:{c['accent']}}}thead th{{background:{c['header_bg']};color:{c['header_fg']}}}\n"
+           f"@media (prefers-color-scheme:dark){{{DARK} h1,{DARK} h2{{color:inherit}}"
+           f"{DARK} thead th{{background:var(--panel);color:inherit}}}}\n")
+    if paged:
+        css += (f":root{{--cover-from:{c['primary_dark']};--cover-to:{c['primary']}}}\n@page{{font-family:{body}}}\n"
+                + ("@page{@top-left{content:element(runlogo)}@top-center{content:element(runtitle)}}\n"
+                   if theme["logos"].get("header") else ""))
+    else:
+        css += ".cover{border-bottom:3px solid var(--accent);padding-bottom:12px}\n"
+    return css + LOCKED_CSS
+
+
+def render_html(result, sites, missing, args, now, paged=False):
+    """One self-contained page: inline CSS, no scripts, fonts or remote resources (design §6.4); logos only as
+    data: URIs. Paged (for -O pdf) adds the cover, contents and running header and footer elements."""
+    theme = getattr(args, "theme_data", None)
     md = render_md(result, sites, missing, args, now)
     body, _, _ = md.rpartition("\n---\n")
+    head_md, _, rest = body.partition("\n## ")
     title = html.escape(title_for(sites, missing, args))
+    sections = markdown_to_html("## " + rest if rest else "", paged)
+    org = html.escape(theme["org"]) if theme else ""
+    logo = (theme or {}).get("logos", {}).get("cover" if paged else "header")
+    label = html.escape(md_inline(args.classification)) if args.classification else ""
+    cover = ('<header class="cover">' + (f'<p class="cover-class">{label}</p>' if paged and label else "")
+             + (f'<img class="cover-logo" alt="{org}" src="{logo}">' if logo else "")
+             + f'{markdown_to_html(head_md)}\n<p class="attrib">{html.escape(attribution(now))}</p></header>\n')
+    css = HTML_CSS + (PRINT_CSS if paged else "") + theme_css(theme, paged)
+    running = ""
+    if paged:
+        header_title = html.escape(md_inline((theme or {}).get("labels", {}).get("header_title") or title_for(sites, missing, args)))
+        header_logo = (theme or {}).get("logos", {}).get("header")
+        running = (f'<div class="run-title">{header_title}</div>' + (f'<div class="run-class">{label}</div>' if label else "")
+                   + (f'<div class="run-logo"><img alt="{org}" src="{header_logo}"></div>' if header_logo else "") + "\n")
+        toc = "".join(f'<li><a href="#{ident}">{text}</a></li>'
+                      for ident, text in re.findall(r'<h2 id="(sec-\d+)">(.*?)</h2>', sections))
+        sections = f'<nav class="toc"><h2>Contents</h2><ol>{toc}</ol></nav>\n{sections}'
     return ("<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">\n"
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
             f"<meta name=\"generator\" content=\"{SCRIPT_NAME} {SCRIPT_VERSION}\">\n"
-            f"<title>{title}</title>\n<style>{HTML_CSS}</style></head>\n<body><main>\n"
-            f"{markdown_to_html(body)}\n<footer>"
-            + (f"{html.escape(md_inline(args.classification))} · " if args.classification else "")
+            + (f"<meta name=\"author\" content=\"{org}\">\n" if org else "")
+            + f"<title>{title}</title>\n<style>{css}</style></head>\n<body><main>\n{running}{cover}"
+            f"{sections}\n<footer>" + (f"{label} · " if label else "")
             + f"{html.escape(attribution(now))}</footer>\n</main></body></html>\n")
+
+
+def _weasyprint():
+    """WeasyPrint, imported only for -O pdf; its absence is an input error naming the package."""
+    try:
+        import weasyprint  # pylint: disable=import-outside-toplevel
+    except (ImportError, OSError) as exc:
+        raise InputError(f"-O pdf needs WeasyPrint ({PDF_PACKAGE_HINT}): {exc}") from exc
+    return weasyprint
+
+
+def local_fetcher(weasyprint):
+    """A WeasyPrint URL fetcher for data: URIs only, so a report never reaches the network (design §9):
+    a URLFetcher limited to that scheme (WeasyPrint 70+), else a function around default_url_fetcher."""
+    if hasattr(weasyprint, "URLFetcher"):
+        return weasyprint.URLFetcher(allowed_protocols={"data"})
+
+    def fetch(url):
+        if not url.startswith("data:"):
+            raise ValueError(f"remote resource refused: {url}")
+        return weasyprint.default_url_fetcher(url)
+    return fetch
+
+
+def render_pdf(result, sites, missing, args, now):
+    """The paged HTML through WeasyPrint; <meta name="generator"> becomes the PDF Creator."""
+    weasyprint = _weasyprint()
+    for name in ("weasyprint", "fontTools"):         # CSS it does not support (screen rules) is not an error
+        logging.getLogger(name).setLevel(logging.ERROR)
+    page = render_html(result, sites, missing, args, now, paged=True)
+    try:
+        return weasyprint.HTML(string=page, url_fetcher=local_fetcher(weasyprint)).write_pdf()
+    except Exception as exc:  # pylint: disable=broad-except  # a WeasyPrint failure, reported as such
+        raise InputError(f"PDF rendering failed: {type(exc).__name__}: {exc}") from exc
 
 
 def render_json(result, sites, missing, args, now):
@@ -1332,6 +1825,7 @@ def render_json(result, sites, missing, args, now):
             "at": args.at.isoformat() if args.at else None,
             "role_regex": args.role_regex,
             "baseline": args.baseline, "rx_delta_db": args.rx_delta_db, "flap_min": args.flap_min,
+            "suppress": getattr(args, "suppress", None),
         },
         **result,
     }
@@ -1355,11 +1849,16 @@ def build_parser():
         description=(f"Version: {SCRIPT_VERSION}\n\n"
                      "Reports on nic-sweep sweeps (and legacy nic-health CSV) for one site, several or all:\n"
                      "coverage, verdicts, every finding with its evidence, baselines and outliers over\n"
-                     "ports with link, and patterns within and across sites.\n"
+                     "ports with link, patterns within and across sites, and suppressed known issues.\n"
                      "Read-only and offline."),
-        epilog=("--import takes SITE and every following path: put SWEEP_DIRs before it, or end its list with --.\n\n"
+        epilog=("--import takes SITE and every following path: put SWEEP_DIRs before it, or end its list with --.\n"
+                f"-O pdf needs WeasyPrint ({PDF_PACKAGE_HINT}) and -o FILE.\n"
+                f"Environment: {THEME_ENV}=DIR selects a theme for html and pdf when --theme is not given.\n"
+                f"Report files are written atomically with mode {REPORT_MODE:04o} (less the umask).\n\n"
                 "Exit status:\n 0  report written\n 1  input error (unreadable input, unknown schema or site, a site\n"
-                "    selected twice, no data for the selection) or the output file cannot be written\n 3  usage error\n\n"
+                "    selected twice, no data for the selection, an invalid suppress file or theme, theme contrast\n"
+                f"    below {MIN_CONTRAST}:1 with --strict-theme, WeasyPrint missing or failing for -O pdf) or an\n"
+                "    output file cannot be written\n 3  usage error\n\n"
                 f"See also: nic-sweep.sh(8), nic-health.sh(8), nic-xray.sh(8). Design: {DESIGN_REF}"))
     p.add_argument("sweep_dirs", nargs="*", metavar="SWEEP_DIR", help="nic-sweep directories (DIR/<site>/<UTC time>)")
     p.add_argument("-R", "--sweep-root", metavar="DIR", help="nic-sweep tree; selects the latest sweep of each site")
@@ -1375,11 +1874,21 @@ def build_parser():
                    help=f"Rx at least DB below its module type's median is an outlier (default {DEFAULT_RX_DELTA_DB:g})")
     p.add_argument("-f", "--flap-min", type=int, default=DEFAULT_FLAP_MIN, metavar="N",
                    help=f"list ports with at least N carrier changes since driver load (default {DEFAULT_FLAP_MIN})")
-    p.add_argument("-O", "--output-format", choices=("md", "json", "html"), default="md",
-                   help="md (default), json, or html (one self-contained file)")
+    p.add_argument("-S", "--suppress", metavar="FILE",
+                   help="JSON rules for known tool issues: matching results leave findings, verdicts and patterns "
+                        "and are listed in their own section")
+    p.add_argument("-O", "--output-format", choices=("md", "json", "html", "pdf"), default="md",
+                   help="md (default), json, html (one self-contained file) or pdf (WeasyPrint; needs -o)")
     p.add_argument("-o", "--output", metavar="FILE", help="write to FILE instead of standard output")
+    p.add_argument("-P", "--per-site", action="store_true",
+                   help="with -o FILE.ext, also write FILE-SITE.ext per selected site (same baseline)")
+    p.add_argument("-T", "--theme", metavar="DIR", default=os.environ.get(THEME_ENV) or None,
+                   help=f"theme folder for html and pdf (default: ${THEME_ENV}; -T '' for no theme)")
+    p.add_argument("-X", "--strict-theme", action="store_true",
+                   help=f"a theme colour pair with contrast below {MIN_CONTRAST}:1 is an error, not a warning")
     p.add_argument("-t", "--title", metavar="TEXT", help="report title")
-    p.add_argument("-c", "--classification", metavar="TEXT", help="classification label, e.g. 'confidential site data'")
+    p.add_argument("-c", "--classification", metavar="TEXT",
+                   help="classification label, e.g. 'confidential site data' (overrides the theme's)")
     p.add_argument("-v", "--version", action="version", version=f"{SCRIPT_NAME} {SCRIPT_VERSION}")
     return p
 
@@ -1410,6 +1919,14 @@ def parse_args(argv):
         p.error("--rx-delta-db must be a positive number")
     if args.flap_min < 1:
         p.error("--flap-min must be at least 1")
+    if args.output_format == "pdf" and not args.output:
+        p.error("-O pdf writes a binary file: give -o FILE")
+    if args.per_site and not args.output:
+        p.error("--per-site needs -o FILE (per-site files are named FILE-SITE.ext)")
+    if args.strict_theme and args.output_format not in ("html", "pdf"):
+        p.error("--strict-theme applies to -O html and pdf only (md and json ignore themes)")
+    if args.strict_theme and not args.theme:
+        p.error(f"--strict-theme needs --theme or {THEME_ENV}")
     args.role_re = None
     if args.role_regex:
         try:
@@ -1421,6 +1938,111 @@ def parse_args(argv):
     return args
 
 
+def per_site_path(output, site):
+    """FILE.ext -> FILE-SITE.ext. Site names are validated (NAME_RE): no path separator can get in."""
+    if not NAME_RE.match(site):
+        raise InputError(f"site name {site!r} cannot be part of a file name")
+    root, ext = os.path.splitext(output)
+    return f"{root}-{site}{ext}"
+
+
+def _warn(text):
+    sys.stderr.write(f"⚠️  {text}\n")
+
+
+def build_outputs(args, now):
+    """[(path or None for stdout, text or PDF bytes)]: the report, then one per site with --per-site."""
+    args.theme_data = None
+    if args.theme and args.output_format in ("html", "pdf"):    # md and json never read a theme
+        args.theme_data = load_theme(args.theme)
+        for warning in args.theme_data["warnings"]:
+            if args.strict_theme:
+                raise InputError(f"{warning} (--strict-theme)")
+            _warn(warning)
+        for notice in args.theme_data["notices"]:
+            _warn(notice)
+        if not args.classification:
+            args.classification = args.theme_data["labels"].get("classification")
+    if args.output_format == "pdf":
+        _weasyprint()                                   # fail before reading any input
+    args.suppress_rules = load_suppress(args.suppress) if args.suppress else None
+    sites, missing = load_selection(args)
+    if args.suppress_rules:
+        apply_suppress(sites, args.suppress_rules)
+        selected = {s.site for s in sites}
+        hits = collections.Counter(r["suppressed"] for s in sites for h in s.hosts.values() for r in h.records
+                                   if r.get("suppressed"))
+        for rule in args.suppress_rules:
+            if not hits[rule["rule"]]:
+                _warn(f"suppress rule {rule['rule']} ({rule['check_id']}) matched nothing")
+            for site in rule["sites"] or []:
+                if site not in selected:
+                    _warn(f"suppress rule {rule['rule']}: site {site} is not in the selection")
+    baseline_sites = load_baseline_sites(args, sites)
+    renderer = {"json": render_json, "html": render_html, "md": render_md, "pdf": render_pdf}[args.output_format]
+    result = analyse(sites, missing, args, baseline_sites)
+    outputs = [(args.output, renderer(result, sites, missing, args, now))]
+    if args.per_site and len(sites) + len(missing) == 1:
+        _warn("--per-site: one site selected, the report is already per site")
+    for site in sites if args.per_site and len(sites) + len(missing) > 1 else []:
+        # Single-site report over the combined report's baseline population, so outliers agree
+        site_args = argparse.Namespace(**vars(args))
+        if args.title:
+            site_args.title = f"{args.title} · {site.site}"
+        site_result = analyse([site], [], site_args, baseline_sites or sites)
+        outputs.append((per_site_path(args.output, site.site), renderer(site_result, [site], [], site_args, now)))
+    return outputs
+
+
+def write_outputs(outputs):
+    """Write every file atomically: a temp file next to it (exclusive, random name, never through a symlink,
+    REPORT_MODE), then os.replace, which also replaces a symlink at the target instead of following it. All
+    target directories are checked first so --per-site does not leave a partial set; temp files go on failure.
+    An existing target that is not a regular file (/dev/null, a FIFO, /dev/stdout) is written to directly:
+    replacing it would destroy it (as root, the system's /dev/null)."""
+    files, special = [], []
+    for path, content in outputs:
+        if path is None:
+            continue
+        data = content if isinstance(content, bytes) else content.encode("utf-8")
+        try:
+            st = os.stat(path)
+        except OSError:
+            st = None
+        if st and not stat.S_ISREG(st.st_mode) and not stat.S_ISDIR(st.st_mode):
+            special.append((path, data))
+        else:
+            files.append((path, data))
+    for path, _ in files:
+        folder = os.path.dirname(os.path.abspath(path))
+        if not (os.path.isdir(folder) and os.access(folder, os.W_OK | os.X_OK)):
+            raise InputError(f"{path}: directory {folder} does not exist or is not writable")
+        if os.path.isdir(path) and not os.path.islink(path):
+            raise InputError(f"{path}: is a directory")
+    temps = []
+    try:
+        for path, data in files:
+            folder, base = os.path.split(os.path.abspath(path))
+            tmp = os.path.join(folder, f".{base}.{secrets.token_hex(TEMP_NAME_BYTES)}.tmp")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), REPORT_MODE)
+            temps.append(tmp)
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(data)
+        for (path, _), tmp in zip(files, temps):
+            os.replace(tmp, path)
+        for path, data in special:
+            with open(path, "wb") as fh:
+                fh.write(data)
+    except OSError as exc:
+        for tmp in temps:
+            with contextlib.suppress(OSError):
+                os.remove(tmp)
+        raise InputError(f"cannot write the report: {exc}") from exc
+    for path, content in outputs:
+        if path is None:
+            sys.stdout.write(content)
+
+
 def main(argv=None):
     if sys.version_info < MIN_PYTHON:
         sys.stderr.write(f"❌ {SCRIPT_NAME} needs Python {'.'.join(map(str, MIN_PYTHON))} or newer\n")
@@ -1428,10 +2050,7 @@ def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
     now = datetime.datetime.now().astimezone()
     try:
-        sites, missing = load_selection(args)
-        result = analyse(sites, missing, args, load_baseline_sites(args, sites))
-        renderer = {"json": render_json, "html": render_html, "md": render_md}[args.output_format]
-        text = renderer(result, sites, missing, args, now)
+        write_outputs(build_outputs(args, now))
     except InputError as exc:
         sys.stderr.write(f"❌ {exc}\n")
         return EXIT_INPUT
@@ -1439,15 +2058,6 @@ def main(argv=None):
         sys.stderr.write(f"❌ internal error while reading the input ({type(exc).__name__}: {exc}); "
                          "please report it with the input that caused it\n")
         return EXIT_INPUT
-    if args.output:
-        try:
-            with open(args.output, "w", encoding="utf-8") as fh:
-                fh.write(text)
-        except OSError as exc:
-            sys.stderr.write(f"❌ {args.output}: {exc}\n")
-            return EXIT_INPUT
-    else:
-        sys.stdout.write(text)
     return EXIT_OK
 
 

@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "name": "example",
+  "org": "Example Corp",
+  "colors": { "primary_dark": "#0B1F44", "primary": "#1F4E99", "accent": "#4A90D9",
+              "link_dark": "#7FB3E8", "header_bg": "#DDE3EA", "header_fg": "#0B1F44" },
+  "fonts":  { "heading": ["Example Sans Light"], "body": ["Example Sans"] },
+  "logos":  { "cover": "logo-dark.svg", "header": "logo-light.png" },
+  "labels": { "header_title": "NIC Health · Example Corp", "classification": "Example Corp internal" }
+}
