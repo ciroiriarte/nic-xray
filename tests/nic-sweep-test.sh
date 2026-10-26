@@ -349,16 +349,29 @@ assert_eq "existing sweep directory: exit 3" "3" "$?"
 assert_eq "existing sweep directory: refused with a message" "1" "$(grep -c 'already exists' "$FIX/clash.err")"
 assert_eq "existing sweep directory: nothing written into it" "0" "$(find "$OUTC" -name MANIFEST.tsv | wc -l | tr -d ' ')"
 
+# count_procs CMDLINE: processes whose full command line is exactly CMDLINE (from /proc; pure Bash,
+# CI images may lack pgrep)
+count_procs() {
+    local P N=0
+    local -a ARGV
+    for P in /proc/[0-9]*/cmdline; do
+        mapfile -d '' ARGV < "$P" 2>/dev/null || continue
+        [[ "${ARGV[*]:-}" == "$1" ]] && (( ++N ))
+    done
+    echo "$N"
+}
+
 # Interrupt: workers forward TERM to timeout(1), so no ssh or remote stand-in survives the sweep
 printf 'S1,hang1,h-hang\nS1,hang2,h-hang\n' > "$FIX/inv-hang.csv"
 PATH="$FIX/bin:$PATH" bash "$SCRIPT" -f "$FIX/inv-hang.csv" -o "$FIX/out-int" -n -T 60 > /dev/null 2>&1 &
 SWEEP_PID=$!
-for (( W = 0; W < 50; W++ )); do pgrep -f '^sleep 31$' >/dev/null && break; sleep 0.1; done
+for (( W = 0; W < 50; W++ )); do (( $(count_procs "sleep 31") > 0 )) && break; sleep 0.1; done
 kill -INT "$SWEEP_PID"
 wait "$SWEEP_PID"
 assert_eq "interrupt: exit 3" "3" "$?"
 sleep 0.5
-assert_eq "interrupt: no stand-in ssh left running" "0" "$(pgrep -fc '^sleep 31$' || true)"
+assert_eq "interrupt: stand-ins were running before" "yes" "$( (( W < 50 )) && echo yes)"
+assert_eq "interrupt: no stand-in ssh left running" "0" "$(count_procs "sleep 31")"
 
 echo
 if (( FAIL > 0 )); then
