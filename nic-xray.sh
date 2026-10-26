@@ -448,6 +448,30 @@ pad_plain() {
     printf "%s%*s" "$TEXT" "$PAD" ""
 }
 
+# --- Helper: optical power (dBm) as a JSON value ---
+# A finite decimal is printed as is; anything else is null. ethtool -m reports
+# 0 mW (no light) as "-inf" dBm, which JSON cannot represent (issue #24).
+json_dbm() {
+    if [[ "$1" =~ ^-?[0-9]+(\.[0-9]+)?$ ]]; then
+        printf '%s' "$1"
+    else
+        printf 'null'
+    fi
+}
+
+# --- Helper: colon-separated per-lane dBm values as a JSON array ---
+json_dbm_lanes() {
+    local -a LANES
+    local LI
+    IFS=':' read -ra LANES <<< "$1"
+    printf '['
+    for (( LI = 0; LI < ${#LANES[@]}; LI++ )); do
+        (( LI > 0 )) && printf ','
+        json_dbm "${LANES[LI]}"
+    done
+    printf ']'
+}
+
 # --- Helper: escape string for JSON output ---
 json_escape() {
     local STR="$1"
@@ -3441,50 +3465,15 @@ elif [[ "${OUTPUT_FORMAT}" == "json" ]]; then
             printf '      "sfp_type": "%s",\n' "$(json_escape "${DATA_OPTICS_TYPE[$i]}")"
             printf '      "vendor": "%s",\n' "$(json_escape "${DATA_OPTICS_VENDOR[$i]}")"
             printf '      "wavelength": "%s",\n' "$(json_escape "${DATA_OPTICS_WAVELENGTH[$i]}")"
-            # Tx power: numeric or string
-            if [[ "${DATA_OPTICS_TX_DBM[$i]}" == "N/A" ]]; then
-                printf '      "tx_power_dbm": null,\n'
-            else
-                printf '      "tx_power_dbm": %s,\n' "${DATA_OPTICS_TX_DBM[$i]}"
-            fi
+            printf '      "tx_power_dbm": %s,\n' "$(json_dbm "${DATA_OPTICS_TX_DBM[$i]}")"
             printf '      "tx_status": "%s",\n' "$(json_escape "${DATA_OPTICS_TX_STATUS[$i]}")"
-            # Rx power: numeric or string
-            if [[ "${DATA_OPTICS_RX_DBM[$i]}" == "N/A" ]]; then
-                printf '      "rx_power_dbm": null,\n'
-            else
-                printf '      "rx_power_dbm": %s,\n' "${DATA_OPTICS_RX_DBM[$i]}"
-            fi
+            printf '      "rx_power_dbm": %s,\n' "$(json_dbm "${DATA_OPTICS_RX_DBM[$i]}")"
             printf '      "rx_status": "%s",\n' "$(json_escape "${DATA_OPTICS_RX_STATUS[$i]}")"
             printf '      "lanes": %s' "${DATA_OPTICS_LANE_COUNT[$i]:-0}"
             # Multi-lane per-channel detail
             if [[ ${DATA_OPTICS_LANE_COUNT[$i]:-0} -gt 1 && -n "${DATA_OPTICS_TX_LANES[$i]}" ]]; then
-                # Tx lanes array
-                printf ',\n      "tx_lanes_dbm": ['
-                IFS_SAVE="$IFS"
-                IFS=':' read -ra _TX_L <<< "${DATA_OPTICS_TX_LANES[$i]}"
-                IFS="$IFS_SAVE"
-                for ((li=0; li<${#_TX_L[@]}; li++)); do
-                    (( li > 0 )) && printf ','
-                    if [[ "${_TX_L[$li]}" == "N/A" ]]; then
-                        printf 'null'
-                    else
-                        printf '%s' "${_TX_L[$li]}"
-                    fi
-                done
-                printf ']'
-                # Rx lanes array
-                printf ',\n      "rx_lanes_dbm": ['
-                IFS=':' read -ra _RX_L <<< "${DATA_OPTICS_RX_LANES[$i]}"
-                IFS="$IFS_SAVE"
-                for ((li=0; li<${#_RX_L[@]}; li++)); do
-                    (( li > 0 )) && printf ','
-                    if [[ "${_RX_L[$li]}" == "N/A" ]]; then
-                        printf 'null'
-                    else
-                        printf '%s' "${_RX_L[$li]}"
-                    fi
-                done
-                printf ']'
+                printf ',\n      "tx_lanes_dbm": %s' "$(json_dbm_lanes "${DATA_OPTICS_TX_LANES[$i]}")"
+                printf ',\n      "rx_lanes_dbm": %s' "$(json_dbm_lanes "${DATA_OPTICS_RX_LANES[$i]}")"
             fi
             printf '\n    }'
         fi

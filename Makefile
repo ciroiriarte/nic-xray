@@ -25,9 +25,10 @@ uninstall-completion:
 
 test:
 	bash tests/nic-health-test.sh
+	bash tests/nic-xray-test.sh
 
 # Static analysis of the scripts and the test suite (needs shellcheck)
 lint:
 	@command -v $(SHELLCHECK) >/dev/null || { echo "lint: $(SHELLCHECK) not found; install shellcheck" >&2; exit 1; }
 	$(SHELLCHECK) nic-xray.sh nic-health.sh
-	$(SHELLCHECK) -x tests/nic-health-test.sh
+	$(SHELLCHECK) -x tests/nic-health-test.sh tests/nic-xray-test.sh
