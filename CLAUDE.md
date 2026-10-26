@@ -3,14 +3,20 @@
 ## 1. Objectives
 * Provide detailed physical network interface diagnostics for Linux systems
 * `nic-xray.sh` is the primary script (inventory, topology, traffic metrics).
-* Companion scripts live alongside it in the repo root. Planned: `nic-health.sh`
-  for vendor-specific NIC hardware health checks (design: `docs/design/nic-health.md`).
+* Companion scripts live alongside it in the repo root:
+  * `nic-health.sh`: NIC hardware health checks per host (design: `docs/design/nic-health.md`).
+  * Planned: `nic-sweep.sh` (fleet collection over SSH) and `nic-report.py`
+    (single- and multi-site analysis and reports) (design: `docs/design/nic-sweep.md`).
 * Every rule in this file applies to each script. Where a rule names `nic-xray.sh`,
   read it as the script's own name (e.g. `--version` prints `nic-health.sh <version>`,
   man page `man/man8/nic-health.8`).
 
 ## 2. Technical Stack & Dependencies
 * **Language:** Modern Bash
+* **Exception:** `nic-report.py` is Python 3.9+, standard library only (WeasyPrint
+  optional, for PDF), because it parses CSV, computes statistics and renders HTML/PDF
+  (`docs/design/nic-sweep.md` §3). Every other rule in this file still applies to it.
+  No other script may use Python.
 
 ## 3. Coding Rules & Constraints
 * Should use bash native capabilities as much as possible before falling back to external tools
