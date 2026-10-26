@@ -493,7 +493,7 @@ class TestMalformedInput(unittest.TestCase):
         f = os.path.join(self.tmp.name, "h1_x.csv")
         with open(f, "w") as fh:
             fh.write("severity,scope,target,check_id,value,unit,threshold,evidence,hint,ref\n\"OK\0\",a,b,c,d,e,f,g,h,i\n")
-        self.assert_clean_failure("-i", "SITE3", f)
+        self.assertIn("NUL bytes", self.assert_clean_failure("-i", "SITE3", f))   # on every Python version
 
     def test_invalid_stamp_dates_are_skipped(self):
         self.sweep(stamp="20261020T100000Z")

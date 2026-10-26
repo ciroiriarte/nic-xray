@@ -397,6 +397,9 @@ def _clean_csv_lines(path):
             lines = [ln.replace("\r", "") for ln in fh]
     except (OSError, UnicodeDecodeError) as exc:
         raise InputError(f"{path}: {exc}") from exc
+    # A NUL byte means a binary or corrupt file; checked here because csv accepts NUL since Python 3.11
+    if any("\0" in ln for ln in lines):
+        raise InputError(f"{path}: contains NUL bytes (binary or corrupt file)")
     while lines and not lines[0].strip():
         lines.pop(0)
     return lines
