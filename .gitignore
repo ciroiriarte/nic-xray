@@ -6,3 +6,6 @@ samples/obfuscation-table.sed
 
 # Operator workspace: site data, reports, company themes (never published)
 /local/
+
+# oh-my-claudecode session state (local tooling, never published)
+.omc/
