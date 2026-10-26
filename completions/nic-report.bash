@@ -16,7 +16,14 @@ _nic_report() {
 			return
 			;;
 		-O|--output-format)
-			COMPREPLY=($(compgen -W "md json" -- "$cur"))
+			COMPREPLY=($(compgen -W "md json html" -- "$cur"))
+			return
+			;;
+		-b|--baseline)
+			COMPREPLY=($(compgen -W "scope all" -- "$cur"))
+			return
+			;;
+		-d|--rx-delta-db|-f|--flap-min)
 			return
 			;;
 		-s|--site)
@@ -55,6 +62,9 @@ _nic_report() {
 			-a --at
 			-i --import
 			-r --role-regex
+			-b --baseline
+			-d --rx-delta-db
+			-f --flap-min
 			-O --output-format
 			-o --output
 			-t --title

@@ -986,8 +986,10 @@ Host status: `ok`, `ssh-fail`, `sudo-fail`, `tool-missing`, `timeout`, `bad-outp
 | 1. Coverage and comparability | columns per role | columns per site |
 | 2. Verdicts | per role and per host | per site, then per role |
 | 3. Findings | by host | by site → host |
+| 4. Baselines and outliers | the site's own medians (or the fleet's with `-b all`) | medians across the selected sites |
+| 5. Patterns | same issue on the same port/ASIC across hosts of a role | also: same issue on the same role at two or more sites |
 
-Coverage counts hosts, ASICs, ports, ports with link, deep checks and FEC modes; lists every host not collected; and flags what limits a comparison (mixed nic-health versions or windows, different days, imported data without metadata, sites with no sweep at the requested date). Findings list every WARN/CRIT/UNKNOWN result with its evidence and hint.
+Coverage counts hosts, ASICs, ports, ports with link, deep checks and FEC modes; lists every host not collected; and flags what limits a comparison (mixed nic-health versions or windows, different days, imported data without metadata, sites with no sweep at the requested date). Findings list every WARN/CRIT/UNKNOWN result with its evidence and hint. Baselines are computed over ports with link: receive power per module type, outliers (at least `-d` dB, default 5, below the median **and** a robust median/MAD score of 3.5; multi-lane modules are their own type, judged by the lowest lane), errors since boot, carrier changes above `-f` (default 100), discards, temperatures and PCIe links below capability. Patterns group related checks into one issue (symbol/CRC/BER → "link errors") and need `-r` for roles; without it a site's hosts form one group and the report says so.
 
 ```bash
 nic-report.py -R sweeps                                    # latest sweep of every site
@@ -995,12 +997,13 @@ nic-report.py -R sweeps -s SITE1                           # one site
 nic-report.py -R sweeps -s SITE1 -s SITE2 -a 2026-10-23    # as they were on a date (UTC)
 nic-report.py -R sweeps -i SITE9 old/SITE9/                # add an older CSV collection (one file per host)
 nic-report.py -R sweeps -O json -o report.json             # every computed value, for automation
+nic-report.py -R sweeps -s SITE3 -b all -O html -o s3.html # one site against the fleet's medians, as HTML
 nic-report.py -R sweeps -r '^[^-]+-[^-]+-(?P<role>[a-z]+\d+[a-z]*)-\d+'             # roles from host names
 ```
 
-Options: `-R`/`--sweep-root`, `-s`/`--site`, `-a`/`--at`, `-i`/`--import` (takes every following path: put sweep directories first or end it with `--`), `-r`/`--role-regex`, `-O`/`--output-format`, `-o`/`--output`, `-t`/`--title`, `-c`/`--classification`, `-v`/`--version`, `-h`/`--help`. Odd or damaged input ends in a `❌` message, never a traceback; a host whose result file is missing or malformed is listed as `unreadable-result` instead of failing the report. Data from nic-health older than 2.12.0 has no link state: ports are counted from link-flap records and ports with link shown as unknown.
+Options: `-R`/`--sweep-root`, `-s`/`--site`, `-a`/`--at`, `-i`/`--import` (takes every following path: put sweep directories first or end it with `--`), `-r`/`--role-regex`, `-b`/`--baseline scope|all`, `-d`/`--rx-delta-db`, `-f`/`--flap-min`, `-O`/`--output-format md|json|html`, `-o`/`--output`, `-t`/`--title`, `-c`/`--classification`, `-v`/`--version`, `-h`/`--help`. Odd or damaged input ends in a `❌` message, never a traceback; a host whose result file is missing or malformed is listed as `unreadable-result` instead of failing the report. Data from nic-health older than 2.12.0 has no link state: ports are counted from link-flap records and ports with link shown as unknown.
 
-Exit status: `0` report written, `1` input error (unreadable input, unknown schema or site, a site selected twice, no data for the selection) or the output file cannot be written, `3` usage error. Design: [`docs/design/nic-sweep.md`](docs/design/nic-sweep.md) §6. HTML/PDF output, themes, baselines and recommendations follow in later phases.
+Exit status: `0` report written, `1` input error (unreadable input, unknown schema or site, a site selected twice, no data for the selection) or the output file cannot be written, `3` usage error. Design: [`docs/design/nic-sweep.md`](docs/design/nic-sweep.md) §6. HTML is one self-contained page (inline style, no scripts or remote resources). PDF, themes and recommendations follow in later phases.
 
 ## 📄 License
 

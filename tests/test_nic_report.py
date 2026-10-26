@@ -37,9 +37,9 @@ EV_BER = "Effective Physical BER=3E-9 Raw Physical BER=7E-7 Effective Physical E
 EV_BER_ZERO = "Effective Physical BER=15E-255 Raw Physical BER=15E-255 Effective Physical Errors=0 since 62465.4 min"
 
 
-def rec(severity, scope, target, check_id, value="", evidence="", hint=""):
+def rec(severity, scope, target, check_id, value="", evidence="", hint="", threshold=""):
     return {"severity": severity, "scope": scope, "target": target, "check_id": check_id, "value": value,
-            "unit": "", "threshold": "", "evidence": evidence, "hint": hint, "ref": "docs/design/nic-health.md"}
+            "unit": "", "threshold": threshold, "evidence": evidence, "hint": hint, "ref": "docs/design/nic-health.md"}
 
 
 def host_doc(host, verdict, version="2.13.0", collected="2026-10-26T12:00:00Z", interval=30, extra=()):
@@ -653,6 +653,325 @@ class TestRealSamples(unittest.TestCase):
         self.assertEqual(list(data.hosts), ["server-01"])
         self.assertEqual(len(data.hosts["server-01"].raw_results), 24)
         self.assertEqual(data.hosts["server-01"].verdict, "CRIT")
+
+
+def port_rows(port, link=True, rx=None, tx=-1.0, comp="100GBASE-SR4 or 25GBASE-SR", part="VENDOR PART25",
+              judged=True, sym=None, carrier=1, discards=None, temp=40, temp_high=90, low=-11.3):
+    """nic-health records for one port in real evidence formats (fictional values)."""
+    rows = [rec("OK", "port", port, "generic.link.state", "up" if link else "no link"),
+            rec("OK", "port", port, "generic.link.flaps", "+0", f"carrier_changes={carrier} (since driver load)")]
+    if rx is not None:
+        rx = ",".join(str(v) for v in rx) if isinstance(rx, (list, tuple)) else rx
+        note = "" if judged else " (not judged: no link)"
+        rows.append(rec("OK", "port", port, "mlx5.deep.module", "",
+                        f"Temperature [C]={temp} [-5..{temp_high}]; Rx Power Current [dBm]={rx} [{low}..3.398]{note}; "
+                        f"Tx Power Current [dBm]={tx} [-9.4..3.398]; Tx Fault [per lane]=0; module {part}"))
+    if link and comp:
+        rows.append(rec("OK", "port", port, "mlx5.deep.fec", "link: Firecode FEC", f"FEC=Firecode FEC; module Compliance={comp}"))
+    rows.append(rec("OK", "port", port, "mlx5.phy.errors", "+0",
+                    f"rx_symbol_err_phy={sym} (+0)" if sym else "all 4 counters are 0"))
+    if discards:
+        rows.append(rec("WARN", "port", port, "mlx5.nic.discards", f"rx_discards_phy=+1", f"rx_discards_phy={discards} (+1)"))
+    return rows
+
+
+def ports_doc(host, ports, uptime=3600 * 1000, extra=()):
+    doc = host_doc(host, "OK")
+    doc["results"] = [rec("OK", "asic", "0000:01:00", "generic.pcie.link", "16.0 GT/s x8")] + list(extra)
+    for p in ports:
+        doc["results"] += port_rows(**p)
+    doc["uptime_s"] = uptime
+    return doc
+
+
+class Phase4Base(unittest.TestCase):
+    """Shared fixtures for the Phase 4 tests (no tests of its own)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = os.path.join(self.tmp.name, "sweeps")
+
+    def site(self, site, hosts, stamp="20261026T100000Z"):
+        return write_sweep(self.root, site, stamp, [(h, "ok", "OK", ports_doc(h, ps, **kw)) for h, ps, kw in hosts])
+
+    def analyse(self, argv):
+        args = nr.parse_args(argv + ["-r", ROLE_RE])
+        sites, missing = nr.load_selection(args)
+        return nr.analyse(sites, missing, args, nr.load_baseline_sites(args, sites)), sites, missing, args
+
+    def normal_site(self, site="SITE1", weak=None):
+        hosts = []
+        for i in range(1, 5):
+            ports = [{"port": f"eth{j}", "rx": round(-0.4 + 0.05 * ((i + j) % 5), 3)} for j in range(4)]
+            if weak and i == 1:
+                ports[0]["rx"] = weak
+            hosts.append((f"acme-{site.lower()}-stop1d-0{i}", ports, {}))
+        return self.site(site, hosts)
+
+
+class TestBaselinesAndOutliers(Phase4Base):
+    def test_stats(self):
+        st = nr._stats([-1.0, -0.5, 0.0, 0.5, 9.0])
+        self.assertEqual((st["ports"], st["min"], st["p5"], st["median"], st["max"], st["mad"]), (5, -1.0, -1.0, 0.0, 9.0, 0.5))
+        self.assertEqual(nr._stats([float(v) for v in range(21)])["p5"], 1.0)     # nearest rank
+
+    def test_robust_score_side_of_the_rule(self):
+        # A wide group: -8 is 6 dB under the median but only ~1 MAD-sigma away, so not an outlier
+        values = [-8, -6, -4, -2, 0, 2, 4]
+        self.site("SITE1", [(f"acme-s1-stop1d-0{i}", [{"port": "eth0", "rx": v}], {}) for i, v in enumerate(values, 1)])
+        res, *_ = self.analyse(["-R", self.root])
+        self.assertEqual(res["baselines"]["rx_outliers"], [])
+        self.assertEqual(res["baselines"]["rx_by_module_type"]["100GBASE-SR4 or 25GBASE-SR"]["mad"], 4)
+
+    def test_multi_lane_modules_are_their_own_type(self):
+        hosts = [(f"acme-s1-stop1d-0{i}", [{"port": "eth0", "rx": -0.5},
+                                            {"port": "eth1", "rx": [-1.2, -0.4, -0.3, -0.5], "part": "VENDOR P100"}], {})
+                 for i in range(1, 4)]
+        self.site("SITE1", hosts)
+        res, *_ = self.analyse(["-R", self.root])
+        types = res["baselines"]["rx_by_module_type"]
+        self.assertEqual(types["100GBASE-SR4 or 25GBASE-SR · 4-lane"]["ports"], 3)
+        self.assertEqual(types["100GBASE-SR4 or 25GBASE-SR · 4-lane"]["median"], -1.2)      # lowest lane
+        self.assertEqual(types["100GBASE-SR4 or 25GBASE-SR"]["ports"], 3)
+
+    def test_baseline_all_types_ports_the_same_way(self):
+        # SITE1 has no FEC compliance (only the part number); SITE2 knows the part's compliance
+        self.site("SITE1", [("acme-s1-stop1d-01", [{"port": "eth0", "rx": -9.0, "comp": None, "part": "VEND P"},
+                                                   {"port": "eth1", "rx": -0.4, "comp": None, "part": "VEND P"}], {})])
+        self.site("SITE2", [(f"acme-s2-stop1d-0{i}", [{"port": f"eth{j}", "rx": -0.5 + 0.05 * j, "part": "VEND P"}
+                                                       for j in range(3)], {}) for i in range(1, 4)])
+        res, *_ = self.analyse(["-R", self.root])
+        self.assertEqual([(o["site"], o["port"]) for o in res["baselines"]["rx_outliers"]], [("SITE1", "eth0")])
+        res, *_ = self.analyse(["-R", self.root, "-s", "SITE1", "-b", "all"])
+        self.assertEqual([(o["site"], o["port"], o["module_type"]) for o in res["baselines"]["rx_outliers"]],
+                         [("SITE1", "eth0", "100GBASE-SR4 or 25GBASE-SR")])
+
+    def test_baseline_all_does_not_leak_other_sites(self):
+        noisy = [rec("WARN", "asic", "0000:04:00", "generic.pcie.link", "2.5 GT/s x4")]
+        self.site("SITE1", [(f"acme-s1-stop1d-0{i}", [{"port": "eth0", "rx": -0.5}], {}) for i in range(1, 4)])
+        self.site("SITE2", [(f"acme-s2-stop1d-0{i}", [{"port": "eth0", "rx": -9.0 if i == 1 else -0.5, "sym": 99,
+                                                        "carrier": 900, "discards": 5, "temp": 88}],
+                             {"extra": noisy}) for i in range(1, 4)])
+        res, *_ = self.analyse(["-R", self.root, "-s", "SITE1", "-b", "all"])
+        b = res["baselines"]
+        for key in ("rx_outliers", "rx_near_low_limit", "errors_since_boot", "flaps", "discards", "hottest_modules",
+                    "modules_near_high_limit"):
+            self.assertEqual({x["site"] for x in b[key]} - {"SITE1"}, set(), key)
+        self.assertEqual(b["pcie"]["below_capability"], [])
+        self.assertEqual(res["patterns"]["within_sites"], [])
+        self.assertEqual(b["baseline"]["sites"], ["SITE1", "SITE2"])
+
+    def test_baseline_all_skips_broken_and_mismatched_sites(self):
+        self.normal_site("SITE1", weak=-8.5)
+        bad = write_sweep(self.root, "SITE2", "20261026T100000Z", [], schema=1)       # manifest lists no hosts
+        odd = self.site("SITE3", [("acme-s3-stop1d-01", [{"port": "eth0", "rx": -0.5}], {})])
+        with open(os.path.join(odd, "sweep.json"), "w") as fh:
+            json.dump({"schema_version": 1, "site": "OTHER"}, fh)
+        self.assertTrue(os.path.isdir(bad))
+        res, sites, missing, args = self.analyse(["-R", self.root, "-s", "SITE1", "-b", "all"])
+        excluded = {x["site"]: x["reason"] for x in res["baselines"]["baseline"]["excluded"]}
+        self.assertIn("lists no hosts", excluded["SITE2"])
+        self.assertIn("is for site 'OTHER'", excluded["SITE3"])
+        self.assertEqual(len(res["baselines"]["rx_outliers"]), 1)
+        md = nr.render_md(res, sites, missing, args, nr.datetime.datetime.now().astimezone())
+        self.assertIn("SITE2 left out of the baseline", md)
+
+    def test_uptime_zero_gives_no_rate(self):
+        self.site("SITE1", [("acme-s1-stop1d-01", [{"port": "eth0", "rx": -0.5, "sym": 50}], {"uptime": 0})])
+        res, *_ = self.analyse(["-R", self.root])
+        self.assertIsNone(res["baselines"]["errors_since_boot"][0]["per_hour"])
+
+    def test_patterns_without_roles(self):
+        pcie = [rec("WARN", "asic", "0000:04:00", "generic.pcie.link", "2.5 GT/s x4")]
+        self.site("SITE1", [(f"acme-s1-stoc2-0{i}", [{"port": "eth0", "rx": -0.5}], {"extra": pcie}) for i in range(1, 3)])
+        args = nr.parse_args(["-R", self.root])                       # no -r
+        sites, missing = nr.load_selection(args)
+        res = nr.analyse(sites, missing, args)
+        self.assertFalse(res["patterns"]["roles_known"])
+        self.assertEqual([(w["role"], w["target"], len(w["hosts"])) for w in res["patterns"]["within_sites"]],
+                         [(nr.NO_ROLE, "0000:04:00", 2)])
+        md = nr.render_md(res, sites, missing, args, nr.datetime.datetime.now().astimezone())
+        self.assertIn("Hosts have no role (use -r/--role-regex)", md)
+
+    def test_related_checks_form_one_issue_family(self):
+        ev = [rec("CRIT", "port", "eth0", "mlx5.phy.errors", "x"), rec("WARN", "port", "eth0", "mlx5.frame.errors", "x"),
+              rec("WARN", "port", "eth0", "mlx5.deep.ber", "x")]
+        self.site("SITE1", [(f"acme-s1-stop1d-0{i}", [{"port": "eth0", "rx": -0.5}], {"extra": ev}) for i in range(1, 3)])
+        res, *_ = self.analyse(["-R", self.root])
+        self.assertEqual([w["issue"] for w in res["patterns"]["within_sites"]], ["link errors (symbol/CRC/BER)"])
+
+    def test_pre_2_12_link_needs_a_fec_mode(self):
+        doc = ports_doc("acme-s1-stop1d-01", [{"port": "eth0", "rx": -0.5}, {"port": "eth1", "rx": -25.0, "comp": None}])
+        doc["results"] = [r for r in doc["results"] if r["check_id"] != "generic.link.state"]
+        d = write_sweep(self.root, "SITE1", "20261026T100000Z", [("acme-s1-stop1d-01", "ok", "OK", doc)])
+        facts = {p["port"]: p["linked"] for p in nr.port_facts([nr.finalize(nr.load_sweep_dir(d), None)])}
+        self.assertEqual(facts, {"eth0": True, "eth1": False})     # stray light without a FEC mode is not a link
+
+    def test_weak_port_is_an_outlier(self):
+        self.normal_site(weak=-8.5)
+        res, *_ = self.analyse(["-R", self.root])
+        out = res["baselines"]["rx_outliers"]
+        self.assertEqual([(o["host"], o["port"]) for o in out], [("acme-site1-stop1d-01", "eth0")])
+        self.assertLess(out[0]["delta_db"], -7.5)
+        self.assertLess(out[0]["robust_z"], -3.5)
+        self.assertEqual(res["baselines"]["rx_by_module_type"]["100GBASE-SR4 or 25GBASE-SR"]["ports"], 16)
+
+    def test_margin_must_also_hold(self):
+        self.normal_site(weak=-4.0)                       # far by robust score, but under the 5 dB margin
+        res, *_ = self.analyse(["-R", self.root])
+        self.assertEqual(res["baselines"]["rx_outliers"], [])
+        res, *_ = self.analyse(["-R", self.root, "-d", "3"])
+        self.assertEqual(len(res["baselines"]["rx_outliers"]), 1)
+
+    def test_tight_group_uses_margin_only(self):
+        hosts = [(f"acme-s1-ctrl2d-0{i}", [{"port": "eth0", "rx": -0.5}], {}) for i in range(1, 5)]
+        hosts.append(("acme-s1-ctrl2d-05", [{"port": "eth0", "rx": -6.0}], {}))
+        self.site("SITE1", hosts)
+        res, *_ = self.analyse(["-R", self.root])
+        self.assertEqual([(o["host"], o["robust_z"]) for o in res["baselines"]["rx_outliers"]], [("acme-s1-ctrl2d-05", None)])
+
+    def test_dark_unlinked_and_small_groups_excluded(self):
+        hosts = [(f"acme-s1-stop1d-0{i}", [{"port": "eth0", "rx": -0.5},
+                                            {"port": "eth1", "rx": -40, "link": False, "judged": False},
+                                            {"port": "eth2", "rx": -9.0, "link": False}], {}) for i in range(1, 4)]
+        hosts.append(("acme-s1-stop1d-04", [{"port": "eth0", "rx": -9.0, "comp": "OTHER-TYPE", "part": "P2"},
+                                             {"port": "eth1", "rx": -0.4}], {}))
+        self.site("SITE1", hosts)
+        res, *_ = self.analyse(["-R", self.root])
+        b = res["baselines"]
+        self.assertEqual(b["rx_outliers"], [])                              # dark/unlinked ignored; OTHER-TYPE has 1 port
+        self.assertNotIn("OTHER-TYPE", b["rx_by_module_type"])
+        self.assertEqual(b["rx_by_module_type"]["100GBASE-SR4 or 25GBASE-SR"]["ports"], 4)
+
+    def test_pre_2_12_link_from_judged_power(self):
+        doc = ports_doc("acme-s1-stop1d-01", [{"port": f"eth{j}", "rx": -0.5} for j in range(3)])
+        doc["results"] = [r for r in doc["results"] if r["check_id"] != "generic.link.state"]
+        d = write_sweep(self.root, "SITE1", "20261026T100000Z", [("acme-s1-stop1d-01", "ok", "OK", doc)])
+        facts = nr.port_facts([nr.finalize(nr.load_sweep_dir(d), None)])
+        self.assertTrue(all(p["linked"] for p in facts))
+
+    def test_lists_errors_flaps_discards_temperature_pcie(self):
+        pcie = [rec("WARN", "asic", "0000:04:00", "generic.pcie.link", "2.5 GT/s x4", threshold="16.0 GT/s x4 (slot)")]
+        hosts = [("acme-s1-stoc2-01", [{"port": "eth0", "rx": -0.5, "sym": 7200, "carrier": 500, "discards": 99,
+                                        "temp": 85, "temp_high": 90}], {"uptime": 7200, "extra": pcie}),
+                 ("acme-s1-stoc2-02", [{"port": "eth0", "rx": -0.5, "carrier": 50}], {"extra": pcie}),
+                 ("acme-s1-stoc2-03", [{"port": "eth0", "rx": -0.5}], {})]
+        self.site("SITE1", hosts)
+        res, *_ = self.analyse(["-R", self.root])
+        b = res["baselines"]
+        self.assertEqual([(e["host"], e["total"], e["per_hour"]) for e in b["errors_since_boot"]], [("acme-s1-stoc2-01", 7200, 3600.0)])
+        self.assertEqual([f["carrier_changes"] for f in b["flaps"]], [500])
+        res2, *_ = self.analyse(["-R", self.root, "-f", "10"])
+        self.assertEqual([f["carrier_changes"] for f in res2["baselines"]["flaps"]], [500, 50])
+        self.assertEqual(b["discards"][0]["total"], 99)
+        self.assertEqual([t["temp_c"] for t in b["modules_near_high_limit"]], [85.0])
+        self.assertEqual(len(b["pcie"]["below_capability"]), 2)
+        within = res["patterns"]["within_sites"]
+        self.assertIn(("stoc2", "generic.pcie.link", "0000:04:00", 2, 3),
+                      [(w["role"], w["issue"], w["target"], len(w["hosts"]), w["role_hosts"]) for w in within])
+
+    def test_cross_site_pattern_and_single_site_has_none(self):
+        self.normal_site("SITE1", weak=-8.5)
+        self.normal_site("SITE2", weak=-8.0)
+        res, *_ = self.analyse(["-R", self.root])
+        across = res["patterns"]["across_sites"]
+        self.assertEqual([(a["role"], a["issue"], a["sites"]) for a in across], [("stop1d", nr.OUTLIER_KIND, ["SITE1", "SITE2"])])
+        res, *_ = self.analyse(["-R", self.root, "-s", "SITE1"])
+        self.assertEqual(res["patterns"]["across_sites"], [])
+
+    def test_baseline_all_uses_every_site_of_the_tree(self):
+        # SITE1 alone reads low everywhere (no outlier by its own median); against SITE2's fleet it is
+        self.site("SITE1", [(f"acme-s1-stop1d-0{i}", [{"port": "eth0", "rx": -6.5}], {}) for i in range(1, 4)])
+        self.normal_site("SITE2")
+        res, *_ = self.analyse(["-R", self.root, "-s", "SITE1"])
+        self.assertEqual(res["baselines"]["rx_outliers"], [])
+        self.assertEqual(res["baselines"]["baseline"]["sites"], ["SITE1"])
+        res, *_ = self.analyse(["-R", self.root, "-s", "SITE1", "-b", "all"])
+        self.assertEqual(res["baselines"]["baseline"]["sites"], ["SITE1", "SITE2"])
+        self.assertEqual({o["site"] for o in res["baselines"]["rx_outliers"]}, {"SITE1"})   # reports on SITE1 only
+        self.assertEqual(len(res["baselines"]["rx_outliers"]), 3)
+
+    def test_baseline_all_needs_sweep_root(self):
+        p = subprocess.run([sys.executable, SCRIPT, "-b", "all", "-i", "X", "/nonexistent"], capture_output=True, text=True)
+        self.assertEqual(p.returncode, 3)
+
+    def test_whole_dbm_note(self):
+        self.site("SITE1", [(f"acme-s1-stop1d-0{i}", [{"port": "eth0", "rx": -2}], {}) for i in range(1, 4)])
+        res, sites, missing, args = self.analyse(["-R", self.root])
+        self.assertEqual(res["baselines"]["whole_dbm_sites"], ["SITE1"])
+        md = nr.render_md(res, sites, missing, args, nr.datetime.datetime.now().astimezone())
+        self.assertIn("recorded in whole dBm", md)
+
+
+class TestPhase4Rendering(Phase4Base):
+    def render(self, argv, fmt):
+        res, sites, missing, args = self.analyse(argv)
+        now = nr.datetime.datetime(2026, 10, 26, 12, 0, tzinfo=nr.datetime.timezone.utc)
+        return {"md": nr.render_md, "html": nr.render_html, "json": nr.render_json}[fmt](res, sites, missing, args, now)
+
+    def test_markdown_sections(self):
+        self.normal_site("SITE1", weak=-8.5)
+        md = self.render(["-R", self.root], "md")
+        for heading in ("## 4. Baselines and outliers", "### 4.2 Receive power outliers", "### 4.6 Receive discards",
+                        "## 5. Patterns"):
+            self.assertIn(heading, md)
+        self.assertIn("| acme-site1-stop1d-01 | eth0 | stop1d | 100GBASE-SR4 or 25GBASE-SR | -8.50 |", md)
+        self.assertNotIn("Across sites", md)                               # single site: within-site only
+
+    def test_converter_never_stalls(self):
+        self.normal_site("SITE1")
+        for argv in (["-t", "A\n#b"], ["-c", "x\n----"], ["-t", "#### x"], ["-c", "- item\n| a |"]):
+            p = subprocess.run([sys.executable, SCRIPT, "-R", self.root, "-O", "html", *argv],
+                               capture_output=True, text=True, timeout=30)
+            self.assertEqual(p.returncode, 0, (argv, p.stderr))
+            self.assertIn("</html>", p.stdout)
+        self.assertIn("<p>#### x</p>", nr.markdown_to_html("#### x"))
+        self.assertIn("<p>----</p>", nr.markdown_to_html("----"))
+
+    def test_threshold_options_validated(self):
+        self.normal_site("SITE1")
+        for argv in (["-d", "0"], ["-d", "-1"], ["-d", "nan"], ["-d", "inf"], ["-f", "0"], ["-f", "x"]):
+            p = subprocess.run([sys.executable, SCRIPT, "-R", self.root, *argv], capture_output=True, text=True)
+            self.assertEqual(p.returncode, 3, argv)
+
+    def test_classification_in_html_footer(self):
+        self.normal_site("SITE1")
+        page = self.render(["-R", self.root, "-c", "internal <x>"], "html")
+        self.assertIn("internal &lt;x&gt; · Generated by", page.split("<footer>")[1])
+
+    def test_json_has_baselines_and_patterns(self):
+        self.normal_site("SITE1", weak=-8.5)
+        doc = json.loads(self.render(["-R", self.root, "-d", "4", "-f", "50"], "json"))
+        self.assertEqual(len(doc["baselines"]["rx_outliers"]), 1)
+        self.assertEqual((doc["selection"]["rx_delta_db"], doc["selection"]["flap_min"], doc["selection"]["baseline"]), (4.0, 50, "scope"))
+        self.assertIn("within_sites", doc["patterns"])
+
+    def test_html_is_self_contained_and_escaped(self):
+        evil = [rec("CRIT", "port", "eth0", "mlx5.phy.errors", "<script>alert(1)</script>", "a <b>bold</b> & `tick`",
+                    "Hint with <img src=x onerror=alert(1)>")]
+        self.site("SITE1", [("acme-s1-stop1d-01", [{"port": "eth0", "rx": -0.5}], {"extra": evil})])
+        page = self.render(["-R", self.root], "html")
+        self.assertTrue(page.startswith("<!doctype html>"))
+        self.assertNotIn("<script", page)
+        self.assertNotIn("<img", page)
+        self.assertNotIn("http://", page)
+        self.assertNotIn("https://", page)
+        self.assertIn("&lt;script&gt;", page)
+        self.assertIn('<meta name="generator" content="nic-report.py', page)
+        self.assertIn("prefers-color-scheme:dark", page)
+        self.assertIn('<span class="sev sev-CRIT">CRIT</span>', page)
+        self.assertIn("<table>", page)
+        self.assertIn('<ul class="meta"><li><strong>Prepared:</strong>', page)     # header lines, not a bullet list
+        self.assertIn("Generated by nic-report v", page.split("<footer>")[1])
+
+    def test_html_cli(self):
+        self.normal_site("SITE1", weak=-8.5)
+        out = os.path.join(self.tmp.name, "r.html")
+        p = subprocess.run([sys.executable, SCRIPT, "-R", self.root, "-O", "html", "-o", out], capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        with open(out, encoding="utf-8") as fh:
+            self.assertIn("<title>NIC Health: SITE1</title>", fh.read())
 
 
 if __name__ == "__main__":

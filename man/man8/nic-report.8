@@ -17,8 +17,14 @@ nic-report \- single- and multi-site NIC health reports from nic-sweep sweeps
 .RI ...]...
 .RI [ \-r | \-\-role\-regex
 .IR RE ]
+.RI [ \-b | \-\-baseline
+.IR scope | all ]
+.RI [ \-d | \-\-rx\-delta\-db
+.IR DB ]
+.RI [ \-f | \-\-flap\-min
+.IR N ]
 .RI [ \-O | \-\-output\-format
-.IR md | json ]
+.IR md | json | html ]
 .RI [ \-o | \-\-output
 .IR FILE ]
 .RI [ \-t | \-\-title
@@ -32,7 +38,7 @@ nic-report \- single- and multi-site NIC health reports from nic-sweep sweeps
 reads the sweeps written by
 .BR nic-sweep.sh (8)
 (and, for older collections, nic-health CSV files) and writes a report for one
-site, several sites, or every site of a sweep tree. The report has three
+site, several sites, or every site of a sweep tree. The report has five
 sections:
 .TP
 .B Coverage and comparability
@@ -47,6 +53,27 @@ Hosts by verdict and the share of clean hosts, per site and per role.
 .B Findings
 Every WARN, CRIT and UNKNOWN result, worst first, grouped by site and host, with
 its evidence and hint.
+.TP
+.B Baselines and outliers
+Over ports with link: receive and transmit power per module type (minimum, p5
+by nearest rank, median, maximum), receive-power outliers, ports near the
+module's own low limit,
+link errors since boot (with the rate per hour of uptime when known), ports with
+many carrier changes, receive discards, the hottest modules and those near their
+own high limit, PCIe links trained below what card and slot support, and
+slot-limited cards. Ports whose module type has too few ports for a baseline are
+counted as not evaluated.
+.TP
+.B Patterns
+Within a site: the same issue on the same port or ASIC in two or more hosts of a
+role (for example a PCIe link at Gen1 on 3 of 4 storage nodes); hosts count only
+when collected. Across sites (several sites only): the same issue on the same
+role at two or more sites, which hints at a shared cause such as a cabling
+standard or a BIOS profile. Related checks form one issue (symbol, CRC and BER
+errors are "link errors"; flaps and link-downs "link instability"). Without
+.BR \-\-role\-regex ,
+a site's hosts form one group and cross-site patterns are not computed; the
+report says so.
 .PP
 With one site the coverage table has a column per role and the verdicts list
 each host; with several sites the columns are sites. The tool is read-only and
@@ -109,8 +136,36 @@ Derive each host's role from its name: the group named
 (or the first group; a regex without a group is a usage error). Without it,
 roles are empty.
 .TP
-.BR \-O ", " \-\-output\-format " " \fImd\fR|\fIjson\fR
-Markdown (default) or JSON with every computed value.
+.BR \-b ", " \-\-baseline " " \fIscope\fR|\fIall\fR
+Where medians for outliers come from:
+.B scope
+(default) uses the sites in the report;
+.B all
+uses every site of
+.B \-\-sweep\-root
+(latest sweep each, at
+.BR \-\-at ),
+while the report still covers only the selection. Useful for one small site. A
+tree site that cannot be read is left out of the baseline, and the report names
+it and why.
+.TP
+.BR \-d ", " \-\-rx\-delta\-db " " \fIDB\fR
+A port's receive power is an outlier when it is at least
+.I DB
+(default 5, a positive number) below the median of its module type, and its
+robust score (median/MAD) is at least 3.5 away (in a group where all ports read
+the same, the margin alone decides). A module type needs three ports with link
+for a baseline; multi-lane modules form their own type, judged by their lowest
+lane.
+.TP
+.BR \-f ", " \-\-flap\-min " " \fIN\fR
+List ports with at least
+.I N
+(default 100) carrier changes since driver load.
+.TP
+.BR \-O ", " \-\-output\-format " " \fImd\fR|\fIjson\fR|\fIhtml\fR
+Markdown (default), JSON with every computed value, or HTML: one self-contained
+page (inline style, no scripts or remote resources; light and dark themes).
 .TP
 .BR \-o ", " \-\-output " " \fIFILE\fR
 Write to
@@ -140,6 +195,15 @@ a sweep whose
 names another site than its directory is an error. Symbolic links in the tree
 are followed. Long options cannot be abbreviated.
 .SH NOTES
+Baselines use ports with link only: without light a module reads about
+\-40 dBm and would distort them. For nic-health older than 2.12.0 (no link
+state) link is inferred from a deep FEC mode plus light on the receiver, and the
+report says for how many ports. Readings recorded in whole dBm (some vendor
+tools round) are noted, since differences under 2 dB mean little there. The
+module limits are the module's own
+.RI [ low .. high ]
+range as nic-health reports it. Errors since boot are uncorrectable symbol
+errors.
 A port counts as having link when nic-health reported its link state as
 .BR up .
 nic-health older than 2.12.0 records no link state: ports are then counted from
@@ -182,6 +246,12 @@ Mix a sweep tree with an older hand-made collection:
 .PP
 .RS
 .B nic-report.py \-R sweeps \-i SITE9 old/SITE9/
+.RE
+.PP
+One small site, outliers judged against the whole fleet, as an HTML page:
+.PP
+.RS
+.B nic-report.py \-R sweeps \-s SITE3 \-b all \-O html \-o site3.html
 .RE
 .SH AUTHORS
 Ciro Iriarte <ciro.iriarte+software@gmail.com>
