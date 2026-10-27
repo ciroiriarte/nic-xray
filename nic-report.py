@@ -1637,8 +1637,8 @@ _WHO = "site host role"
 RULE_FACTS = {
     "port": _fact_types(
         text=_WHO + " port optics_source optics_status module_type module_vendor fec deep_recommendation bond "
-                    "lacp_partner peer_switch peer_port peer_descr peer peer_from_sweep slot_label asic severity",
-        num="rx_dbm tx_dbm lanes rx_delta_host_db rx_delta_fleet_db rx_delta_db phy_err_total phy_err_window "
+                    "lacp_partner peer_switch peer_port peer_descr peer peer_from_sweep slot_label asic severity rx_delta_basis",
+        num="rx_dbm tx_dbm lanes rx_delta_host_db rx_delta_fleet_db rx_delta_db rx_below_db phy_err_total phy_err_window "
             "phy_err_rate_s phy_err_rate_h_uptime carrier_changes flaps_window link_down_recent discards_total "
             "discards_window deep_opcode ber_effective bond_link_failures lacp_aggregator speed_mbps mtu numa_node "
             "active cross_site_sites",
@@ -1695,6 +1695,11 @@ MODIFIER = "modifier"
 MAX_RAISE = 3
 PLACEHOLDER_RE = re.compile(r"\{([a-z][a-z0-9_]*)(?:\|([^{}]*))?\}")
 MISSING_TEXT = "unknown"                 # a placeholder whose fact is absent and that names no fallback
+# The baseline that gave rx_delta_db, as a sentence names it
+RX_DELTA_BASIS = {"rx_delta_host_db": "the host's other ports of this module type",
+                  "rx_delta_fleet_db": "this module type in the baseline"}
+# Number facts that are identifiers: printed without thousands separators
+ID_FACTS = frozenset("vlans role_vlans lacp_aggregator numa_node mtu bond_mtus deep_opcode".split())
 FACT_TEXT_MAX = 200                      # characters of any filled placeholder in a sentence
 FACT_LIST_SHOWN = PATTERN_ITEMS_SHOWN    # list items shown per placeholder before "… and N more"
 # Prioritisation (§6.3.2): the score starts at the rule's base priority (lower is more urgent)
@@ -1711,8 +1716,8 @@ TOP_SUMMARY = 5                          # recommendations repeated in the execu
 # whose facts its 'when' reads (asic facts never collide with port ones, so one table serves both scopes)
 NIC_DISCARDS = "mlx5.nic.discards"
 FACT_SOURCES = {
-    "mlx5.deep.module": ("rx_dbm", "tx_dbm", "rx_lanes", "rx_delta_host_db", "rx_delta_fleet_db", "rx_delta_db",
-                         "rx_low_host", "rx_low_fleet", "rx_low"),
+    "mlx5.deep.module": ("rx_dbm", "tx_dbm", "rx_lanes", "rx_delta_host_db", "rx_delta_fleet_db", "rx_delta_db", "rx_below_db",
+                         "rx_delta_basis", "rx_low_host", "rx_low_fleet", "rx_low"),
     "mlx5.phy.errors": ("phy_err_total", "phy_err_window", "phy_err_growing", "phy_err_rate_s", "phy_err_rate_h_uptime"),
     LINK_FLAPS: ("carrier_changes", "flaps_window", "flaps_high"),
     LINK_LOOKBACK: ("link_down_recent",),
@@ -1938,12 +1943,13 @@ def eval_condition(node, facts):
     return same(v, lit) if op == "eq" else not same(v, lit)
 
 
-def fact_text(v):
-    """A fact in a sentence: yes/no, integers with separators, dB/dBm-style decimals, short lists."""
+def fact_text(v, ident=False):
+    """A fact in a sentence: yes/no, integers with separators (none on identifiers), dB/dBm-style decimals,
+    short lists."""
     if isinstance(v, bool):
         return "yes" if v else "no"
     if isinstance(v, int):
-        return f"{v:,}"
+        return str(v) if ident else f"{v:,}"
     if isinstance(v, float):
         if v and abs(v) < 0.01:
             return f"{v:.2g}"
@@ -1951,7 +1957,7 @@ def fact_text(v):
     if isinstance(v, list):
         more = len(v) - FACT_LIST_SHOWN
         suffix = f" … and {more} more" if more > 0 else ""
-        body = ", ".join(fact_text(x) for x in v[:FACT_LIST_SHOWN])
+        body = ", ".join(fact_text(x, ident) for x in v[:FACT_LIST_SHOWN])
         if len(body) + len(suffix) > FACT_TEXT_MAX:
             body = body[:FACT_TEXT_MAX - len(suffix) - 1] + "…"
         return body + suffix
@@ -1965,7 +1971,7 @@ def fill_template(text, facts):
         v = facts.get(m.group(1))
         if v is None or v == []:
             return m.group(2) if m.group(2) is not None else MISSING_TEXT
-        return fact_text(v)
+        return fact_text(v, m.group(1) in ID_FACTS)
     return _plain(PLACEHOLDER_RE.sub(sub, text))
 
 
@@ -2072,9 +2078,11 @@ def rule_targets(sites, report_ports, baseline_ports, a4, pcie, pt, multi, args)
             if st and all(math.isfinite(st[k]) for k in ("median", "mad")) and math.isfinite(rx - st["median"]):
                 f["rx_delta_fleet_db"] = round(rx - st["median"], 2)
                 f["rx_low_fleet"] = _robust_outlier(rx - st["median"], st, margin)
-            deltas = [f[k] for k in ("rx_delta_host_db", "rx_delta_fleet_db") if k in f]
+            deltas = [(f[k], k) for k in ("rx_delta_host_db", "rx_delta_fleet_db") if k in f]
             if deltas:
-                f["rx_delta_db"] = min(deltas)
+                f["rx_delta_db"], basis = min(deltas)
+                f["rx_below_db"] = round(-f["rx_delta_db"], 2)
+                f["rx_delta_basis"] = RX_DELTA_BASIS[basis]
                 lows = [f[k] for k in ("rx_low_host", "rx_low_fleet") if k in f]
                 f["rx_low"] = any(lows)
         elif x.get("module_type"):
@@ -2133,11 +2141,12 @@ def rule_targets(sites, report_ports, baseline_ports, a4, pcie, pt, multi, args)
         ports_out.append((key, f))
         by_host_ports[(p["site"], p["host"])].append(f)
 
-    # VLAN drift: per (site, role, port name), a port whose LLDP VLAN set differs from a strict majority of its peers
+    # VLAN drift: per (site, role, port name), a port whose LLDP VLAN set differs from a strict majority of its peers.
+    # Hosts without a role are not compared: one port name across roles carries different VLANs by design
     vlan_groups = collections.defaultdict(list)
     for _, f in ports_out:
-        if f.get("vlans"):
-            vlan_groups[(f["site"], f["role"] or NO_ROLE, f["port"])].append(f)
+        if f.get("vlans") and f["role"]:
+            vlan_groups[(f["site"], f["role"], f["port"])].append(f)
     for group in vlan_groups.values():
         if len(group) < VLAN_MIN_HOSTS:
             continue
@@ -2319,11 +2328,12 @@ def diagnose(targets, catalog, multi):
         why = _impact(f) if scope == "port" else None
         if why:
             score -= IMPACT_RAISE
-            notes.append(f"raised half a level: {why}")
         impact = 1 if why else 0
         if scope == "port" and f.get("idle"):
             score += IDLE_LOWER
             notes.append("lowered: up but unused (not in use, no traffic in the window)")
+        if why:                                     # half a level never changes the level: it ranks within it
+            notes.insert(len(mods), f"ranked higher within P{_level(score)}: {why}")
         recs.append({"scope": scope, "keys": [key], "rules": main + mods, "facts": f, "score": score, "base": base,
                      "adjustments": notes, "activity": f.get("active", ACT_NONE), "impact": impact})
     recs = _collapse(recs)
@@ -2399,9 +2409,14 @@ def _rank_key(r):
             [x["id"] for x in r["rules"]])
 
 
+def _level(score):
+    """The priority a ranking score falls in."""
+    return min(max(math.ceil(score), PRIORITIES[0]), PRIORITIES[-1])
+
+
 def _render_rec(r, multi):
     f = r["facts"]
-    level = min(max(math.ceil(r["score"]), PRIORITIES[0]), PRIORITIES[-1])
+    level = _level(r["score"])
     main = [x for x in r["rules"] if x["priority"] is not None]
 
     def texts(key, rules):              # each rule's sentence once, in rule order
@@ -2954,6 +2969,11 @@ def _f(v, digits=2):
     return None if v is None else f"{v:.{digits}f}"
 
 
+def _count(v):
+    """A count for a table cell: thousands separators, none when absent."""
+    return f"{v:,}" if isinstance(v, int) else v
+
+
 def _rate(v):
     """A rate for display: thousands separators from 100 up, else 3 significant digits (JSON keeps the float)."""
     if v is None:
@@ -3011,7 +3031,7 @@ def render_md_baselines(result, multi):
                      for t, st in b["tx_by_module_type"].items()]) if b["tx_by_module_type"] else "No Tx baseline.", ""]
     md += ["### 5.4 Link errors since boot", "", "Uncorrectable symbol errors (rx_symbol_err_phy) since boot.", ""]
     md += [md_table(["Host", "Port", "Role", "Symbol errors", "In window", "Per hour of uptime"],
-                    [[_where(e, multi), e["port"], e["role"], f"{e['total']:,}", e["window"], _rate(e["per_hour"])]
+                    [[_where(e, multi), e["port"], e["role"], f"{e['total']:,}", _count(e["window"]), _rate(e["per_hour"])]
                      for e in b["errors_since_boot"]]) + (f"\n\n{b['errors_ports']} ports with errors; the {TOP_N} highest shown."
                                                          if b["errors_ports"] > TOP_N else "")
            if b["errors_since_boot"] else "No port with symbol errors since boot.", ""]
@@ -3021,7 +3041,7 @@ def render_md_baselines(result, multi):
            if b["flaps"] else "No port above the carrier-change threshold.", ""]
     md += ["### 5.6 Receive discards since boot", ""]
     md += [md_table(["Host", "Port", "Role", "Discards", "In window"],
-                    [[_where(d, multi), d["port"], d["role"], f"{d['total']:,}", d["window"]] for d in b["discards"]])
+                    [[_where(d, multi), d["port"], d["role"], f"{d['total']:,}", _count(d["window"])] for d in b["discards"]])
            if b["discards"] else "No port with receive discards since boot.", ""]
     md += ["### 5.7 Module temperature and PCIe", ""]
     hot = b["hottest_modules"]
@@ -3037,8 +3057,8 @@ def render_md_baselines(result, multi):
     else:
         md += ["Every PCIe link trained at what the card and its slot support.", ""]
     if pc["slot_limited"]:
-        md += ["Slot-limited cards (slot narrower or slower than the card, by design): "
-               + ", ".join(f"{k} {v}" for k, v in pc["slot_limited"].items()) + ".", ""]
+        md += ["NIC ASICs in a slot narrower or slower than the card (OK, by design): "
+               + ", ".join(f"{v} at {k}" for k, v in pc["slot_limited"].items()) + ".", ""]
     return md
 
 
@@ -3053,7 +3073,7 @@ def render_md_patterns(result, multi):
     md = ["## 6. Patterns", ""]
     if not pt["roles_known"]:
         md += ["Hosts have no role (use -r/--role-regex): within-site patterns group all hosts of a site, "
-               "and cross-site patterns need roles.", ""]
+               "and cross-site patterns and VLAN drift need roles.", ""]
     if pt["within_sites"]:
         md += ["**Within a site:** the same issue on the same port or ASIC in two or more hosts of a role.", "",
                md_table(["Site", "Role", "Issue", "Port / ASIC", "Hosts"],
@@ -3128,7 +3148,7 @@ def render_md_actions(result, multi):
     md = ["## 7. Recommended actions (priority order)", ""]
     if not dg["catalogs"]:
         return md + [f"No rule catalog was found ({RULES_FILE}); give one with -u/--rules or {RULES_ENV}.", ""]
-    cats = "; ".join(f"{md_inline(c['file'])} (catalog {md_inline(c['catalog_version'])}, {c['rules']} rules"
+    cats = "; ".join(f"{md_inline(os.path.basename(c['file']))} (catalog {md_inline(c['catalog_version'])}, {c['rules']} rules"
                      + (f"; overrides {', '.join(c['overrides'])}" if c["overrides"] else "") + ")" for c in dg["catalogs"])
     md += [f"Rule catalogs: {cats}. Ranked by priority (P1 act now … P4 informational) after modifiers and service "
            "impact, then activity in the window, number of hosts and place. Matches on one target are merged into one "

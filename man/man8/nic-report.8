@@ -298,7 +298,8 @@ or
 Derive each host's role from its name: the group named
 .B role
 (or the first group; a regex without a group is a usage error). Without it,
-roles are empty.
+roles are empty: within-site patterns then group all hosts of a site, and
+cross-site patterns and VLAN drift are not judged.
 .TP
 .BR \-b ", " \-\-baseline " " \fIscope\fR|\fIall\fR
 Where medians for outliers come from:
@@ -533,7 +534,8 @@ relative to it, then in
 .B NIC_REPORT_RULES
 replaces that lookup. Without a catalog the report says so and only
 .B \-\-rules
-files are used. Section 7 lists every catalog file loaded, its
+files are used. Section 7 names every catalog file loaded (the JSON report keeps
+its path), its
 .B catalog_version
 and the ids it overrides. A file is a JSON object:
 .PP
@@ -607,7 +609,9 @@ number of targets that have it.
 .PP
 Recommendations are ranked by the rule's base priority, raised by modifiers and
 by half a level for a bond member with bond link failures, link drops or
-traffic in the window, and lowered one level for a port that is up but unused
+traffic in the window (which ranks it higher within its level, shown as
+.IR "ranked higher within P" n),
+and lowered one level for a port that is up but unused
 (not in use and no traffic, from nic-health service-impact facts). Traffic means
 more than 100 bytes per second in either direction over the sampling window:
 below that a port only sees control frames such as LLDP; then by

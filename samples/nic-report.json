@@ -3,7 +3,7 @@
   "generator": {
     "tool": "nic-report.py",
     "version": "2.14.0",
-    "generated_at": "2026-10-27T14:31:27+00:00"
+    "generated_at": "2026-10-27T18:13:28+00:00"
   },
   "title": "NIC Health: cross-site comparison (SITE1 · SITE2)",
   "classification": "Fictional sample data",
@@ -725,7 +725,7 @@
     "catalogs": [
       {
         "file": "nic-report-rules.json",
-        "catalog_version": "2026.10.1",
+        "catalog_version": "2026.10.2",
         "rules": 17,
         "overrides": []
       }
@@ -785,7 +785,7 @@
         "score": 0.5,
         "base_priority": 1,
         "adjustments": [
-          "raised half a level: bond0 member with 7 bond link failures"
+          "ranked higher within P1: bond0 member with 7 bond link failures"
         ],
         "activity": "window",
         "service_impact": true,
@@ -810,7 +810,7 @@
             "file": "nic-report-rules.json"
           }
         ],
-        "diagnosis": "Attenuated optical path: Rx -8.6 dBm is -7.86 dB from its peers' median, and the link is failing now (3 link-down messages in the look-back window, 1 carrier changes since driver load, 943 symbol errors in the window).",
+        "diagnosis": "Attenuated optical path: Rx -8.6 dBm is 7.86 dB below the median of this module type in the baseline, and the link is failing now (3 link-down messages in the look-back window, 1 carrier changes since driver load, 943 symbol errors in the window).",
         "action": "Clean or inspect both fibre ends, then replace the optic and the cable leg to acme-s1-leaf-01.example.net et-0/0/2:0; check the switch side's Tx and DOM for that lane.",
         "modifiers": [],
         "targets": [
@@ -888,6 +888,8 @@
           "rx_delta_fleet_db": -7.86,
           "rx_low_fleet": true,
           "rx_delta_db": -7.86,
+          "rx_below_db": 7.86,
+          "rx_delta_basis": "this module type in the baseline",
           "rx_low": true,
           "phy_err_total": 414877072,
           "phy_err_window": 943,
@@ -1108,7 +1110,9 @@
           "role": 20,
           "role_vlan_drift": 0,
           "role_vlans": 0,
+          "rx_below_db": 20,
           "rx_dbm": 20,
+          "rx_delta_basis": 20,
           "rx_delta_db": 20,
           "rx_delta_fleet_db": 20,
           "rx_delta_host_db": 20,

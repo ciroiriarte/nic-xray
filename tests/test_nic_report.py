@@ -894,6 +894,13 @@ class TestBaselinesAndOutliers(Phase4Base):
         facts = nr.port_facts([nr.finalize(nr.load_sweep_dir(d), None)])
         self.assertTrue(all(p["linked"] for p in facts))
 
+    def test_slot_limited_line_names_what_it_counts(self):
+        limited = [rec("OK", "asic", "0000:04:00", "generic.pcie.link", "8.0 GT/s x8",
+                       evidence="8.0 GT/s x8; slot-limited width: card max 16.0 GT/s x16")]
+        self.site("SITE1", [("acme-s1-stoc2-01", [{"port": "eth0", "rx": -0.5}], {"extra": limited})])
+        md = nr.render_md_baselines(self.analyse(["-R", self.root])[0], False)
+        self.assertIn("NIC ASICs in a slot narrower or slower than the card (OK, by design): 1 at SITE1.", md)
+
     def test_lists_errors_flaps_discards_temperature_pcie(self):
         pcie = [rec("WARN", "asic", "0000:04:00", "generic.pcie.link", "2.5 GT/s x4", threshold="16.0 GT/s x4 (slot)")]
         hosts = [("acme-s1-stoc2-01", [{"port": "eth0", "rx": -0.5, "sym": 7200, "carrier": 500, "discards": 99,
@@ -910,6 +917,7 @@ class TestBaselinesAndOutliers(Phase4Base):
         self.assertEqual(b["discards"][0]["total"], 99)
         self.assertEqual([t["temp_c"] for t in b["modules_near_high_limit"]], [85.0])
         self.assertEqual(len(b["pcie"]["below_capability"]), 2)
+        self.assertEqual((nr._count(947461), nr._count(None)), ("947,461", None))
         within = res["patterns"]["within_sites"]
         self.assertIn(("stoc2", "generic.pcie.link", "0000:04:00", 2, 3),
                       [(w["role"], w["issue"], w["target"], len(w["hosts"]), w["role_hosts"]) for w in within])
@@ -2095,8 +2103,8 @@ def catalog(*rules, version="site.1"):
 class Phase7Base(Phase5Base):
     """Helpers for the A8 tests: sweeps with nic-xray files, the packaged catalog plus --rules files."""
 
-    def analyse(self, argv, rules=()):
-        args = nr.parse_args(argv + ["-r", ROLE_RE] + [x for r in rules for x in ("-u", r)])
+    def analyse(self, argv, rules=(), roles=True):
+        args = nr.parse_args(argv + (["-r", ROLE_RE] if roles else []) + [x for r in rules for x in ("-u", r)])
         args.suppress_rules = nr.load_suppress(args.suppress) if args.suppress else None
         args.catalog = nr.load_catalog(DEFAULT_RULES, args.rules)
         sites, missing = nr.load_selection(args)
@@ -2140,13 +2148,13 @@ class Phase7Base(Phase5Base):
         shutil.rmtree(self.root, ignore_errors=True)
         self.sweep("SITE1", [(host, self.ports4(**eth0), extra, xray)])
 
-    def diagnosis(self, argv=None, rules=()):
-        return self.analyse(argv or ["-R", self.root], rules)[0]["diagnosis"]
+    def diagnosis(self, argv=None, rules=(), roles=True):
+        return self.analyse(argv or ["-R", self.root], rules, roles)[0]["diagnosis"]
 
-    def fired(self, argv=None, rules=()):
+    def fired(self, argv=None, rules=(), roles=True):
         """{rule id: [target]} of every match."""
         out = collections.defaultdict(list)
-        for m in self.diagnosis(argv, rules)["matches"]:
+        for m in self.diagnosis(argv, rules, roles)["matches"]:
             out[m["rule"]].append(tuple(m["target"]))
         return out
 
@@ -2240,7 +2248,7 @@ class TestRuleCatalog(Phase7Base):
                          ["OPT-ATTEN-ACTIVE", "OPT-ATTEN-LATENT", "OPT-LANE", "LINK-FLAP-HIST", "PCIE-SHARED", "PCIE-SEAT",
                           "PCIE-SEAT-FEW", "PCIE-DISCARDS", "FEC-MISMATCH", "SIG-INTEGRITY", "PATTERN-CROSS-SITE", "LAG-SPLIT",
                           "BOND-SPEED-MISMATCH", "BOND-MTU-MISMATCH", "BOND-SINGLE-SWITCH", "VLAN-DRIFT", "OPT-WEAK-ANY-VENDOR"])
-        self.assertEqual(cat["files"], [{"file": DEFAULT_RULES, "catalog_version": "2026.10.1", "rules": 17, "overrides": []}])
+        self.assertEqual(cat["files"], [{"file": DEFAULT_RULES, "catalog_version": "2026.10.2", "rules": 17, "overrides": []}])
 
     def test_file_level_errors(self):
         self.bad({**catalog(), "schema_version": 2}, "unsupported schema_version 2")
@@ -2319,14 +2327,16 @@ class TestRuleCatalog(Phase7Base):
         md, args = self.report(["-R", self.root, "-u", first, "-u", second])
         dg = nr.analyse(*nr.load_selection(args), args)["diagnosis"]
         self.assertEqual([(c["file"], c["catalog_version"], c["rules"], c["overrides"]) for c in dg["catalogs"]],
-                         [(DEFAULT_RULES, "2026.10.1", 17, []), (first, "site.1", 2, ["OPT-ATTEN-ACTIVE"]),
+                         [(DEFAULT_RULES, "2026.10.2", 17, []), (first, "site.1", 2, ["OPT-ATTEN-ACTIVE"]),
                           (second, "site.2", 1, ["OPT-ATTEN-ACTIVE"])])
         self.assertEqual(dg["rules"], 18)
         port = next(r for r in dg["recommendations"] if r["scope"] == "port")
         self.assertEqual((port["diagnosis"], port["base_priority"], port["rules"][0]["file"]), ("Second eth0.", 2, second))
         self.assertEqual([r["rules"][0]["id"] for r in dg["recommendations"]], ["OPT-ATTEN-ACTIVE", "SITE-NEW"])
-        self.assertIn(f"Rule catalogs: {DEFAULT_RULES} (catalog 2026.10.1, 17 rules); {first} (catalog site.1, 2 rules; "
-                      f"overrides OPT-ATTEN-ACTIVE); {second} (catalog site.2, 1 rules; overrides OPT-ATTEN-ACTIVE).", md)
+        # The report names each catalog file, not where it lives; the JSON keeps the path
+        self.assertIn("Rule catalogs: nic-report-rules.json (catalog 2026.10.2, 17 rules); first.json (catalog site.1, 2 "
+                      "rules; overrides OPT-ATTEN-ACTIVE); second.json (catalog site.2, 1 rules; overrides OPT-ATTEN-ACTIVE).", md)
+        self.assertNotIn(os.path.dirname(DEFAULT_RULES), md)
 
     def test_environment_replaces_the_default_lookup(self):
         own = self.write_json("own.json", catalog(rule("ONLY-RULE"), version="own.7"))
@@ -2502,19 +2512,29 @@ class TestStarterRules(Phase7Base):
                           "peers": ["leaf-a1.example.net et-0/0/1:0", "leaf-a1.example.net et-0/0/1:0"]})
         r = next(r for r in self.diagnosis()["recommendations"] if r["scope"] == "bond")
         self.assertEqual([x["id"] for x in r["rules"]], ["BOND-MTU-MISMATCH", "BOND-SINGLE-SWITCH"])
-        self.assertTrue(r["diagnosis"].startswith("Members of bond0 have different MTUs (1,500, 9,000): large frames"))
+        self.assertTrue(r["diagnosis"].startswith("Members of bond0 have different MTUs (1500, 9000): large frames"))
 
-    def vlan_site(self, sets):
+    def vlan_site(self, sets, roles=True):
         shutil.rmtree(self.root, ignore_errors=True)
         self.sweep("SITE1", [(f"acme-s1-stop1d-0{i}", self.ports4(), [], [xray_if("eth0", vlan=v)])
                              for i, v in enumerate(sets, 1)])
-        return self.fired().get("VLAN-DRIFT", [])
+        return self.fired(roles=roles).get("VLAN-DRIFT", [])
 
     def test_vlan_drift(self):
         self.assertEqual(self.vlan_site(["100;200[P]", "100;200", "100;300"]), [("SITE1", "acme-s1-stop1d-03", "eth0")])
         self.assertEqual(self.vlan_site(["100;200", "100;300"]), [])                             # too few hosts to judge
         self.assertEqual(self.vlan_site(["100", "200", "300"]), [])                               # no majority
         self.assertEqual(self.vlan_site(["100;200"] * 3), [])
+        # Without roles one port name spans roles, whose VLANs differ by design: not judged
+        self.assertEqual(self.vlan_site(["100;200[P]", "100;200", "100;300"], roles=False), [])
+
+    def test_vlan_ids_without_separators(self):
+        self.vlan_site(["3205;3206", "3205;3206", "3205;3207"])
+        r = next(r for r in self.diagnosis()["recommendations"] if r["rules"][0]["id"] == "VLAN-DRIFT")
+        self.assertEqual(r["diagnosis"], "The switch port advertises VLANs 3205, 3207 where most stop1d hosts get 3205, "
+                                         "3206 on this port (only as reliable as the switch's LLDP VLAN TLVs).")
+        self.assertEqual((nr.fact_text(9100), nr.fact_text(9100, True), nr.fact_text([3205, 3206], True)),
+                         ("9,100", "9100", "3205, 3206"))
 
     def xray_optics(self, deep):
         shutil.rmtree(self.root, ignore_errors=True)
@@ -2549,7 +2569,7 @@ class TestPrioritisation(Phase7Base):
         self.assertEqual([r["id"] for r in recs], [f"R{n}" for n in range(1, 9)])
         top = recs[0]
         self.assertEqual((top["score"], top["service_impact"], top["activity"]), (0.5, True, "window"))
-        self.assertEqual(top["adjustments"], ["raised half a level: bond0 member with 7 bond link failures"])
+        self.assertEqual(top["adjustments"], ["ranked higher within P1: bond0 member with 7 bond link failures"])
         self.assertEqual((recs[1]["score"], recs[1]["activity"], recs[2]["activity"]), (2.0, "window", "history"))
         self.assertEqual(recs[1]["adjustments"], ["lowered: up but unused (not in use, no traffic in the window)"])
         self.assertEqual((recs[3]["hosts"], recs[3]["rules"][1]["id"]), (["acme-s4-gw3-01", "acme-s4-gw3-02"], "PCIE-DISCARDS"))
@@ -2595,7 +2615,10 @@ class TestMergeAndPatterns(Phase7Base):
         r = dg["recommendations"][0]
         self.assertEqual([x["id"] for x in r["rules"]], ["OPT-ATTEN-ACTIVE", "FEC-MISMATCH", "SIG-INTEGRITY"])
         self.assertEqual((r["priority"], r["base_priority"]), (1, 1))
-        self.assertTrue(r["diagnosis"].startswith("Attenuated optical path: Rx -8.5 dBm is "))
+        # The worse of the two baselines, named: the host's other ports here
+        self.assertTrue(r["diagnosis"].startswith("Attenuated optical path: Rx -8.5 dBm is 8 dB below the median of "
+                                                  "the host's other ports of this module type, "), r["diagnosis"])
+        self.assertEqual((r["facts"]["rx_below_db"], r["facts"]["rx_delta_db"]), (8.0, -8.0))
         self.assertIn(" Configuration: the module needs FEC ", r["diagnosis"])
         self.assertTrue(r["diagnosis"].endswith("(opcode 15: Bad signal integrity: check the cable and connectors)."))
         self.assertEqual(len(dg["matches"]), 3)
@@ -2908,7 +2931,7 @@ class TestNarrative(Phase7Base):
                       "assumed: the host's only ASIC below capability). Fixing the PCIe link speed should stop the discards; "
                       "re-check them afterwards.\n", actions)
         self.assertIn("  - Rules: PCIE-SHARED (P3), PCIE-DISCARDS (modifier) · base P3; raised 1 level(s) by PCIE-DISCARDS\n", actions)
-        self.assertIn("  - Rules: OPT-ATTEN-ACTIVE (P1) · base P1; raised half a level: bond0 member with 7 bond link failures\n", actions)
+        self.assertIn("  - Rules: OPT-ATTEN-ACTIVE (P1) · base P1; ranked higher within P1: bond0 member with 7 bond link failures\n", actions)
 
     def test_json_and_html(self):
         self.five_sites()
