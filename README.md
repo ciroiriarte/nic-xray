@@ -961,6 +961,7 @@ nic-sweep.sh -f inventory.csv                              # every site, deep mo
 nic-sweep.sh -f inventory.csv -s SITE1 -J admin@jump -p 16 # one site via a jump host, 16 at a time
 nic-sweep.sh -f inventory.csv --ship ./nic-health.sh       # hosts without the package
 nic-sweep.sh -f inventory.csv -l basic -I 5 --no-xray      # quick passive sweep
+nic-sweep.sh -f inventory.csv -L 1440                      # with 24 h of link-flap history
 ```
 
 | Option | Description |
@@ -973,6 +974,7 @@ nic-sweep.sh -f inventory.csv -l basic -I 5 --no-xray      # quick passive sweep
 | `-T`, `--timeout SEC` | Per-host limit (default: interval + 300 s deep, + 120 s basic) |
 | `-o`, `--output-dir DIR` | Sweep tree root (default `./sweeps`) |
 | `-l`, `--level LEVEL` / `-I`, `--interval SEC` | Passed to nic-health (default `deep`, `30`) |
+| `-L`, `--lookback MIN` | nic-health link-down look-back, 0–1440 minutes (default: not passed, nic-health's 60); `1440` covers 24 h |
 | `--no-xray` | Do not collect `nic-xray --all --output json` |
 | `--ship PATH` | Send a local `nic-health.sh` over SSH, run it from a temporary file, delete it. Needs sudo for `bash /tmp/nic-health.*`, effectively full root: prefer the package |
 | `--accept-new-hostkeys` | Trust unknown host keys on first contact |

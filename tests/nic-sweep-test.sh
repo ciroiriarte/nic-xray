@@ -345,6 +345,13 @@ assert_eq "--accept-new-hostkeys" "1" "$(grep -m1 -c 'StrictHostKeyChecking=acce
 assert_eq "-u default user" "1" "$(grep -m1 -c -- '-l svc -- h-ok' "$STUB_LOG")"
 assert_eq "-l/-I reach nic-health" "1" "$(grep -m1 -c -- '-O json -l basic -I 5' "$STUB_LOG")"
 assert_eq "basic default timeout = interval + 120" "125" "$(jq -r .options.timeout_s "$(latest S1)/sweep.json")"
+assert_eq "no -L: nic-health not given -L" "0" "$(grep -c -- '-I 5 -L' "$STUB_LOG")"
+assert_eq "no -L: lookback_min null" "null" "$(jq -r .options.lookback_min "$(latest S1)/sweep.json")"
+sweep "$FIX/inv-ok.csv" -L 1440
+assert_eq "-L reaches nic-health" "1" "$(grep -m1 -c -- '-O json -l deep -I 30 -L 1440' "$STUB_LOG")"
+assert_eq "-L recorded as lookback_min" "1440" "$(jq -r .options.lookback_min "$(latest S1)/sweep.json")"
+sweep "$FIX/inv-ok.csv" --lookback 0
+assert_eq "--lookback 0 passed (off)" "1" "$(grep -m1 -c -- '-I 30 -L 0' "$STUB_LOG")"
 sweep "$FIX/inv-ok.csv" --ship "$REPO/nic-health.sh"
 assert_eq "--ship: script sent over stdin unchanged" "$(sha256sum < "$REPO/nic-health.sh" | cut -d' ' -f1)" \
     "$(sha256sum < "$FIX/shipped.h-ok" | cut -d' ' -f1)"
@@ -353,7 +360,7 @@ assert_eq "--ship recorded" "true" "$(jq -r .options.ship "$(latest S1)/sweep.js
 
 # --- Usage errors (exit 3, usage on stderr) ---
 for CASE in "" "-f /nonexistent" "-f $FIX/inv-ok.csv -p 0" "-f $FIX/inv-ok.csv -p 999" "-f $FIX/inv-ok.csv -l bogus" \
-            "-f $FIX/inv-ok.csv -I 3601" "-f $FIX/inv-ok.csv -T 0" "-f $FIX/inv-ok.csv -J bad;host" \
+            "-f $FIX/inv-ok.csv -I 3601" "-f $FIX/inv-ok.csv -L 1441" "-f $FIX/inv-ok.csv -L x" "-f $FIX/inv-ok.csv -T 0" "-f $FIX/inv-ok.csv -J bad;host" \
             "-f $FIX/inv-ok.csv -s bad/site" "-f $FIX/inv-ok.csv --ship /nonexistent" "-f $FIX/inv-ok.csv extra" \
             "-f $FIX/inv-ok.csv -s NOSUCH" "--bogus"; do
     # shellcheck disable=SC2086

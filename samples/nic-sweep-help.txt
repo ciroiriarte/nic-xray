@@ -1,7 +1,7 @@
 Usage: nic-sweep.sh -f|--inventory FILE [-s|--site SITE]... [-J|--jump HOST] [-u|--user USER]
        [-p|--parallel N] [-T|--timeout SEC] [-o|--output-dir DIR] [-l|--level basic|deep]
-       [-I|--interval SEC] [--no-xray] [--ship PATH] [--accept-new-hostkeys]
-       [-n|--no-color] [-v|--version] [-h|--help]
+       [-I|--interval SEC] [-L|--lookback MIN] [--no-xray] [--ship PATH]
+       [--accept-new-hostkeys] [-n|--no-color] [-v|--version] [-h|--help]
 
 Version: 2.14.0
 
@@ -25,6 +25,8 @@ Options:
  -l, --level LEVEL       nic-health level: basic or deep (default: deep)
  -I, --interval SEC      nic-health sampling window (default: 30, max: 3600).
                          30 s or longer catches bursty link errors that 5 s misses
+ -L, --lookback MIN      nic-health link-down look-back in the kernel journal (0-1440,
+                         0 = off; default: nic-health's own, 60). 1440 covers 24 h
      --no-xray           Do not collect nic-xray --all --output json
      --ship PATH         Send this local nic-health.sh to each host over ssh, run it from a
                          temporary file and delete it (for hosts without the package).

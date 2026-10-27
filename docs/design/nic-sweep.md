@@ -115,7 +115,7 @@ SITE1,node-cmp-01,10.0.0.20,ops
 ```
 nic-sweep.sh -f|--inventory FILE [-s|--site SITE]... [-J|--jump HOST] [-u|--user USER]
              [-p|--parallel N] [-T|--timeout SEC] [-o|--output-dir DIR]
-             [-l|--level basic|deep] [-I|--interval SEC] [--no-xray]
+             [-l|--level basic|deep] [-I|--interval SEC] [-L|--lookback MIN] [--no-xray]
              [--ship PATH] [--accept-new-hostkeys] [-n|--no-color] [-v|--version] [-h|--help]
 ```
 
@@ -129,6 +129,7 @@ nic-sweep.sh -f|--inventory FILE [-s|--site SITE]... [-J|--jump HOST] [-u|--user
 | `-T, --timeout` | interval + 300 s (deep) / + 120 s (basic) | Per-host wall-clock limit for `nic-health`; `nic-xray` has its own 120 s. Deep mode queries each mlx5 port (10 s cap each); real deep sweeps took 35–90 s per host |
 | `-o, --output-dir` | `./sweeps` | Root of the sweep tree (§5.4) |
 | `-l, --level` / `-I, --interval` | `deep` / `30` | Passed to `nic-health`. 30 s, because shorter windows miss bursty link errors (see `nic-health.md` §5) |
+| `-L, --lookback` | not passed (`nic-health`'s 60) | Passed to `nic-health` as `-L` only when given: link-down messages in the kernel journal over the last MIN minutes (0–1440). 1440 gives the 24 h flap evidence a hand-over needs. Recorded as `options.lookback_min` in `sweep.json` (`null` when not given; additive, `schema_version` stays 1) |
 | `--no-xray` | off | Skip `nic-xray`. By default the sweep also collects `nic-xray --all --output json` (`--lacp --vlan --bmac --optics --physical`: LLDP peer, LACP, optics for every vendor, VLANs seen via LLDP, NUMA node and slot) on every host where `nic-xray` is installed; hosts without it are recorded as `xray: absent` in the manifest, not as a failure |
 | `--ship PATH` | off | Copy a local `nic-health.sh` to the host's `/tmp`, run it, delete it. For hosts without the package. Default: require `nic-health` (or `nic-health.sh`) on the remote `PATH` |
 | `--accept-new-hostkeys` | off | `StrictHostKeyChecking=accept-new`. Default leaves SSH's own policy in place |
@@ -139,7 +140,7 @@ A missing `--inventory` prints the usage message (`CLAUDE.md` §3).
 
 1. `ssh -o BatchMode=yes -o ConnectTimeout=10 [-J jump] user@address`. Never prompts.
 2. Remote command, fixed and quoted (no remote `eval`):
-   `sudo -n nic-health -O json -l <level> -I <interval>`; with `--ship`, the shipped path instead, removed on exit.
+   `sudo -n nic-health -O json -l <level> -I <interval> [-L <lookback>]`; with `--ship`, the shipped path instead, removed on exit.
 3. stdout → `nodes/<host>.json`, stderr → `nodes/<host>.err`; host, address, status, exit code, duration, nic-xray status and verdict → `MANIFEST.tsv`.
 4. Classify each host: `ok` (JSON parsed; any verdict), `ssh-fail`, `sudo-fail` (`sudo -n` refused), `tool-missing`, `timeout`, `bad-output` (not valid JSON). JSON validity is strict: `jq` checks the shape, plus a separate check for bare non-finite numbers (`inf`, `-inf`, `nan`), which JSON forbids but `jq` (1.6 and 1.7) accepts. `nic-xray` < 2.13.0 writes `-inf` for optics without light (#24): such output is kept, marked `failed`, and noted in `.err`. `jq` 1.6 also exits 0 on empty input with `-e`, so output must be non-empty. The `nic-health` `schema_version` is not checked: 1 and 2 (typed `metrics`, §7 P2) are both collected as they are, and `merged.csv` keeps its columns (metrics are JSON only); a non-finite number inside `metrics` is `bad-output` like anywhere else.
 5. A progress bar on stderr when stdout is a terminal (`CLAUDE.md` §3); none with `-n` or when output is redirected.

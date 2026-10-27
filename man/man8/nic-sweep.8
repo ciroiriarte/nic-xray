@@ -23,6 +23,8 @@ nic-sweep \- collect nic-health (and nic-xray) from every host of an inventory o
 .IR basic | deep ]
 .RI [ \-I | \-\-interval
 .IR SEC ]
+.RI [ \-L | \-\-lookback
+.IR MIN ]
 .RB [ \-\-no\-xray ]
 .RB [ \-\-ship
 .IR PATH ]
@@ -123,6 +125,19 @@ nic-health level (default
 .BR \-I ", " \-\-interval " " \fISEC\fR
 nic-health sampling window (0\-3600, default 30). A window of 30 seconds or more
 catches bursty link errors that a 5-second window misses.
+.TP
+.BR \-L ", " \-\-lookback " " \fIMIN\fR
+nic-health link-down look-back: driver link-down messages in the kernel journal
+over the last MIN minutes, current boot only (0\-1440, 0 = off). Without this
+option nic-sweep does not pass
+.B \-L
+and nic-health's own default (60) applies. Use 1440 to cover the last 24 hours.
+Recorded as
+.B options.lookback_min
+in
+.B sweep.json
+.RB ( null
+when not given).
 .TP
 .B \-\-no\-xray
 Do not collect nic-xray. By default it is collected on every host where
@@ -306,6 +321,12 @@ One site, through a jump host, 16 hosts at a time:
 .PP
 .RS
 .B nic-sweep.sh \-f inventory.csv \-s SITE1 \-J admin@jump.example \-p 16
+.RE
+.PP
+Flap evidence for the last 24 hours:
+.PP
+.RS
+.B nic-sweep.sh \-f inventory.csv \-L 1440
 .RE
 .PP
 Hosts without the package: ship the local script:

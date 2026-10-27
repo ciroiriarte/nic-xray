@@ -19,6 +19,7 @@
 # Change Log:
 #   - 2026-10-26: Phase 2 of docs/design/nic-sweep.md: inventory, parallel SSH, sweep layout,
 #                 manifest, merged CSV with collection metadata, exit codes, progress bar
+#   - 2026-10-27: -L/--lookback passed to nic-health (link-down look-back, e.g. 1440 for 24 h)
 #
 # Version: 2.14.0
 
@@ -38,6 +39,8 @@ DEFAULT_LEVEL="deep"
 LEVELS=("basic" "deep")
 DEFAULT_INTERVAL=30
 MAX_INTERVAL=3600
+# nic-health's own limit; empty LOOKBACK = do not pass -L (nic-health default applies)
+MAX_LOOKBACK=1440
 DEFAULT_PARALLEL=8
 MAX_PARALLEL=256
 # Per-host limit = sampling interval + margin; deep mode queries each mlx5 port (10 s cap each)
@@ -104,6 +107,7 @@ TIMEOUT=""
 OUTPUT_DIR="$DEFAULT_OUTPUT_DIR"
 LEVEL="$DEFAULT_LEVEL"
 INTERVAL="$DEFAULT_INTERVAL"
+LOOKBACK=""
 COLLECT_XRAY=true
 SHIP=""
 ACCEPT_NEW_HOSTKEYS=false
@@ -127,8 +131,8 @@ REMOTE_XRAY=""
 usage() {
     echo -e "Usage: $SCRIPT_NAME -f|--inventory FILE [-s|--site SITE]... [-J|--jump HOST] [-u|--user USER]"
     echo -e "       [-p|--parallel N] [-T|--timeout SEC] [-o|--output-dir DIR] [-l|--level basic|deep]"
-    echo -e "       [-I|--interval SEC] [--no-xray] [--ship PATH] [--accept-new-hostkeys]"
-    echo -e "       [-n|--no-color] [-v|--version] [-h|--help]"
+    echo -e "       [-I|--interval SEC] [-L|--lookback MIN] [--no-xray] [--ship PATH]"
+    echo -e "       [--accept-new-hostkeys] [-n|--no-color] [-v|--version] [-h|--help]"
     echo -e ""
     echo -e "Version: $SCRIPT_VERSION"
     echo -e ""
@@ -152,6 +156,8 @@ usage() {
     echo -e " -l, --level LEVEL       nic-health level: basic or deep (default: $DEFAULT_LEVEL)"
     echo -e " -I, --interval SEC      nic-health sampling window (default: $DEFAULT_INTERVAL, max: $MAX_INTERVAL)."
     echo -e "                         30 s or longer catches bursty link errors that 5 s misses"
+    echo -e " -L, --lookback MIN      nic-health link-down look-back in the kernel journal (0-$MAX_LOOKBACK,"
+    echo -e "                         0 = off; default: nic-health's own, 60). 1440 covers 24 h"
     echo -e "     --no-xray           Do not collect nic-xray --all --output json"
     echo -e "     --ship PATH         Send this local nic-health.sh to each host over ssh, run it from a"
     echo -e "                         temporary file and delete it (for hosts without the package)."
@@ -228,8 +234,8 @@ check_requirements() {
 
 parse_args() {
     local OPTIONS
-    if ! OPTIONS=$(getopt -o hvf:s:J:u:p:T:o:l:I:n \
-        --long help,version,inventory:,site:,jump:,user:,parallel:,timeout:,output-dir:,level:,interval:,no-xray,ship:,accept-new-hostkeys,no-color \
+    if ! OPTIONS=$(getopt -o hvf:s:J:u:p:T:o:l:I:L:n \
+        --long help,version,inventory:,site:,jump:,user:,parallel:,timeout:,output-dir:,level:,interval:,lookback:,no-xray,ship:,accept-new-hostkeys,no-color \
         -n "$SCRIPT_NAME" -- "$@"); then
         die_unknown "Failed to parse options." usage
     fi
@@ -264,6 +270,10 @@ parse_args() {
             -I|--interval)
                 INTERVAL=$(bounded_uint "$2" 0 "$MAX_INTERVAL") \
                     || die_unknown "Invalid --interval value '$2' (expected 0-$MAX_INTERVAL seconds)." usage
+                shift 2 ;;
+            -L|--lookback)
+                LOOKBACK=$(bounded_uint "$2" 0 "$MAX_LOOKBACK") \
+                    || die_unknown "Invalid --lookback value '$2' (expected 0-$MAX_LOOKBACK minutes)." usage
                 shift 2 ;;
             --no-xray) COLLECT_XRAY=false; shift ;;
             --ship)
@@ -336,6 +346,7 @@ load_inventory() {
 build_remote_commands() {
     local ARGS FIND_HEALTH="" FIND_XRAY="" T PREFIX LIMIT_H LIMIT_X
     printf -v ARGS '%q ' -O json -l "$LEVEL" -I "$INTERVAL"
+    [[ -n "$LOOKBACK" ]] && printf -v ARGS '%s-L %q ' "$ARGS" "$LOOKBACK"
     ARGS="${ARGS% }"
     for T in "${HEALTH_TOOLS[@]}"; do FIND_HEALTH+="command -v $T || "; done
     for T in "${XRAY_TOOLS[@]}"; do FIND_XRAY+="command -v $T || "; done
@@ -595,7 +606,8 @@ write_sweep_json() {
     jq -n --argjson schema "$SWEEP_SCHEMA_VERSION" --arg tool "$SCRIPT_NAME" --arg version "$SCRIPT_VERSION" \
         --arg site "$SITE" --arg started "$STARTED_AT" --arg finished "$FINISHED_AT" \
         --arg inv_file "${INVENTORY##*/}" --arg inv_sha "$INV_SHA" --argjson inv_skipped "$INV_SKIPPED" \
-        --arg level "$LEVEL" --argjson interval "$INTERVAL" --argjson parallel "$PARALLEL" \
+        --arg level "$LEVEL" --argjson interval "$INTERVAL" --argjson lookback "${LOOKBACK:-null}" \
+        --argjson parallel "$PARALLEL" \
         --argjson timeout "$TIMEOUT" --arg jump "$JUMP" --argjson ship "$([[ -n "$SHIP" ]] && echo true || echo false)" \
         --argjson xray "$COLLECT_XRAY" --argjson accept_new "$ACCEPT_NEW_HOSTKEYS" --argjson total "$TOTAL" \
         --argjson by_status "$(counts_json "$RESULTS" 3 "${STATUSES[@]}")" \
@@ -605,7 +617,7 @@ write_sweep_json() {
         '{schema_version: $schema, tool: $tool, version: $version, site: $site,
           started_at: $started, finished_at: $finished,
           inventory: {file: $inv_file, sha256: $inv_sha, skipped_lines: $inv_skipped},
-          options: {level: $level, interval_s: $interval, parallel: $parallel, timeout_s: $timeout,
+          options: {level: $level, interval_s: $interval, lookback_min: $lookback, parallel: $parallel, timeout_s: $timeout,
                     jump: (if $jump == "" then null else $jump end), ship: $ship, xray: $xray,
                     accept_new_hostkeys: $accept_new},
           hosts: {total: $total, by_status: $by_status, by_verdict: $by_verdict, xray: $by_xray},
@@ -682,8 +694,9 @@ main() {
     trap cleanup EXIT
     trap on_interrupt INT TERM
 
-    printf '%b🛰️  %s %s%b  %d hosts, %d site(s), level %s, window %ss, %d at a time%s\n' "$BOLD" "$SCRIPT_NAME" \
-        "$SCRIPT_VERSION" "$RESET_COLOR" "${#INV_HOST[@]}" "${#SITES[@]}" "$LEVEL" "$INTERVAL" "$PARALLEL" \
+    printf '%b🛰️  %s %s%b  %d hosts, %d site(s), level %s, window %ss%s, %d at a time%s\n' "$BOLD" "$SCRIPT_NAME" \
+        "$SCRIPT_VERSION" "$RESET_COLOR" "${#INV_HOST[@]}" "${#SITES[@]}" "$LEVEL" "$INTERVAL" \
+        "${LOOKBACK:+, look-back ${LOOKBACK}m}" "$PARALLEL" \
         "$( (( INV_SKIPPED > 0 )) && printf ', %d inventory line(s) skipped' "$INV_SKIPPED")"
     run_sweep
     TZ=UTC0 printf -v FINISHED_AT '%(%Y-%m-%dT%H:%M:%SZ)T' -1

@@ -23,7 +23,7 @@ _nic_sweep() {
 			_known_hosts_real -- "$cur"
 			return
 			;;
-		-s|--site|-u|--user|-p|--parallel|-T|--timeout|-I|--interval)
+		-s|--site|-u|--user|-p|--parallel|-T|--timeout|-I|--interval|-L|--lookback)
 			# Free-form values: nothing to offer
 			return
 			;;
@@ -43,6 +43,7 @@ _nic_sweep() {
 			-o --output-dir
 			-l --level
 			-I --interval
+			-L --lookback
 			--no-xray
 			--ship
 			--accept-new-hostkeys
