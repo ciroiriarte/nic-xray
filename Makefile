@@ -1,6 +1,9 @@
 PREFIX      ?= /usr/local
 MANDIR      ?= $(PREFIX)/share/man
 COMPDIR     ?= /etc/bash_completion.d
+# nic-report.py's starter rule catalog (looked up next to the script, in ../share/nic-xray, or /usr/share/nic-xray)
+DATADIR     ?= $(PREFIX)/share/nic-xray
+RULES       := nic-report-rules.json
 # shellcheck binary for `make lint` (CI passes a pinned release)
 SHELLCHECK  ?= shellcheck
 # nic-report.py needs Python 3.9+ (the one Python script: CLAUDE.md §2)
@@ -10,7 +13,7 @@ PY_MIN      := (3, 9)
 # Primary script and companions: each ships a man page (section 8) and a completion
 SCRIPTS     := nic-xray nic-health nic-sweep nic-report
 
-.PHONY: install-man uninstall-man install-completion uninstall-completion test lint fixtures
+.PHONY: install-man uninstall-man install-completion uninstall-completion install-rules uninstall-rules test lint fixtures
 
 install-man:
 	install -d $(DESTDIR)$(MANDIR)/man8
@@ -25,6 +28,13 @@ install-completion:
 
 uninstall-completion:
 	for s in $(SCRIPTS); do rm -f $(DESTDIR)$(COMPDIR)/$$s; done
+
+install-rules:
+	install -d $(DESTDIR)$(DATADIR)
+	install -m 644 $(RULES) $(DESTDIR)$(DATADIR)/
+
+uninstall-rules:
+	rm -f $(DESTDIR)$(DATADIR)/$(RULES)
 
 test:
 	bash tests/nic-health-test.sh

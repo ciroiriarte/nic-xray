@@ -31,6 +31,13 @@
 #                 failures, traffic) on port findings and lists; coverage counts both. The link-flap
 #                 extractor also reads a window's "carrier_changes T0=… T1=…" evidence. Node files: invalid
 #                 UTF-8 replaced (with a caveat) and a 32 MiB limit; host text cannot form Markdown links
+#   - 2026-10-26: Phase 7: diagnosis and recommendations (A8). nic-xray data from sweeps (LLDP, LACP,
+#                 VLANs, speed, MTU, placement, optics for every vendor) joined to nic-health ports; facts
+#                 per port, ASIC, bond, host, group and fleet; declarative rule catalog
+#                 (nic-report-rules.json, -u/--rules, NIC_REPORT_RULES) with strict validation; ranking
+#                 by priority, modifiers, service impact and activity; executive summary and recommended
+#                 actions from templates, with unexplained findings listed; a port without an LLDP
+#                 neighbour names the one of an earlier sweep (-L/--lldp-lookback)
 #
 # Version: 2.13.0
 """nic-report.py: single- and multi-site reports from nic-sweep sweeps and legacy nic-health CSV."""
@@ -102,6 +109,8 @@ COUNTERS_ZERO_RE = re.compile(r"\ball \d+ counters are 0\b")
 DEEP_PREFIX = "mlx5.deep."
 LINK_STATE = "generic.link.state"
 LINK_FLAPS = "generic.link.flaps"
+LINK_LOOKBACK = "generic.link.lookback"
+DEEP_TROUBLESHOOTING = "mlx5.deep.troubleshooting"
 LINK_UP = "up"
 PCIE_LINK = "generic.pcie.link"
 DEEP_FEC = "mlx5.deep.fec"
@@ -116,6 +125,7 @@ MIN_GROUP_PORTS = 3             # fewer linked ports than this make no baseline
 NEAR_LIMIT_DB = 3.0             # Rx within this of the module's own low limit (its [low..high] range)
 TEMP_MARGIN_C = 10              # module temperature within this of its own high limit
 NO_LIGHT_DBM = -40.0            # what modules report without light
+OPTICAL_DBM_RANGE = (-60.0, 30.0)   # plausible optical power; a reading outside it is dropped (untrusted input)
 TOP_N = 10                      # rows of "highest" lists
 TOP_HOT = 5                     # hottest modules listed
 PATTERN_ITEMS_SHOWN = 6         # places listed per pattern row before "and N more"
@@ -128,6 +138,26 @@ USE_REASONS = ("bond", "bridge", "upper", "sriov_vfs", "global_address")   # nic
 # (bidi and the like) are refused as well
 IFNAME_RE = re.compile(r"^[^\s/:\x00-\x1f\x7f-\x9f]{1,15}$")
 NODE_MAX_BYTES = 32 * 1024 * 1024    # a nodes/<host>.json larger than this is unreadable, not loaded
+# nic-xray output next to it (nic-sweep §5.4: nodes/<host>.xray.json, nic-xray --all --output json), untrusted
+XRAY_FILE_SUFFIX = ".xray.json"
+XRAY_MAX_BYTES = 8 * 1024 * 1024     # a nic-xray document larger than this is ignored (with a caveat)
+XRAY_TEXT_MAX = 256                  # characters kept of any nic-xray text (LLDP names and descriptions, slot labels)
+XRAY_NONE = ("None",)                # nic-xray's placeholder for "no bond", next to NOT_AVAILABLE
+XRAY_LLDP_KEYS = ("switch_name", "port_name", "port_descr", "peer_port")   # the LLDP neighbour of a port
+DEFAULT_LLDP_LOOKBACK_DAYS = 30      # --lldp-lookback: earlier sweeps searched for a port's last LLDP neighbour
+LLDP_LOOKBACK_MAX_DAYS = 3650       # --lldp-lookback upper bound (keeps the date arithmetic in range)
+LLDP_LOOKBACK_MAX_SWEEPS = 50        # earlier sweeps read at most, newest first
+SWEEP_META_MAX = 1024 * 1024         # bytes of an earlier sweep's sweep.json read for the LLDP fallback
+BDF_RE = re.compile(r"^([0-9a-fA-F]{4}):([0-9a-fA-F]{2}):([0-9a-fA-F]{2})\.[0-7]$")
+# Predictable interface names carry the PCI bus and device (enp130s0f0np0 -> 0000:82:00; enP2p1s0 -> 0002:01:00)
+PCI_NAME_RE = re.compile(r"^en(?:P(\d{1,5}))?p(\d{1,3})s(\d{1,2})(?:f\d|$)")
+LACP_RE = re.compile(r"\bAggID:(\d{1,9}) Peer:((?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2})")
+LACP_NO_PARTNER = "00:00:00:00:00:00"
+SPEED_RE = re.compile(r"^(\d{1,7})Mb/s")
+VLAN_RE = re.compile(r"^(\d{1,4})(?:\[P\])?$")
+VLAN_MAX = 4094
+LLDP_IFNAME = "ifname "              # LLDP port ID subtype prefix nic-xray keeps ("ifname et-0/0/1:0")
+MTU_RANGE = (68, 65535)
 SECONDS_PER_HOUR = 3600
 BASELINES = ("scope", "all")
 OUTLIER_KIND = "Rx outlier (low)"
@@ -206,7 +236,14 @@ def _lanes_with_range(label, evidence):
     lanes = [_float(v) for v in m.group(1).split(",")]
     if any(v is None for v in lanes):
         return None
-    return lanes, (_float(m.group(2)), _float(m.group(3)))
+    low, high = _float(m.group(2)), _float(m.group(3))
+    # A range is both bounds or neither ('[-11.3..1.2.3]' parses one)
+    return lanes, ((low, high) if low is not None and high is not None else (None, None))
+
+
+def _dbm(v):
+    """An optical power in dBm within OPTICAL_DBM_RANGE, else None (1e308 is finite but no reading)."""
+    return v if v is not None and OPTICAL_DBM_RANGE[0] <= v <= OPTICAL_DBM_RANGE[1] else None
 
 
 def _power(label, evidence):
@@ -216,6 +253,8 @@ def _power(label, evidence):
     if not got:
         return None
     lanes, rng = got
+    if any(_dbm(v) is None for v in lanes):
+        return None
     judged = not re.search(re.escape(label) + r"=[^;]*\(not judged", evidence)
     return {"dbm": min(lanes), "lanes": lanes if len(lanes) > 1 else None, "low": rng[0], "high": rng[1],
             "judged": judged}
@@ -369,6 +408,8 @@ def typed_power(t, key, extract):
         if any(x is None for x in lanes):
             return MISSING
     vals = lanes or [v]
+    if any(_dbm(x) is None for x in vals):
+        return MISSING
     return {"dbm": min(vals), "lanes": vals if len(vals) > 1 else None, "low": lo, "high": hi, "judged": judged}
 
 
@@ -505,6 +546,9 @@ class Host:
         self.verdict_before = None      # verdict before --suppress recomputed it (only when it did)
         self.typed_metrics = False      # its nic-health JSON carries typed metrics (schema 2)
         self.invalid_utf8 = False       # its nic-health JSON had invalid UTF-8, read with U+FFFD in its place
+        self.xray_ports = None          # {interface: validated nic-xray values}; None without nic-xray output
+        self.xray_problem = None        # why its nic-xray output could not be read
+        self.xray_invalid_utf8 = False
 
     @property
     def collected(self):
@@ -647,6 +691,170 @@ def load_node(path, host):
     if host.verdict is None:
         # The manifest's verdict column was missing or invalid: the document's, else from the records
         host.verdict = doc.get("verdict") if doc.get("verdict") in VERDICTS else worst_verdict(results)
+    load_xray(path, host)
+
+
+def _xtext(v):
+    """nic-xray text: one line without control or bidi characters, bounded; None for a placeholder or a non-string."""
+    if not isinstance(v, str):
+        return None
+    t = " ".join(CONTROL_RE.sub("", v).split())[:XRAY_TEXT_MAX]
+    return None if t in NOT_AVAILABLE or t in XRAY_NONE else t
+
+
+def xray_port(e):
+    """The values the report uses from one nic-xray interface object, each kept only when well typed (untrusted
+    input); None for an entry without a valid interface name or for a virtual interface."""
+    if not isinstance(e, dict) or not (isinstance(e.get("interface"), str) and IFNAME_RE.match(e["interface"])):
+        return None
+    if "type" in e and e["type"] != "physical":
+        return None
+    p = {"interface": e["interface"]}
+    m = BDF_RE.match(e["device"]) if isinstance(e.get("device"), str) else None
+    if m:
+        p["asic"] = f"{m.group(1)}:{m.group(2)}:{m.group(3)}".lower()
+    numa = e.get("numa_node")
+    if isinstance(numa, str) and re.fullmatch(r"[0-9]{1,4}", numa):
+        p["numa_node"] = int(numa)
+    elif _uint(numa) is not None and numa < 10 ** 4:
+        p["numa_node"] = numa
+    if _xtext(e.get("pci_slot")):
+        p["slot_label"] = _xtext(e["pci_slot"])
+    if e.get("link") in ("up", "down"):
+        p["link"] = e["link"] == "up"
+    speed = _uint(e.get("speed_mbps"))
+    if not speed and isinstance(e.get("speed_duplex"), str):
+        m = SPEED_RE.match(e["speed_duplex"])
+        speed = int(m.group(1)) if m else None
+    if speed:
+        p["speed_mbps"] = speed
+    mtu = _uint(e.get("mtu"))
+    if mtu is not None and MTU_RANGE[0] <= mtu <= MTU_RANGE[1]:
+        p["mtu"] = mtu
+    bond = e.get("parent_bond")
+    if isinstance(bond, str) and IFNAME_RE.match(bond) and bond not in XRAY_NONE and bond not in NOT_AVAILABLE:
+        p["bond"] = bond
+    lacp = e.get("lacp_status") if isinstance(e.get("lacp_status"), str) else ""
+    m = LACP_RE.search(lacp)
+    if m:
+        p["lacp_aggregator"], p["lacp_partner"] = int(m.group(1)), m.group(2).lower()
+        p["lacp_partial"] = "(Partial)" in lacp
+    vlans = sorted({int(m.group(1)) for v in (e["vlan"].split(";") if isinstance(e.get("vlan"), str) else [])
+                    for m in [VLAN_RE.match(v.strip())] if m and 1 <= int(m.group(1)) <= VLAN_MAX})
+    if vlans:
+        p["vlans"] = vlans
+    optics = e.get("optics") if isinstance(e.get("optics"), dict) else {}
+    for key, src in (("module_type", "sfp_type"), ("module_vendor", "vendor"), ("optics_status", "rx_status")):
+        if _xtext(optics.get(src)):
+            p[key] = _xtext(optics[src])
+    lanes = optics.get("rx_lanes_dbm")
+    lanes = [_dbm(_num(x)) for x in lanes] if isinstance(lanes, list) and lanes else None
+    rx = min(lanes) if lanes and None not in lanes else _dbm(_num(optics.get("rx_power_dbm")))
+    if rx is not None:
+        p["rx_dbm"] = rx
+        if lanes and None not in lanes and len(lanes) > 1:
+            p["rx_lanes"] = lanes
+    if _dbm(_num(optics.get("tx_power_dbm"))) is not None:
+        p["tx_dbm"] = _dbm(_num(optics["tx_power_dbm"]))
+    for key in ("switch_name", "port_name", "port_descr"):
+        if _xtext(e.get(key)):
+            p[key] = _xtext(e[key])
+    # Peer port: the LLDP port ID when it is an interface name, else the port description, else the raw ID
+    pid = p.get("port_name", "")
+    peer_port = pid[len(LLDP_IFNAME):] if pid.startswith(LLDP_IFNAME) else (p.get("port_descr") or pid)
+    if peer_port:
+        p["peer_port"] = peer_port
+    return p
+
+
+def read_xray(path, host_name, replaced=None):
+    """{interface: validated values} of nodes/<host>.xray.json in a sweep; None without the file. A malformed or
+    oversized file is an InputError."""
+    xpath = os.path.join(path, "nodes", host_name + XRAY_FILE_SUFFIX)
+    if not os.path.isfile(xpath):
+        return None
+    doc = read_json(xpath, XRAY_MAX_BYTES, [] if replaced is None else replaced)
+    if not isinstance(doc, list):
+        raise InputError(f"{xpath}: not a nic-xray JSON array")
+    ports = {}
+    for entry in doc:
+        port = xray_port(entry)
+        if port and port["interface"] not in ports:      # the first object of an interface wins
+            ports[port["interface"]] = port
+    return ports
+
+
+def load_xray(path, host):
+    """nodes/<host>.xray.json of a collected host, if nic-sweep wrote one. A missing file means no nic-xray data; a
+    malformed or oversized one is a caveat (host.xray_problem), never a failure of the host or the report."""
+    replaced = []
+    try:
+        ports = read_xray(path, host.name, replaced)
+    except InputError as exc:
+        host.xray_problem = str(exc)
+        return
+    if ports is not None:
+        host.xray_ports = ports
+        host.xray_invalid_utf8 = bool(replaced)
+
+
+def _has_lldp(port):
+    return bool(port.get("switch_name") or port.get("port_name"))
+
+
+def earlier_sweeps(data, days):
+    """Paths and stamps of the same site's sweeps before data's, within days of it, newest first (bounded)."""
+    now = sweep_stamp_dt(data.stamp)
+    if not (data.source == "sweep" and data.path and now and days > 0):
+        return []
+    site_dir = os.path.dirname(os.path.normpath(data.path))
+    try:
+        oldest = now - datetime.timedelta(days=days)
+    except OverflowError:                   # a sweep stamped near year 1
+        oldest = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+    try:
+        names = os.listdir(site_dir)
+    except OSError:
+        return []
+    stamps = sorted((n for n in names if n != data.stamp and sweep_stamp_dt(n) and oldest <= sweep_stamp_dt(n) < now),
+                    reverse=True)
+    out = []
+    for stamp in stamps[:LLDP_LOOKBACK_MAX_SWEEPS]:
+        path = os.path.join(site_dir, stamp)
+        try:
+            meta = read_json(os.path.join(path, "sweep.json"), SWEEP_META_MAX)
+        except InputError:
+            continue
+        if isinstance(meta, dict) and meta.get("site") == data.site:
+            out.append((path, stamp))
+    return out
+
+
+def fill_lldp_history(data, days):
+    """A port with no LLDP neighbour in this sweep (link down at collection, say) takes the newest one the same host
+    saw on that interface in an earlier sweep of the site, marked with that sweep (lldp_from). It only names the
+    neighbour: bond and VLAN facts use this sweep's LLDP alone. Earlier files that do not read are skipped."""
+    need = {h.name: {i for i, p in h.xray_ports.items() if not _has_lldp(p)}
+            for h in data.hosts.values() if h.xray_ports}
+    need = {h: ifs for h, ifs in need.items() if ifs}
+    if not need:
+        return
+    for path, stamp in earlier_sweeps(data, days):
+        for name in sorted(need):
+            try:
+                old = read_xray(path, name)
+            except InputError:
+                continue
+            for iface in sorted(need[name]):
+                prev = (old or {}).get(iface)
+                if prev and _has_lldp(prev):
+                    port = data.hosts[name].xray_ports[iface]
+                    port.update({k: prev[k] for k in XRAY_LLDP_KEYS if k in prev}, lldp_from=stamp)
+                    need[name].discard(iface)
+            if not need[name]:
+                del need[name]
+        if not need:
+            return
 
 
 def worst_verdict(rows):
@@ -832,6 +1040,7 @@ def load_selection(args):
             data = load_sweep_dir(what)
         else:
             data = import_paths(what[0], what[1:])
+        fill_lldp_history(data, getattr(args, "lldp_lookback", DEFAULT_LLDP_LOOKBACK_DAYS))
         sites.append(finalize(data, args.role_re))
     seen = collections.Counter(s.site for s in sites)
     dup = [s for s, n in seen.items() if n > 1]
@@ -1002,6 +1211,11 @@ def coverage(sites, missing, multi):
         asics = {(r["host"], r["target"]) for r in recs if r["check_id"] == PCIE_LINK}
         fec = collections.Counter(r["metrics"]["fec"] for r in recs if r["check_id"] == DEEP_FEC and "fec" in r["metrics"])
         impact = {r["host"] for r in recs if r["check_id"] == LINK_STATE and set(IMPACT_KEYS) & set(r["metrics"])}
+        # Optics per port (source precedence, design §6.3.2): nic-health deep mode, else nic-xray (ethtool -m), else none
+        by_name = {h.name: h for h in hosts}
+        deep = {(r["host"], r["target"]) for r in recs if r["check_id"] == "mlx5.deep.module" and "rx" in r["metrics"]} & ports
+        xray = {(hn, t) for hn, t in ports - deep
+                if ((by_name[hn].xray_ports or {}).get(t) or {}).get("rx_dbm") is not None}
         cols.append({
             "group": key,
             "hosts": len(hosts),
@@ -1015,6 +1229,10 @@ def coverage(sites, missing, multi):
             "fec": dict(fec.most_common()),
             "hosts_with_typed_metrics": sum(1 for h in hosts if h.collected and h.typed_metrics),
             "hosts_with_impact_facts": len(impact),
+            "hosts_with_xray": sum(1 for h in hosts if h.collected and h.xray_ports is not None),
+            "lldp_from_earlier_sweep": sum(1 for hn, t in ports
+                                           if ((by_name[hn].xray_ports or {}).get(t) or {}).get("lldp_from")),
+            "optics": {"deep": len(deep), "nic-xray": len(xray), "none": len(ports) - len(deep) - len(xray)},
             "tool_versions": sorted({h.meta.get("tool_version") for h in hosts if h.meta.get("tool_version")}),
             "levels": sorted({h.meta.get("level") for h in hosts if h.meta.get("level")}),
             "intervals_s": sorted({h.meta.get("interval_s") for h in hosts if h.meta.get("interval_s") is not None}),
@@ -1051,6 +1269,22 @@ def coverage(sites, missing, multi):
     bad_utf8 = [f"{h.site}/{h.name}" for s in sites for h in sorted(s.hosts.values(), key=lambda h: h.name) if h.invalid_utf8]
     if bad_utf8:
         caveats.append(f"{len(bad_utf8)} host file(s) contained invalid UTF-8, replaced with U+FFFD: {'; '.join(bad_utf8)}.")
+    old_lldp = [f"{h.site}/{h.name} {i} ({p['lldp_from']})" for s in sites
+                for h in sorted(s.hosts.values(), key=lambda h: h.name)
+                for i, p in sorted((h.xray_ports or {}).items()) if p.get("lldp_from")]
+    if old_lldp:
+        caveats.append(f"{len(old_lldp)} port(s) had no LLDP neighbour in the reported sweep and name the one seen in an "
+                       f"earlier sweep (only to name the peer; bond and VLAN facts use the reported sweep): "
+                       f"{'; '.join(old_lldp)}.")
+    bad_xray = [f"{h.site}/{h.name}" for s in sites for h in sorted(s.hosts.values(), key=lambda h: h.name) if h.xray_problem]
+    if bad_xray:
+        caveats.append(f"{len(bad_xray)} host(s) have unreadable nic-xray output (no LLDP, LACP, VLAN, placement or "
+                       f"nic-xray optics facts for them): {'; '.join(bad_xray)}.")
+    bad_xray_utf8 = [f"{h.site}/{h.name}" for s in sites for h in sorted(s.hosts.values(), key=lambda h: h.name)
+                     if h.xray_invalid_utf8]
+    if bad_xray_utf8:
+        caveats.append(f"{len(bad_xray_utf8)} nic-xray file(s) contained invalid UTF-8, replaced with U+FFFD: "
+                       f"{'; '.join(bad_xray_utf8)}.")
     unreadable = [h for h in not_collected if h["status"] == ST_UNREADABLE]
     if unreadable:
         caveats.append(f"{len(unreadable)} collected host(s) have a missing or malformed result file: "
@@ -1109,8 +1343,12 @@ def port_facts(sites):
                 if r["scope"] != "port":
                     continue
                 key = (site.site, host.name, r["target"])
-                p = ports.setdefault(key, {"site": site.site, "host": host.name, "role": host.role, "port": r["target"],
-                                           "link": None, "uptime_s": host.meta.get("uptime_s")})
+                p = ports.get(key)
+                if p is None:
+                    p = ports[key] = {"site": site.site, "host": host.name, "role": host.role, "port": r["target"],
+                                      "link": None, "uptime_s": host.meta.get("uptime_s"),
+                                      "interval_s": host.meta.get("interval_s"),
+                                      "xray": (host.xray_ports or {}).get(r["target"])}
                 m, cid = r["metrics"], r["check_id"]
                 if cid == LINK_STATE:
                     p["link"] = r["value"] == LINK_UP
@@ -1125,12 +1363,29 @@ def port_facts(sites):
                     for k in ("fec", "compliance"):
                         if k in m:
                             p[k] = m[k]
+                    # nic-health's judgement: WARN when the module needs FEC that the link does not run
+                    if r["severity"] in ("OK", "WARN", "CRIT") and not r.get("suppressed"):
+                        p["fec_mismatch"] = r["severity"] != "OK"
                 elif cid == "mlx5.phy.errors" and "symbol_errors" in m:
                     p["symbol_errors"] = m["symbol_errors"]
                 elif cid == "mlx5.nic.discards" and "discards" in m:
                     p["discards"] = m["discards"]
-                elif cid == LINK_FLAPS and "carrier_changes" in m:
-                    p["carrier_changes"] = m["carrier_changes"]
+                elif cid == LINK_FLAPS:
+                    if "carrier_changes" in m:
+                        p["carrier_changes"] = m["carrier_changes"]
+                    w = re.fullmatch(r"\+(\d{1,%d})" % MAX_COUNTER_DIGITS, r["value"])
+                    if w:
+                        p["flaps_window"] = int(w.group(1))
+                elif cid == LINK_LOOKBACK and re.fullmatch(r"\d{1,%d}" % MAX_COUNTER_DIGITS, r["value"]):
+                    p["link_down_recent"] = int(r["value"])
+                elif cid == DEEP_TROUBLESHOOTING and not r.get("suppressed"):
+                    op = re.fullmatch(r"opcode (\d{1,9})", r["value"])
+                    if op:
+                        p["deep_opcode"] = int(op.group(1))
+                        if int(op.group(1)) and r["hint"].strip(" ."):
+                            p["deep_recommendation"] = r["hint"].strip(" .")
+                elif cid == "mlx5.deep.ber" and "ber" in m:
+                    p["ber"] = m["ber"]
     # Module type: compliance (deep FEC, only with link) else the part number's compliance elsewhere
     by_part = collections.defaultdict(collections.Counter)
     for p in ports.values():
@@ -1316,6 +1571,879 @@ def patterns(sites, a4, pcie, multi):
     return {"within_sites": within_rows, "across_sites": across_rows, "roles_known": has_roles}
 
 
+# --------------------------------------------------------------------------------- diagnosis rules (A8)
+# Design §6.3.1-§6.3.3: named facts per target, a declarative rule catalog evaluated over them (no eval: the
+# operators below, nested in all/any), ranked recommendations and a template narrative.
+
+def _fact_types(**kinds):
+    return {name: kind for kind, names in kinds.items() for name in names.split()}
+
+
+_WHO = "site host role"
+# Facts per scope with their type (num, bool, text, list). A fact that the data does not give is absent, and a
+# condition on an absent fact never matches (exists tests it). Rules and templates may only name these.
+RULE_FACTS = {
+    "port": _fact_types(
+        text=_WHO + " port optics_source optics_status module_type module_vendor fec deep_recommendation bond "
+                    "lacp_partner peer_switch peer_port peer_descr peer peer_from_sweep slot_label asic severity",
+        num="rx_dbm tx_dbm lanes rx_delta_host_db rx_delta_fleet_db rx_delta_db phy_err_total phy_err_window "
+            "phy_err_rate_s phy_err_rate_h_uptime carrier_changes flaps_window link_down_recent discards_total "
+            "discards_window deep_opcode ber_effective bond_link_failures lacp_aggregator speed_mbps mtu numa_node "
+            "active cross_site_sites",
+        bool="link rx_low_host rx_low_fleet rx_low phy_err_growing flaps_high discards_growing fec_mismatch "
+             "deep_signal_integrity in_use has_traffic idle lacp_partial role_vlan_drift",
+        list="rx_lanes in_use_reasons vlans role_vlans checks"),
+    "asic": _fact_types(
+        text=_WHO + " asic pcie_trained pcie_supported slot_label discards_mapping severity",
+        num="numa_node rx_discards_total role_hosts role_hosts_pcie role_share_pcie",
+        bool="pcie_below_cap slot_limited rx_discards_growing",
+        list="rx_discards_ports checks"),
+    "bond": _fact_types(
+        text=_WHO + " bond",
+        num="members members_up bond_peer_switch_count bond_link_failures",
+        bool="bond_speed_mismatch bond_mtu_mismatch bond_lacp_split bond_lldp_complete",
+        list="member_ports bond_speeds bond_mtus bond_peer_switches peers"),
+    "host": _fact_types(
+        text=_WHO + " verdict tool_version",
+        num="uptime_s findings_crit findings_warn findings_unknown",
+        bool="nic_xray"),
+    "group": _fact_types(
+        text="site role",
+        num="role_hosts hosts_clean clean_share hosts_crit hosts_warn role_hosts_pcie role_share_pcie"),
+    "fleet": _fact_types(
+        text="role",
+        num="sites_with",
+        list="issues sites places"),
+}
+RULE_SCOPES = tuple(RULE_FACTS)
+RULE_OPS = ("eq", "ne", "gt", "ge", "lt", "le", "in", "exists")
+NUM_OPS = ("gt", "ge", "lt", "le")
+RULES_FILE = "nic-report-rules.json"
+RULES_ENV = "NIC_REPORT_RULES"           # replaces the default catalog lookup with this file
+RULES_SYSTEM_DIR = "/usr/share/nic-xray"
+RULES_SCHEMA_VERSION = 1
+RULES_TOP_KEYS = ("schema_version", "catalog_version", "description", "rules")
+RULE_REQUIRED = ("id", "scope", "when", "diagnosis", "action", "priority")
+RULE_OPTIONAL = ("ref", "raise", "modifies", "explains")
+RULE_ID_RE = re.compile(r"^[A-Z][A-Z0-9_-]{0,63}$")
+CATALOG_VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$")
+RULES_MAX = 1024 * 1024                  # bytes of one catalog file
+MAX_RULES = 1000
+MAX_RULE_DEPTH = 8                       # nesting of all/any
+MAX_RULE_NODES = 200                     # conditions per rule
+MAX_IN_VALUES = 100
+MAX_TEMPLATE = 1000                      # characters of a diagnosis or action
+MAX_REF = 200
+MAX_DESCRIPTION = 1000                   # characters of a catalog's description
+CHECK_ID_RE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z0-9_]+){1,7}$")   # a nic-health check id, in 'explains'
+MAX_CHECK_ID = 64
+MAX_EXPLAINS = 64                        # check ids per rule
+PRIORITIES = (1, 2, 3, 4)                # 1 act now ... 4 informational
+MODIFIER = "modifier"
+MAX_RAISE = 3
+PLACEHOLDER_RE = re.compile(r"\{([a-z][a-z0-9_]*)(?:\|([^{}]*))?\}")
+MISSING_TEXT = "unknown"                 # a placeholder whose fact is absent and that names no fallback
+FACT_TEXT_MAX = 200                      # characters of any filled placeholder in a sentence
+FACT_LIST_SHOWN = PATTERN_ITEMS_SHOWN    # list items shown per placeholder before "… and N more"
+# Prioritisation (§6.3.2): the score starts at the rule's base priority (lower is more urgent)
+IMPACT_RAISE = 0.5                       # bond member with link failures, link drops in the window or traffic
+IDLE_LOWER = 1.0                         # up but unused (P3: not in use and no traffic in the window)
+ACT_WINDOW, ACT_HISTORY, ACT_NONE = 2, 1, 0     # activity: growing in the window > history only > none
+RX_HOST_MIN_PEERS = 3                    # linked ports of the same module type on the host for a host delta (§8)
+VLAN_MIN_HOSTS = 3                       # same-role hosts with LLDP VLANs on a port before drift is judged
+PRIORITY_ICON = {1: "🔴", 2: "🟠", 3: "🟡", 4: "🔵"}
+STATUS_ICON = {"CRIT": "🔴", "WARN": "🟡", "UNKNOWN": "⚪", "OK": "🟢"}
+TOP_SUMMARY = 5                          # recommendations repeated in the executive summary
+# Facts a check's record gives: dropped for a target whose record of that check was suppressed (§6.3 A7), so a
+# suppressed result is neither a recommendation nor unexplained. Also the default of a rule's 'explains': the checks
+# whose facts its 'when' reads (asic facts never collide with port ones, so one table serves both scopes)
+NIC_DISCARDS = "mlx5.nic.discards"
+FACT_SOURCES = {
+    "mlx5.deep.module": ("rx_dbm", "tx_dbm", "rx_lanes", "rx_delta_host_db", "rx_delta_fleet_db", "rx_delta_db",
+                         "rx_low_host", "rx_low_fleet", "rx_low"),
+    "mlx5.phy.errors": ("phy_err_total", "phy_err_window", "phy_err_growing", "phy_err_rate_s", "phy_err_rate_h_uptime"),
+    LINK_FLAPS: ("carrier_changes", "flaps_window", "flaps_high"),
+    LINK_LOOKBACK: ("link_down_recent",),
+    NIC_DISCARDS: ("discards_total", "discards_window", "discards_growing", "rx_discards_growing", "rx_discards_total",
+                   "rx_discards_ports"),
+    "mlx5.deep.ber": ("ber_effective",),
+    DEEP_FEC: ("fec_mismatch",),
+    DEEP_TROUBLESHOOTING: ("deep_opcode", "deep_signal_integrity", "deep_recommendation"),
+    PCIE_LINK: ("pcie_below_cap", "pcie_trained", "pcie_supported", "slot_limited"),
+}
+# Facts derived from several checks: 'active' from errors, link drops and flaps (a rule reading it explains them)
+DERIVED_SOURCES = {"active": ("mlx5.phy.errors", LINK_FLAPS, LINK_LOOKBACK)}
+FACT_CHECKS = {name: {c for c, names in FACT_SOURCES.items() if name in names} | set(DERIVED_SOURCES.get(name, ()))
+               for name in {n for names in FACT_SOURCES.values() for n in names} | set(DERIVED_SOURCES)}
+DISCARDS_ASSUMED = "(port to ASIC mapping assumed: the host's only ASIC below capability)"
+SIGNAL_INTEGRITY_TEXT = "signal integrity"     # in the mlxlink/mstlink recommendation (opcode 15 in the field)
+
+
+def _read_catalog(path):
+    """One catalog file, validated: (schema metadata, [rule]). Any deviation is an input error naming the rule."""
+    doc = read_json(path, RULES_MAX)
+    if not isinstance(doc, dict):
+        raise InputError(f"{path}: not a rule catalog object")
+    unknown = sorted(set(doc) - set(RULES_TOP_KEYS))
+    if unknown:
+        raise InputError(f"{path}: unknown key(s) {', '.join(unknown)}")
+    if type(doc.get("schema_version")) is not int or doc["schema_version"] != RULES_SCHEMA_VERSION:
+        raise InputError(f"{path}: unsupported schema_version {doc.get('schema_version')!r} (expected {RULES_SCHEMA_VERSION})")
+    desc = doc.get("description")
+    if desc is not None and not (isinstance(desc, str) and len(desc) <= MAX_DESCRIPTION):
+        raise InputError(f"{path}: 'description' must be a string of up to {MAX_DESCRIPTION} characters")
+    version = doc.get("catalog_version")
+    if not (isinstance(version, str) and CATALOG_VERSION_RE.match(version)):
+        raise InputError(f"{path}: 'catalog_version' must be a version string (letters, digits, . _ + -), not {version!r}")
+    if not isinstance(doc.get("rules"), list) or len(doc["rules"]) > MAX_RULES:
+        raise InputError(f"{path}: 'rules' must be a list of at most {MAX_RULES} rules")
+    rules, seen = [], set()
+    for n, raw in enumerate(doc["rules"], 1):
+        rule = _validate_rule(raw, f"{path}: rule {n}")
+        if rule["id"] in seen:
+            raise InputError(f"{path}: rule {rule['id']}: duplicate id in the same file")
+        seen.add(rule["id"])
+        rule["file"] = path
+        rules.append(rule)
+    return {"file": path, "catalog_version": version, "rules": len(rules)}, rules
+
+
+def _validate_rule(raw, where):
+    if not isinstance(raw, dict):
+        raise InputError(f"{where}: not an object")
+    rid = raw.get("id")
+    if not (isinstance(rid, str) and RULE_ID_RE.match(rid)):
+        raise InputError(f"{where}: 'id' must be upper-case letters, digits, '_' or '-', not {rid!r}")
+    where = f"{where.rsplit(': rule ', 1)[0]}: rule {rid}"
+    unknown = sorted(set(raw) - set(RULE_REQUIRED) - set(RULE_OPTIONAL))
+    missing = [k for k in RULE_REQUIRED if k not in raw]
+    if unknown or missing:
+        raise InputError(f"{where}: " + "; ".join(([f"unknown key(s) {', '.join(unknown)}"] if unknown else [])
+                                                  + ([f"missing {', '.join(missing)}"] if missing else [])))
+    scope = raw["scope"]
+    if scope not in RULE_SCOPES:
+        raise InputError(f"{where}: unknown scope {scope!r} (one of {', '.join(RULE_SCOPES)})")
+    facts = RULE_FACTS[scope]
+    counter = [0]
+    _validate_condition(raw["when"], facts, f"{where}: 'when'", 1, counter)
+    for key in ("diagnosis", "action"):
+        _validate_template(raw[key], facts, f"{where}: '{key}'")
+    ref = raw.get("ref")
+    if ref is not None and not (isinstance(ref, str) and ref.strip() and len(ref) <= MAX_REF):
+        raise InputError(f"{where}: 'ref' must be a non-empty string of up to {MAX_REF} characters")
+    explains = raw.get("explains")
+    if explains is None:
+        explains = sorted({c for name in _condition_facts(raw["when"]) for c in FACT_CHECKS.get(name, ())})
+    elif not (isinstance(explains, list) and len(explains) <= MAX_EXPLAINS
+              and all(isinstance(c, str) and len(c) <= MAX_CHECK_ID and CHECK_ID_RE.match(c) for c in explains)):
+        raise InputError(f"{where}: 'explains' must be a list of up to {MAX_EXPLAINS} check ids "
+                         f"(such as mlx5.phy.errors, up to {MAX_CHECK_ID} characters)")
+    priority = raw["priority"]
+    rule = {"id": rid, "scope": scope, "when": raw["when"], "diagnosis": raw["diagnosis"], "action": raw["action"],
+            "ref": ref, "priority": None, "modifies": [], "raise": 0, "explains": sorted(set(explains))}
+    if priority == MODIFIER:
+        mods, rise = raw.get("modifies"), raw.get("raise", 1)
+        if not (isinstance(mods, list) and mods and all(isinstance(m, str) and RULE_ID_RE.match(m) for m in mods)):
+            raise InputError(f"{where}: a modifier needs 'modifies', a non-empty list of rule ids")
+        if type(rise) is not int or not 1 <= rise <= MAX_RAISE:
+            raise InputError(f"{where}: 'raise' must be an integer from 1 to {MAX_RAISE}")
+        rule.update(modifies=sorted(set(mods)), **{"raise": rise})
+    elif type(priority) is int and priority in PRIORITIES:
+        if "modifies" in raw or "raise" in raw:
+            raise InputError(f"{where}: 'modifies' and 'raise' belong to a rule with priority \"{MODIFIER}\"")
+        rule["priority"] = priority
+    else:
+        raise InputError(f"{where}: 'priority' must be 1 (act now) to 4 (informational) or \"{MODIFIER}\", not {priority!r}")
+    return rule
+
+
+def _condition_facts(node):
+    """The fact names a validated condition reads."""
+    if "all" in node or "any" in node:
+        return {name for n in node.get("all", node.get("any")) for name in _condition_facts(n)}
+    return {node["fact"]}
+
+
+def _is_num(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def _value_fits(kind, v):
+    """A literal of a rule against a fact type: numbers for num (bool is not one), bool for bool, text for text."""
+    return {"num": _is_num, "bool": lambda x: isinstance(x, bool), "text": lambda x: isinstance(x, str)}[kind](v) \
+        if kind != "list" else False
+
+
+def _validate_condition(node, facts, where, depth, counter):
+    counter[0] += 1
+    if depth > MAX_RULE_DEPTH or counter[0] > MAX_RULE_NODES:
+        raise InputError(f"{where}: more than {MAX_RULE_DEPTH} levels or {MAX_RULE_NODES} conditions")
+    if not isinstance(node, dict):
+        raise InputError(f"{where}: a condition must be an object")
+    groups = [k for k in ("all", "any") if k in node]
+    if groups:
+        if len(node) != 1:
+            raise InputError(f"{where}: '{groups[0]}' must be the only key of its object")
+        items = node[groups[0]]
+        if not (isinstance(items, list) and items):
+            raise InputError(f"{where}: '{groups[0]}' must be a non-empty list of conditions")
+        for i, item in enumerate(items, 1):
+            _validate_condition(item, facts, f"{where}.{groups[0]}[{i}]", depth + 1, counter)
+        return
+    unknown = sorted(set(node) - {"fact", "op", "value"})
+    if unknown:
+        raise InputError(f"{where}: unknown key(s) {', '.join(unknown)} (a condition is all, any or fact/op/value)")
+    fact, op = node.get("fact"), node.get("op")
+    if fact not in facts:
+        raise InputError(f"{where}: unknown fact {fact!r} for this scope")
+    if op not in RULE_OPS:
+        raise InputError(f"{where}: unknown operator {op!r} (one of {', '.join(RULE_OPS)})")
+    kind = facts[fact]
+    if op == "exists":
+        if "value" in node and not isinstance(node["value"], bool):
+            raise InputError(f"{where}: 'exists' takes true or false")
+        return
+    if "value" not in node:
+        raise InputError(f"{where}: '{op}' needs a value")
+    value = node["value"]
+    if kind == "list":
+        raise InputError(f"{where}: {fact} is a list: only 'exists' applies")
+    if op in NUM_OPS and kind != "num":
+        raise InputError(f"{where}: '{op}' needs a number fact; {fact} is {kind}")
+    if op == "in":
+        if not (isinstance(value, list) and 0 < len(value) <= MAX_IN_VALUES and all(_value_fits(kind, v) for v in value)):
+            raise InputError(f"{where}: 'in' needs a list of 1 to {MAX_IN_VALUES} {kind} values for {fact}")
+    elif not _value_fits(kind, value):
+        raise InputError(f"{where}: {fact} is {kind}; {value!r} is not")
+
+
+def _validate_template(text, facts, where):
+    if not (isinstance(text, str) and text.strip() and len(text) <= MAX_TEMPLATE):
+        raise InputError(f"{where}: must be a non-empty string of up to {MAX_TEMPLATE} characters")
+    for m in PLACEHOLDER_RE.finditer(text):
+        if m.group(1) not in facts:
+            raise InputError(f"{where}: placeholder {{{m.group(1)}}} is not a fact of this scope")
+    if "{" in PLACEHOLDER_RE.sub("", text) or "}" in PLACEHOLDER_RE.sub("", text):
+        raise InputError(f"{where}: unbalanced or malformed placeholder (use {{fact}} or {{fact|fallback}})")
+
+
+def default_catalog_path():
+    """The packaged catalog: $NIC_REPORT_RULES when set, else the first of next to the script, ../share/nic-xray
+    from it (a PREFIX install) and /usr/share/nic-xray. None when none exists."""
+    env = os.environ.get(RULES_ENV)
+    if env:
+        return env
+    here = os.path.dirname(os.path.realpath(__file__))
+    for d in (here, os.path.join(here, os.pardir, "share", "nic-xray"), RULES_SYSTEM_DIR):
+        path = os.path.normpath(os.path.join(d, RULES_FILE))
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def load_catalog(default_path, extra_paths):
+    """The default catalog then every --rules file in order; a later rule replaces an earlier one with the same id
+    (keeping its place), new ids are appended. Modifiers must name rules of the merged catalog."""
+    files, merged = [], collections.OrderedDict()
+    for path in ([default_path] if default_path else []) + list(extra_paths or []):
+        meta, rules = _read_catalog(path)
+        meta["overrides"] = sorted(r["id"] for r in rules if r["id"] in merged)
+        files.append(meta)
+        for r in rules:
+            merged[r["id"]] = r
+    rules = list(merged.values())
+    for r in rules:
+        for target in r["modifies"]:
+            other = merged.get(target)
+            if other is None or other["priority"] is None:
+                raise InputError(f"{r['file']}: rule {r['id']}: modifies {target}, which is not a rule with a priority "
+                                 "in the loaded catalogs")
+            if other["scope"] != r["scope"]:
+                raise InputError(f"{r['file']}: rule {r['id']}: scope {r['scope']} differs from {target}'s ({other['scope']})")
+    return {"files": files, "rules": rules}
+
+
+def eval_condition(node, facts):
+    """Declarative evaluation: all/any, or one fact against a literal. An absent fact matches only 'exists' false."""
+    if "all" in node:
+        return all(eval_condition(n, facts) for n in node["all"])
+    if "any" in node:
+        return any(eval_condition(n, facts) for n in node["any"])
+    v, op, lit = facts.get(node["fact"]), node["op"], node.get("value", True)
+    if op == "exists":
+        return (v is not None) == lit
+    if v is None:
+        return False
+    if op in NUM_OPS:
+        if not (_is_num(v) and _is_num(lit)):
+            return False
+        return {"gt": v > lit, "ge": v >= lit, "lt": v < lit, "le": v <= lit}[op]
+
+    def same(a, b):          # True never equals 1 here
+        return isinstance(a, bool) == isinstance(b, bool) and a == b
+    if op == "in":
+        return any(same(v, x) for x in lit)
+    return same(v, lit) if op == "eq" else not same(v, lit)
+
+
+def fact_text(v):
+    """A fact in a sentence: yes/no, integers with separators, dB/dBm-style decimals, short lists."""
+    if isinstance(v, bool):
+        return "yes" if v else "no"
+    if isinstance(v, int):
+        return f"{v:,}"
+    if isinstance(v, float):
+        if v and abs(v) < 0.01:
+            return f"{v:.2g}"
+        return f"{v:,.0f}" if abs(v) >= 1000 else f"{v:.2f}".rstrip("0").rstrip(".")
+    if isinstance(v, list):
+        more = len(v) - FACT_LIST_SHOWN
+        suffix = f" … and {more} more" if more > 0 else ""
+        body = ", ".join(fact_text(x) for x in v[:FACT_LIST_SHOWN])
+        if len(body) + len(suffix) > FACT_TEXT_MAX:
+            body = body[:FACT_TEXT_MAX - len(suffix) - 1] + "…"
+        return body + suffix
+    return _plain(v)[:FACT_TEXT_MAX]
+
+
+def fill_template(text, facts):
+    """Placeholders replaced by facts ({fact}, or {fact|fallback} when it may be absent). Plain text: the renderers
+    escape it for their format, as any other untrusted text."""
+    def sub(m):
+        v = facts.get(m.group(1))
+        if v is None or v == []:
+            return m.group(2) if m.group(2) is not None else MISSING_TEXT
+        return fact_text(v)
+    return _plain(PLACEHOLDER_RE.sub(sub, text))
+
+
+def asic_of_port(port, xray):
+    """The PCI function prefix (domain:bus:device) of a port: nic-xray's device, else its predictable name."""
+    if xray and xray.get("asic"):
+        return xray["asic"], "nic-xray"
+    m = PCI_NAME_RE.match(port)
+    if m:
+        return f"{int(m.group(1) or 0):04x}:{int(m.group(2)):02x}:{int(m.group(3)):02x}", "name"
+    return None, None
+
+
+def _rx_reading(p):
+    """(module key, Rx dBm, source) of a linked port with light: nic-health deep first (source precedence §6.3.2),
+    else nic-xray (ethtool -m, every vendor); None without one."""
+    if _usable_rx(p) and module_type(p):
+        return module_type(p), p["rx"]["dbm"], "deep"
+    x = p.get("xray") or {}
+    linked = p["linked"] if p["link"] is not None or not x else x.get("link", False)
+    if linked and x.get("rx_dbm") is not None and x["rx_dbm"] > NO_LIGHT_DBM and x.get("module_type"):
+        lanes = x.get("rx_lanes")
+        return f"{x['module_type']} · {len(lanes)}-lane" if lanes else x["module_type"], x["rx_dbm"], "nic-xray"
+    return None
+
+
+def _robust_outlier(delta, st, margin):
+    z = (delta / (MAD_SCALE * st["mad"])) if st["mad"] else None
+    return delta <= -margin and (z is None or z <= -ROBUST_Z_MIN)
+
+
+def _finding_index(sites):
+    """{(site, host, target): (worst severity, sorted check ids)} over active WARN/CRIT/UNKNOWN results, and
+    {(site, host, target): {check_id}} of the suppressed ones."""
+    rank = {s: i for i, s in enumerate(SEVERITIES)}
+    out, suppressed = {}, collections.defaultdict(set)
+    for s in sites:
+        for h in s.hosts.values():
+            for r in h.records:
+                key = (s.site, h.name, r["target"])
+                if r.get("suppressed"):
+                    suppressed[key].add(r["check_id"])
+                elif r["severity"] in FINDING_SEVERITIES:
+                    sev, checks = out.get(key, ("OK", set()))
+                    out[key] = (min(sev, r["severity"], key=lambda x: rank[x]), checks | {r["check_id"]})
+    return {k: (v[0], sorted(v[1])) for k, v in out.items()}, suppressed
+
+
+def _put(facts, **kv):
+    facts.update({k: v for k, v in kv.items() if v is not None})
+
+
+def rule_targets(sites, report_ports, baseline_ports, a4, pcie, pt, multi, args):
+    """Facts per target, by scope: {scope: [(key, facts)]} in a fixed order (design §6.3.1 facts table)."""
+    margin = args.rx_delta_db
+    found, suppressed = _finding_index(sites)
+    xray_of = {(p["site"], p["host"], p["port"]): p.get("xray") for p in report_ports}
+    hosts = {(h.site, h.name): h for s in sites for h in s.hosts.values()}
+    # Rx readings: per host and module type for the host delta; fleet medians from the A4 baseline for deep
+    # readings (the same population, so a port is an outlier here exactly when A4 lists it) and from the baseline
+    # population's nic-xray readings by module type otherwise
+    readings = {}
+    for p in baseline_ports:
+        got = _rx_reading(p)
+        if got:
+            readings[(p["site"], p["host"], p["port"])] = got
+    xray_groups = collections.defaultdict(list)
+    for key, (mtype, rx, src) in readings.items():
+        if src == "nic-xray":
+            xray_groups[mtype].append(rx)
+    fleet = {("deep", t): st for t, st in a4["rx_by_module_type"].items()}
+    fleet.update({("nic-xray", t): _stats(v) for t, v in xray_groups.items() if len(v) >= MIN_GROUP_PORTS})
+    per_host = collections.defaultdict(list)
+    for (site, host, port), (mtype, rx, src) in readings.items():
+        per_host[(site, host, src, mtype)].append((port, rx))
+
+    ports_out = []
+    by_host_ports = collections.defaultdict(list)
+    for p in report_ports:
+        key = (p["site"], p["host"], p["port"])
+        x = p.get("xray") or {}
+        f = {"site": p["site"], "host": p["host"], "role": p["role"], "port": p["port"]}
+        _put(f, link=p["linked"] if p["link"] is not None or not x else x.get("link"))
+        got = readings.get(key)
+        if got:
+            mtype, rx, src = got
+            f.update(rx_dbm=rx, optics_source=src, module_type=mtype)
+            if src == "deep":
+                _put(f, tx_dbm=(p.get("tx") or {}).get("dbm"), rx_lanes=p["rx"]["lanes"],
+                     lanes=len(p["rx"]["lanes"]) if p["rx"]["lanes"] else 1,
+                     optics_status=None if None in (p["rx"]["low"], p["rx"]["high"])
+                     else "OK" if p["rx"]["low"] <= rx <= p["rx"]["high"] else "ALARM",
+                     module_vendor=(p.get("part") or "").split(" ", 1)[0] or None)
+            else:
+                _put(f, tx_dbm=x.get("tx_dbm"), rx_lanes=x.get("rx_lanes"), lanes=len(x["rx_lanes"]) if x.get("rx_lanes") else 1,
+                     optics_status=x.get("optics_status"), module_vendor=x.get("module_vendor"))
+            peers = [v for port, v in per_host[(p["site"], p["host"], src, mtype)] if port != p["port"]]
+            # Readings are within OPTICAL_DBM_RANGE; a derived value that is still not finite is dropped
+            host_delta = rx - statistics.median(peers) if len(peers) >= RX_HOST_MIN_PEERS else None
+            if host_delta is not None and math.isfinite(host_delta):
+                f["rx_delta_host_db"] = round(host_delta, 2)
+                f["rx_low_host"] = f["rx_delta_host_db"] <= -margin
+            st = fleet.get((src, mtype))
+            if st and all(math.isfinite(st[k]) for k in ("median", "mad")) and math.isfinite(rx - st["median"]):
+                f["rx_delta_fleet_db"] = round(rx - st["median"], 2)
+                f["rx_low_fleet"] = _robust_outlier(rx - st["median"], st, margin)
+            deltas = [f[k] for k in ("rx_delta_host_db", "rx_delta_fleet_db") if k in f]
+            if deltas:
+                f["rx_delta_db"] = min(deltas)
+                lows = [f[k] for k in ("rx_low_host", "rx_low_fleet") if k in f]
+                f["rx_low"] = any(lows)
+        elif x.get("module_type"):
+            _put(f, module_type=x["module_type"], module_vendor=x.get("module_vendor"), optics_status=x.get("optics_status"))
+        se = p.get("symbol_errors")
+        if se:
+            f["phy_err_total"] = se["total"]
+            if se["delta"] is not None:
+                f.update(phy_err_window=se["delta"], phy_err_growing=se["delta"] > 0)
+                if p.get("interval_s"):
+                    f["phy_err_rate_s"] = round(se["delta"] / p["interval_s"], 3)
+            if (p.get("uptime_s") or 0) > 0:
+                f["phy_err_rate_h_uptime"] = round(se["total"] / (p["uptime_s"] / SECONDS_PER_HOUR), 3)
+        _put(f, carrier_changes=p.get("carrier_changes"), flaps_window=p.get("flaps_window"),
+             link_down_recent=p.get("link_down_recent"), fec=p.get("fec"), fec_mismatch=p.get("fec_mismatch"),
+             deep_opcode=p.get("deep_opcode"), ber_effective=(p.get("ber") or {}).get("effective"))
+        if p.get("carrier_changes") is not None:
+            f["flaps_high"] = p["carrier_changes"] >= args.flap_min
+        if p.get("discards"):
+            f["discards_total"] = p["discards"]["total"]
+            if p["discards"]["delta"] is not None:
+                f.update(discards_window=p["discards"]["delta"], discards_growing=p["discards"]["delta"] > 0)
+        if p.get("deep_recommendation"):
+            f["deep_recommendation"] = p["deep_recommendation"]
+            f["deep_signal_integrity"] = SIGNAL_INTEGRITY_TEXT in p["deep_recommendation"].lower()
+        elif p.get("deep_opcode") is not None:
+            f["deep_signal_integrity"] = False
+        svc = p.get("service") or {}
+        _put(f, in_use=svc.get("in_use"), in_use_reasons=svc.get("in_use_reasons"),
+             bond_link_failures=svc.get("bond_link_failures"), has_traffic=svc.get("has_traffic"))
+        # Source precedence: nic-health for health, nic-xray for LLDP, LACP, VLANs and placement; bond from nic-xray
+        # (its view of the bonding driver), else from nic-health's P3 facts
+        _put(f, bond=x.get("bond") or svc.get("bond"), lacp_aggregator=x.get("lacp_aggregator"),
+             lacp_partner=x.get("lacp_partner"), lacp_partial=x.get("lacp_partial"), peer_switch=x.get("switch_name"),
+             peer_port=x.get("peer_port"), peer_descr=x.get("port_descr"), peer_from_sweep=x.get("lldp_from"),
+             speed_mbps=x.get("speed_mbps"),
+             mtu=x.get("mtu"), vlans=x.get("vlans"), numa_node=x.get("numa_node"), slot_label=x.get("slot_label"))
+        if f.get("peer_switch") or f.get("peer_port"):
+            f["peer"] = " ".join(v for v in (f.get("peer_switch"), f.get("peer_port")) if v)
+        _put(f, asic=asic_of_port(p["port"], x)[0])
+        if f.get("link") and f.get("in_use") is False and f.get("has_traffic") is False:
+            f["idle"] = True
+        elif f.get("in_use") is not None:
+            f["idle"] = False
+        for cid in suppressed.get(key, ()):
+            for k in FACT_SOURCES.get(cid, ()):
+                f.pop(k, None)
+        active = ACT_NONE
+        if f.get("phy_err_growing") or (f.get("link_down_recent") or 0) > 0 or (f.get("flaps_window") or 0) > 0:
+            active = ACT_WINDOW
+        elif (f.get("phy_err_total") or 0) > 0 or f.get("flaps_high"):
+            active = ACT_HISTORY
+        f["active"] = active
+        if key in found:
+            f["severity"], f["checks"] = found[key]
+        ports_out.append((key, f))
+        by_host_ports[(p["site"], p["host"])].append(f)
+
+    # VLAN drift: per (site, role, port name), a port whose LLDP VLAN set differs from a strict majority of its peers
+    vlan_groups = collections.defaultdict(list)
+    for _, f in ports_out:
+        if f.get("vlans"):
+            vlan_groups[(f["site"], f["role"] or NO_ROLE, f["port"])].append(f)
+    for group in vlan_groups.values():
+        if len(group) < VLAN_MIN_HOSTS:
+            continue
+        sets = collections.Counter(tuple(f["vlans"]) for f in group)
+        top, n = sorted(sets.items(), key=lambda kv: (-kv[1], kv[0]))[0]
+        if n * 2 > len(group):
+            for f in group:
+                f["role_vlan_drift"] = tuple(f["vlans"]) != top
+                f["role_vlans"] = list(top)
+
+    # Cross-site patterns (A5) a port takes part in
+    pattern_sites = collections.Counter()
+    for a in pt["across_sites"]:
+        for i in a["items"]:
+            pattern_sites[(i["site"], i["host"], i["target"])] = max(pattern_sites[(i["site"], i["host"], i["target"])],
+                                                                      len(a["sites"]))
+    for key, f in ports_out:
+        if pattern_sites.get(key):
+            f["cross_site_sites"] = pattern_sites[key]
+
+    # Role shares (same role within a site) over collected hosts
+    role_hosts = collections.Counter((h.site, h.role or NO_ROLE) for h in hosts.values() if h.collected)
+    below = {(x["site"], x["host"], x["asic"]) for x in pcie["below_capability"]}
+    role_below = collections.Counter()
+    for site, host in {(s, h) for s, h, _ in below}:
+        role_below[(site, hosts[(site, host)].role or NO_ROLE)] += 1
+
+    asics_out = []
+    for s in sites:
+        for h in sorted(s.hosts.values(), key=lambda h: h.name):
+            for r in h.records:
+                if r["check_id"] != PCIE_LINK:
+                    continue
+                key, group = (s.site, h.name, r["target"]), (s.site, h.role or NO_ROLE)
+                f = {"site": s.site, "host": h.name, "role": h.role, "asic": r["target"], "role_hosts": role_hosts[group],
+                     "role_hosts_pcie": role_below[group]}
+                if not r.get("suppressed"):         # a suppressed result gives no facts (§6.3 A7), as for ports
+                    f.update(pcie_trained=_plain(r["value"]) or None, pcie_supported=_plain(r["threshold"]) or None,
+                             slot_limited="slot-limited" in r["evidence"])
+                f = {k: v for k, v in f.items() if v is not None}
+                if role_hosts[group]:
+                    f["role_share_pcie"] = round(role_below[group] / role_hosts[group], 3)
+                if not r.get("suppressed") and r["severity"] in ("OK", "WARN"):
+                    f["pcie_below_cap"] = key in below
+                if key in found:
+                    f["severity"], f["checks"] = found[key]
+                asics_out.append((key, f))
+    asic_index = {k: f for k, f in asics_out}
+    # Ports on each ASIC (nic-xray device, else the predictable name); a host's unmapped ports with growing receive
+    # discards go to its only ASIC below capability, when it has exactly one (mapping "host")
+    for (site, host), pfs in sorted(by_host_ports.items()):
+        unmapped = []
+        for f in sorted(pfs, key=lambda f: f["port"]):
+            asic, how = asic_of_port(f["port"], xray_of.get((site, host, f["port"])))
+            target = asic_index.get((site, host, asic)) if asic else None
+            if target is None:
+                unmapped.append(f)
+                continue
+            _put(target, numa_node=f.get("numa_node"), slot_label=f.get("slot_label"))
+            if f.get("discards_growing"):
+                _add_discards(target, f, how)
+        below_here = [a for (s_, h_, _), a in asics_out if (s_, h_) == (site, host) and a.get("pcie_below_cap")]
+        if len(below_here) == 1:
+            for f in unmapped:
+                if f.get("discards_growing"):
+                    _add_discards(below_here[0], f, "host")
+    for _, f in asics_out:
+        if "pcie_below_cap" in f and "rx_discards_growing" not in f:
+            f["rx_discards_growing"] = False
+
+    bonds_out = []
+    for (site, host), pfs in sorted(by_host_ports.items()):
+        members = collections.defaultdict(list)
+        for f in pfs:
+            if f.get("bond"):
+                members[f["bond"]].append(f)
+        for bond, ms in sorted(members.items()):
+            ms.sort(key=lambda f: f["port"])
+            up = [m for m in ms if m.get("link")]
+            speeds = sorted({m["speed_mbps"] for m in up if m.get("speed_mbps")})
+            mtus = sorted({m["mtu"] for m in ms if m.get("mtu")})
+            lacp = {(m["lacp_aggregator"], m["lacp_partner"]) for m in up
+                    if m.get("lacp_aggregator") is not None and m.get("lacp_partner") != LACP_NO_PARTNER}
+            # This sweep's LLDP only: a neighbour from an earlier sweep names a peer, it does not prove the cabling
+            current = [m for m in ms if not m.get("peer_from_sweep")]
+            switches = sorted({m["peer_switch"] for m in current if m.get("peer_switch")})
+            f = {"site": site, "host": host, "role": ms[0]["role"], "bond": bond, "members": len(ms), "members_up": len(up),
+                 "member_ports": [m["port"] for m in ms], "bond_peer_switches": switches,
+                 "bond_peer_switch_count": len(switches), "bond_lldp_complete": all(m.get("peer_switch") and not m.get("peer_from_sweep") for m in ms),
+                 "peers": [m["peer"] for m in ms if m.get("peer")]}
+            if len([m for m in up if m.get("speed_mbps")]) >= 2:
+                f.update(bond_speed_mismatch=len(speeds) > 1, bond_speeds=speeds)
+            if len([m for m in ms if m.get("mtu")]) >= 2:
+                f.update(bond_mtu_mismatch=len(mtus) > 1, bond_mtus=mtus)
+            if len([m for m in up if m.get("lacp_aggregator") is not None and m.get("lacp_partner") != LACP_NO_PARTNER]) >= 2:
+                f["bond_lacp_split"] = len(lacp) > 1
+            failures = [m["bond_link_failures"] for m in ms if m.get("bond_link_failures") is not None]
+            if failures:
+                f["bond_link_failures"] = sum(failures)
+            bonds_out.append(((site, host, bond), f))
+
+    hosts_out, groups = [], collections.OrderedDict()
+    for s in sites:
+        for h in sorted(s.hosts.values(), key=lambda h: h.name):
+            if not h.collected:
+                continue
+            sev = collections.Counter(r["severity"] for r in _active(h.records))
+            f = {"site": s.site, "host": h.name, "role": h.role, "verdict": h.verdict, "nic_xray": h.xray_ports is not None,
+                 "findings_crit": sev["CRIT"], "findings_warn": sev["WARN"], "findings_unknown": sev["UNKNOWN"]}
+            _put(f, tool_version=h.meta.get("tool_version"), uptime_s=h.meta.get("uptime_s"))
+            hosts_out.append(((s.site, h.name), f))
+            groups.setdefault((s.site, h.role or NO_ROLE), []).append(h)
+    groups_out = []
+    for (site, role), hs in groups.items():
+        v = collections.Counter(h.verdict for h in hs)
+        groups_out.append(((site, role), {"site": site, "role": role, "role_hosts": len(hs), "hosts_clean": v["OK"],
+                                          "clean_share": round(v["OK"] / len(hs), 3), "hosts_crit": v["CRIT"],
+                                          "hosts_warn": v["WARN"], "role_hosts_pcie": role_below[(site, role)],
+                                          "role_share_pcie": round(role_below[(site, role)] / len(hs), 3)}))
+    fleet_out = []
+    if multi:
+        by_role = collections.OrderedDict()
+        for a in pt["across_sites"]:
+            by_role.setdefault(a["role"], []).append(a)
+        for role, rows in by_role.items():
+            places = sorted({(i["site"], i["host"], i["target"]) for a in rows for i in a["items"]})
+            sites_hit = sorted({x for a in rows for x in a["sites"]})
+            items = sorted({(i["site"], i["host"], i["target"], a["issue"]) for a in rows for i in a["items"]})
+            fleet_out.append(((role,), {"role": role, "issues": [a["issue"] for a in rows], "sites": sites_hit,
+                                        "sites_with": len(sites_hit),
+                                        "places": [f"{s_} {h_} {t_}" for s_, h_, t_ in places], "_places": places,
+                                        "_items": items}))
+    return {"port": ports_out, "asic": asics_out, "bond": bonds_out, "host": hosts_out, "group": groups_out,
+            "fleet": fleet_out}
+
+
+def _add_discards(target, port_facts_, how):
+    target["rx_discards_growing"] = True
+    target["rx_discards_total"] = target.get("rx_discards_total", 0) + port_facts_.get("discards_total", 0)
+    target.setdefault("rx_discards_ports", []).append(port_facts_["port"])
+    target["discards_mapping"] = how if target.get("discards_mapping") in (None, how) else "mixed"
+
+
+def _place(scope, key):
+    """Display and sort key of a target: (site, host, target name)."""
+    if scope in ("port", "asic", "bond"):
+        return key
+    if scope == "host":
+        return (key[0], key[1], "")
+    if scope == "group":
+        return (key[0], "", key[1])
+    return ("", "", key[0])
+
+
+def diagnose(targets, catalog, multi):
+    """Evaluate the catalog, merge matches per target, rank (§6.3.2) and fill the templates (§6.3.3)."""
+    if not catalog:
+        return {"catalogs": [], "rules": 0, "matches": [], "recommendations": [], "facts": _facts_summary(targets)}
+    matches, per_target = [], collections.OrderedDict()
+    for rule in catalog["rules"]:
+        for key, facts in targets[rule["scope"]]:
+            if eval_condition(rule["when"], facts):
+                matches.append({"rule": rule["id"], "scope": rule["scope"], "target": list(key)})
+                per_target.setdefault((rule["scope"], key), []).append(rule)
+    facts_of = {(scope, key): f for scope, items in targets.items() for key, f in items}
+    recs = []
+    for (scope, key), rules in per_target.items():
+        main = sorted((r for r in rules if r["priority"] is not None), key=lambda r: (r["priority"], r["id"]))
+        if not main:
+            continue                                  # a modifier alone recommends nothing
+        ids = {r["id"] for r in main}
+        mods = sorted((r for r in rules if r["priority"] is None and ids & set(r["modifies"])), key=lambda r: r["id"])
+        f = facts_of[(scope, key)]
+        base = main[0]["priority"]
+        score, notes = float(base), []
+        for m in mods:
+            score -= m["raise"]
+            notes.append(f"raised {m['raise']} level(s) by {m['id']}")
+        why = _impact(f) if scope == "port" else None
+        if why:
+            score -= IMPACT_RAISE
+            notes.append(f"raised half a level: {why}")
+        impact = 1 if why else 0
+        if scope == "port" and f.get("idle"):
+            score += IDLE_LOWER
+            notes.append("lowered: up but unused (not in use, no traffic in the window)")
+        recs.append({"scope": scope, "keys": [key], "rules": main + mods, "facts": f, "score": score, "base": base,
+                     "adjustments": notes, "activity": f.get("active", ACT_NONE), "impact": impact})
+    recs = _collapse(recs)
+    # Breadth: a cross-site pattern is listed once, with the recommendations of the places it links; on its own
+    # only when some of its places have no recommendation
+    covered = {}
+    for r in recs:
+        if r["scope"] in ("port", "asic"):
+            for k in r["keys"]:
+                covered[k] = r
+    patterns, standalone = [], []
+    for r in recs:
+        if r["scope"] == "fleet":
+            places = r["facts"]["_places"]
+            (patterns if places and all(p in covered for p in places) else standalone).append(r)
+        else:
+            standalone.append(r)
+    ranked = sorted(standalone, key=_rank_key)
+    for n, r in enumerate(ranked, 1):
+        r["id"] = f"R{n}"
+    for pat in sorted(patterns, key=_rank_key):
+        linked = sorted({covered[p]["id"] for p in pat["facts"]["_places"]}, key=lambda i: int(i[1:]))
+        host_rec = next(r for r in ranked if r["id"] == linked[0])
+        host_rec.setdefault("patterns", []).append({"rules": [x["id"] for x in pat["rules"]], "links": linked,
+                                                    "facts": pat["facts"], "rule_objs": pat["rules"]})
+    out = [_render_rec(r, multi) for r in ranked]
+    return {"catalogs": catalog["files"], "rules": len(catalog["rules"]), "matches": matches, "recommendations": out,
+            "facts": _facts_summary(targets)}
+
+
+def _impact(f):
+    """Why a port's recommendation is raised (service impact, §6.3.2): a bond member with bond link failures (P3),
+    link drops in the window or traffic in the window; None otherwise."""
+    if not f.get("bond"):
+        return None
+    if (f.get("bond_link_failures") or 0) > 0:
+        return f"{f['bond']} member with {f['bond_link_failures']:,} bond link failures"
+    if (f.get("link_down_recent") or 0) > 0 or (f.get("flaps_window") or 0) > 0:
+        return f"{f['bond']} member dropping its link in the window"
+    if f.get("has_traffic"):
+        return f"{f['bond']} member carrying traffic"
+    return None
+
+
+def _collapse(recs):
+    """Recommendations that differ only by host (same rules, site, role, scope, target name, score and filled
+    texts) become one that lists the hosts."""
+    groups = collections.OrderedDict()
+    for r in recs:
+        f = r["facts"]
+        if r["scope"] in ("port", "asic", "bond"):
+            texts = tuple(fill_template(x[key], f) for x in r["rules"] for key in ("diagnosis", "action"))
+            k = (r["scope"], f["site"], f.get("role"), r["keys"][0][2], tuple(x["id"] for x in r["rules"]), r["score"],
+                 tuple(r["adjustments"]), texts)
+        else:
+            k = (r["scope"], r["keys"][0])
+        groups.setdefault(k, []).append(r)
+    out = []
+    for rs in groups.values():
+        rs.sort(key=lambda r: r["keys"][0])
+        first = dict(rs[0])
+        first["keys"] = [k for r in rs for k in r["keys"]]
+        first["activity"] = max(r["activity"] for r in rs)
+        first["impact"] = max(r["impact"] for r in rs)
+        first["all_facts"] = [r["facts"] for r in rs]
+        out.append(first)
+    return out
+
+
+def _rank_key(r):
+    """Score (base priority adjusted), then activity, service impact, breadth (hosts), then place: deterministic."""
+    return (r["score"], -r["activity"], -r["impact"], -len(r["keys"]), [_place(r["scope"], k) for k in r["keys"]],
+            [x["id"] for x in r["rules"]])
+
+
+def _render_rec(r, multi):
+    f = r["facts"]
+    level = min(max(math.ceil(r["score"]), PRIORITIES[0]), PRIORITIES[-1])
+    main = [x for x in r["rules"] if x["priority"] is not None]
+
+    def texts(key, rules):              # each rule's sentence once, in rule order
+        return list(dict.fromkeys(fill_template(x[key], f) for x in rules))
+    hosts = sorted({k[1] for k in r["keys"] if r["scope"] in ("port", "asic", "bond", "host")})
+    peers, peer_sweeps = [], []
+    for fx in r.get("all_facts", [f]):
+        if fx.get("peer") and fx["peer"] not in peers:
+            peers.append(fx["peer"])
+            peer_sweeps.append(fx.get("peer_from_sweep"))
+    out = {"id": r["id"], "priority": level, "score": r["score"], "base_priority": r["base"],
+           "adjustments": r["adjustments"], "activity": ["none", "history", "window"][r["activity"]],
+           "service_impact": bool(r["impact"]), "scope": r["scope"], "site": f.get("site"), "role": f.get("role") or None,
+           "hosts": hosts, "target": _place(r["scope"], r["keys"][0])[2], "peers": peers,
+           "peer_sweeps": peer_sweeps,
+           "rules": [{"id": x["id"], "priority": x["priority"] if x["priority"] is not None else MODIFIER,
+                      "ref": x["ref"], "file": x["file"]} for x in r["rules"]],
+           "diagnosis": " ".join(texts("diagnosis", main)), "action": " ".join(texts("action", main)),
+           "modifiers": [{"id": x["id"], "diagnosis": _assumed(fill_template(x["diagnosis"], f), x, f),
+                          "action": fill_template(x["action"], f)} for x in r["rules"] if x["priority"] is None],
+           "targets": [list(_place(r["scope"], k)) for k in r["keys"]],
+           "covers": _covers(r),
+           "facts": {k: v for k, v in f.items() if not k.startswith("_")}}
+    out["patterns"] = [{"rules": p["rules"], "links": p["links"], "role": p["facts"]["role"],
+                        "sites": p["facts"]["sites"], "issues": p["facts"]["issues"],
+                        "diagnosis": " ".join(dict.fromkeys(fill_template(x["diagnosis"], p["facts"]) for x in p["rule_objs"])),
+                        "action": " ".join(dict.fromkeys(fill_template(x["action"], p["facts"]) for x in p["rule_objs"]))}
+                       for p in r.get("patterns", [])]
+    return out
+
+
+def _assumed(text, rule, f):
+    """A discards sentence on an ASIC whose ports were pinned to it only as the host's one ASIC below capability
+    says so (before its closing period)."""
+    if NIC_DISCARDS not in rule["explains"] or f.get("discards_mapping") not in ("host", "mixed"):
+        return text
+    return f"{text[:-1]} {DISCARDS_ASSUMED}." if text.endswith(".") else f"{text} {DISCARDS_ASSUMED}"
+
+
+def _fleet_covers(facts, rules):
+    """(site, host, target, check) a cross-site pattern explains: each place's issue, for the checks of that issue
+    family its rules explain."""
+    explained = {c for x in rules for c in x["explains"]}
+    return [(s_, h_, t_, c) for s_, h_, t_, issue in facts["_items"] for c in sorted(explained)
+            if ISSUE_FAMILY.get(c, c) == issue or (issue == OUTLIER_KIND and c == "mlx5.deep.module")]
+
+
+def _covers(r):
+    """The findings a recommendation explains, as [site, host, target, check]: per port, ASIC, bond or host, the
+    checks its rules (modifiers included) explain; on an ASIC also the ports whose discards a discards-explaining rule names; for a
+    cross-site pattern, its places (linked patterns add theirs to the recommendation they are listed with)."""
+    if r["scope"] == "fleet":
+        return [list(c) for c in _fleet_covers(r["facts"], r["rules"])]
+    explained = sorted({c for x in r["rules"] for c in x["explains"]})
+    # A host's own records name the host as their target
+    targets = r["keys"] if r["scope"] in ("port", "asic", "bond") else [(*k, k[1]) for k in r["keys"]] \
+        if r["scope"] == "host" else []
+    out = [[*k, c] for k in targets for c in explained]
+    if r["scope"] == "asic" and NIC_DISCARDS in explained:
+        out += [[k[0], k[1], port, NIC_DISCARDS] for fx, k in zip(r.get("all_facts", [r["facts"]]), r["keys"])
+                for port in fx.get("rx_discards_ports", [])]
+    for p in r.get("patterns", []):
+        out += [list(c) for c in _fleet_covers(p["facts"], p["rule_objs"])]
+    return out
+
+
+def _facts_summary(targets):
+    """Per scope: targets, and how many carry each known fact (0 = always absent with this data)."""
+    out = {}
+    for scope, items in targets.items():
+        counts = collections.Counter(k for _, f in items for k in f if not k.startswith("_"))
+        out[scope] = {"targets": len(items), "facts": {k: counts.get(k, 0) for k in sorted(RULE_FACTS[scope])}}
+    return out
+
+
+def unexplained(sites, recs):
+    """Active findings no recommendation explains (a rule on their target, a modifier or a cross-site pattern whose
+    'explains' names their check): gaps in the catalog stay visible (§6.3.2)."""
+    covered = {tuple(c) for r in recs for c in r["covers"]}
+    return [{"site": r["site"], "host": r["host"], "target": r["target"], "check_id": r["check_id"],
+             "severity": r["severity"]} for r in findings(sites)
+            if (r["site"], r["host"], r["target"], r["check_id"]) not in covered]
+
+
+def site_status(verdict_rows):
+    """Executive summary per site (A2): hosts, clean share, hosts per verdict and the status icon."""
+    out = []
+    for v in verdict_rows:
+        worst = next((k for k in ("CRIT", "WARN", "UNKNOWN") if v["by_verdict"][k]), "OK")
+        out.append({"site": v["site"], "hosts": v["hosts"], "collected": v["collected"], "clean": v["clean"],
+                    "clean_pct": v["clean_pct"], "by_verdict": v["by_verdict"], "status": worst})
+    return out
+
+
 def analyse(sites, missing, args=None, baseline_sites=None):
     multi = len(sites) + len(missing) > 1
     args = args or argparse.Namespace(rx_delta_db=DEFAULT_RX_DELTA_DB, flap_min=DEFAULT_FLAP_MIN, baseline="scope")
@@ -1346,9 +2474,14 @@ def analyse(sites, missing, args=None, baseline_sites=None):
     for r in findings(sites):
         key = (r["site"], r["host"], r["target"])
         fnd.append({**r, "service": service[key]} if r["scope"] == "port" and key in service else r)
+    pt, vd = patterns(sites, a4, pcie, multi), verdicts(sites)
+    targets = rule_targets(sites, report_ports, baseline_ports, a4, pcie, pt, multi, args)
+    diag = diagnose(targets, getattr(args, "catalog", None), multi)
+    diag["unexplained"] = unexplained(sites, diag["recommendations"])
+    diag["summary"] = site_status(vd)
     return {"multi_site": multi, "coverage": cov,
-            "verdicts": verdicts(sites), "findings": fnd, "baselines": a4,
-            "patterns": patterns(sites, a4, pcie, multi), "suppressed": supp}
+            "verdicts": vd, "findings": fnd, "baselines": a4,
+            "patterns": pt, "suppressed": supp, "diagnosis": diag}
 
 
 # --------------------------------------------------------------------------------- themes (§6.8)
@@ -1480,16 +2613,23 @@ def _plain(v):
     return " ".join(CONTROL_RE.sub("", str(v)).split())
 
 
+def md_entities(text):
+    """'&', '<' and '>' as entities: untrusted text in Markdown prose never becomes raw HTML."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def md_cell(v):
     if isinstance(v, _MD):
         return v.replace("|", "/")
     # '*' neutralised: untrusted text must not turn into bold or a severity badge
-    return "—" if v is None or v == "" else MD_LINK_RE.sub("］", _plain(v)).replace("*", "∗").replace("|", "/")
+    return "—" if v is None or v == "" else md_entities(MD_LINK_RE.sub("］", _plain(v)).replace("*", "∗").replace("|", "/"))
 
 
-def md_inline(v):
-    """Untrusted text inside Markdown prose or a code span: one line, no backticks, links or other markup."""
-    return MD_LINK_RE.sub("］", _plain(v)).replace("`", "'").replace("*", "∗")
+def md_inline(v, literal=False):
+    """Untrusted text inside Markdown prose: one line, no backticks, links or other markup. literal: for a code span
+    (shown as written) or text its format escapes itself (HTML title, JSON), so without entities."""
+    text = MD_LINK_RE.sub("］", _plain(v)).replace("`", "'").replace("*", "∗")
+    return text if literal else md_entities(text)
 
 
 def _badge(v):
@@ -1507,9 +2647,9 @@ def md_table(head, rows):
     return "\n".join(out)
 
 
-def title_for(sites, missing, args):
+def title_for(sites, missing, args, literal=False):
     if args.title:
-        return md_inline(args.title)
+        return md_inline(args.title, literal)
     names = [s.site for s in sites] + missing
     return f"NIC Health: {names[0]}" if len(names) == 1 else f"NIC Health: cross-site comparison ({' · '.join(names)})"
 
@@ -1531,8 +2671,10 @@ def render_md(result, sites, missing, args, now):
         md.append(f"- **Classification:** {md_inline(args.classification)}")
     md.append("")
 
-    # 1. Coverage
-    md += ["## 1. Coverage and comparability", ""]
+    md += render_md_summary(result, multi)
+
+    # 2. Coverage
+    md += ["## 2. Coverage and comparability", ""]
     head = ["", *[c["group"] for c in cov["groups"]]]
     rows = [
         ["Hosts", *[c["hosts"] for c in cov["groups"]]],
@@ -1548,6 +2690,9 @@ def render_md(result, sites, missing, args, now):
         ["nic-health version", *[", ".join(c["tool_versions"]) for c in cov["groups"]]],
         ["Typed metrics / impact facts", *[f"{c['hosts_with_typed_metrics']} of {c['collected']} / "
                                            f"{c['hosts_with_impact_facts']}" for c in cov["groups"]]],
+        ["Hosts with nic-xray", *[c["hosts_with_xray"] for c in cov["groups"]]],
+        ["Optics from deep / nic-xray / none", *[f"{c['optics']['deep']} / {c['optics']['nic-xray']} / {c['optics']['none']}"
+                                                 for c in cov["groups"]]],
         ["Window", *[", ".join(f"{i} s" for i in c["intervals_s"]) for c in cov["groups"]]],
         ["Collected on", *[", ".join(c["dates"]) for c in cov["groups"]]],
     ]
@@ -1560,8 +2705,8 @@ def render_md(result, sites, missing, args, now):
     if cov["caveats"]:
         md += ["**Caveats**", ""] + [f"- {md_inline(c)}" for c in cov["caveats"]] + [""]
 
-    # 2. Verdicts
-    md += ["## 2. Verdicts", ""]
+    # 3. Verdicts
+    md += ["## 3. Verdicts", ""]
     if multi:
         md += [md_table(["Site", "Hosts", "Collected", "OK", "WARN", "CRIT", "UNKNOWN", "Clean (of collected)", "CRIT / WARN / UNKNOWN rows"],
                         [[v["site"], v["hosts"], v["collected"], *[v["by_verdict"][k] for k in VERDICTS],
@@ -1578,8 +2723,8 @@ def render_md(result, sites, missing, args, now):
                             [[h["host"], h["role"], h["status"], _verdict_cell(h["verdict"], h.get("verdict_before"))]
                              for h in v["hosts_detail"]]), ""]
 
-    # 3. Findings
-    md += ["## 3. Findings", ""]
+    # 4. Findings
+    md += ["## 4. Findings", ""]
     fnd = result["findings"]
     if not fnd:
         md += ["No WARN, CRIT or UNKNOWN result.", ""]
@@ -1592,10 +2737,10 @@ def render_md(result, sites, missing, args, now):
                 if md[-1] != "":
                     md.append("")
                 md += [f"### {r['site'] + ' · ' if multi else ''}{r['host']}", ""]
-            ev = md_inline(r["evidence"])
-            ev = ev if len(ev) <= MAX_EVIDENCE else ev[:MAX_EVIDENCE] + "…"
+            raw = r["evidence"] or ""
+            ev = md_inline(raw[:MAX_EVIDENCE]) + ("…" if len(raw) > MAX_EVIDENCE else "")   # cut before entities
             svc = service_label(r.get("service"))
-            md.append(f"- **{r['severity']}** `{md_inline(r['target'])}` `{md_inline(r['check_id'])}`: "
+            md.append(f"- **{r['severity']}** `{md_inline(r['target'], literal=True)}` `{md_inline(r['check_id'], literal=True)}`: "
                       f"{md_inline(r['value']) or '—'}" + (f" ({md_inline(svc)})" if svc else ""))
             if ev:
                 md.append(f"  - Evidence: {ev}")
@@ -1604,6 +2749,7 @@ def render_md(result, sites, missing, args, now):
         md.append("")
     md += render_md_baselines(result, multi)
     md += render_md_patterns(result, multi)
+    md += render_md_actions(result, multi)
     md += render_md_suppressed(result, multi)
     md += ["---", "", attribution(now), ""]
     return "\n".join(md)
@@ -1644,11 +2790,11 @@ def render_md_baselines(result, multi):
         population = "the sites in this report"
     else:
         population = "the sites of the combined report"           # --per-site: same medians as the combined one
-    md = ["## 4. Baselines and outliers", "",
+    md = ["## 5. Baselines and outliers", "",
           f"Over ports with link. Baseline: {population}"
           f" ({', '.join(b['baseline']['sites'])}; {b['baseline']['ports_with_rx']} ports with an Rx reading)."
           + "".join(f" {x['site']} left out of the baseline: {md_inline(x['reason'])}." for x in b["baseline"]["excluded"]), "",
-          "### 4.1 Receive power by module type", ""]
+          "### 5.1 Receive power by module type", ""]
     if b["whole_dbm_sites"]:
         md[-2:-2] = [f"Power at {', '.join(b['whole_dbm_sites'])} was recorded in whole dBm: differences under 2 dB "
                      "are not significant there, and minima and p5 values lean on that rounding.", ""]
@@ -1656,7 +2802,7 @@ def render_md_baselines(result, multi):
                     [[t, st["ports"], _f(st["min"]), _f(st["p5"]), _f(st["median"]), _f(st["max"])]
                      for t, st in b["rx_by_module_type"].items()]) if b["rx_by_module_type"]
            else "No module type has enough ports with an Rx reading for a baseline.", ""]
-    md += ["### 4.2 Receive power outliers", "",
+    md += ["### 5.2 Receive power outliers", "",
            "At least the configured margin below the median for the module type, with a robust score "
            f"(median/MAD) of at least {ROBUST_Z_MIN:g}.", ""]
     md += [md_table(["Host", "Port", "Role", "Module type", "Rx dBm", "Median", "Δ dB", "Robust z"],
@@ -1676,25 +2822,25 @@ def render_md_baselines(result, multi):
                                  for o in b["rx_near_low_limit"]) + ".")
     for n in notes:
         md += [md_inline(n), ""]
-    md += ["### 4.3 Transmit power by module type", ""]
+    md += ["### 5.3 Transmit power by module type", ""]
     md += [md_table(["Module type", "Ports", "Min", "Median", "Max"],
                     [[t, st["ports"], _f(st["min"]), _f(st["median"]), _f(st["max"])]
                      for t, st in b["tx_by_module_type"].items()]) if b["tx_by_module_type"] else "No Tx baseline.", ""]
-    md += ["### 4.4 Link errors since boot", "", "Uncorrectable symbol errors (rx_symbol_err_phy) since boot.", ""]
+    md += ["### 5.4 Link errors since boot", "", "Uncorrectable symbol errors (rx_symbol_err_phy) since boot.", ""]
     md += [md_table(["Host", "Port", "Role", "Symbol errors", "In window", "Per hour of uptime"],
                     [[_where(e, multi), e["port"], e["role"], f"{e['total']:,}", e["window"], _rate(e["per_hour"])]
                      for e in b["errors_since_boot"]]) + (f"\n\n{b['errors_ports']} ports with errors; the {TOP_N} highest shown."
                                                          if b["errors_ports"] > TOP_N else "")
            if b["errors_since_boot"] else "No port with symbol errors since boot.", ""]
-    md += ["### 4.5 Link stability", ""]
+    md += ["### 5.5 Link stability", ""]
     md += [md_table(["Host", "Port", "Role", "Carrier changes"],
                     [[_where(f, multi), f["port"], f["role"], f"{f['carrier_changes']:,}"] for f in b["flaps"]])
            if b["flaps"] else "No port above the carrier-change threshold.", ""]
-    md += ["### 4.6 Receive discards since boot", ""]
+    md += ["### 5.6 Receive discards since boot", ""]
     md += [md_table(["Host", "Port", "Role", "Discards", "In window"],
                     [[_where(d, multi), d["port"], d["role"], f"{d['total']:,}", d["window"]] for d in b["discards"]])
            if b["discards"] else "No port with receive discards since boot.", ""]
-    md += ["### 4.7 Module temperature and PCIe", ""]
+    md += ["### 5.7 Module temperature and PCIe", ""]
     hot = b["hottest_modules"]
     md += [("Hottest modules: " + md_inline(", ".join(f"{_where(t, multi)} {t['port']} {t['temp_c']:g} °C" for t in hot)) + ". ")
            if hot else ""]
@@ -1721,7 +2867,7 @@ def _places(items):
 
 def render_md_patterns(result, multi):
     pt = result["patterns"]
-    md = ["## 5. Patterns", ""]
+    md = ["## 6. Patterns", ""]
     if not pt["roles_known"]:
         md += ["Hosts have no role (use -r/--role-regex): within-site patterns group all hosts of a site, "
                "and cross-site patterns need roles.", ""]
@@ -1744,6 +2890,89 @@ def render_md_patterns(result, multi):
     return md
 
 
+def _rec_target(r, multi):
+    """Where a recommendation applies, for Markdown: site and hosts, the port/ASIC/bond, and the LLDP peer."""
+    where = f"{r['site']} " if multi and r["site"] else ""
+    if r["scope"] in ("port", "asic", "bond"):
+        text = f"{where}{', '.join(r['hosts'])} `{md_inline(r['target'], literal=True)}`"
+        if r["peers"]:
+            text += " ↔ " + ", ".join(f"`{md_inline(x, literal=True)}`" + (f" (LLDP from sweep {md_inline(st)})" if st else "")
+                                      for x, st in zip(r["peers"], r.get("peer_sweeps") or [None] * len(r["peers"])))
+        return text
+    if r["scope"] == "host":
+        return f"{where}{', '.join(r['hosts'])}"
+    if r["scope"] == "group":
+        return f"{r['site']} role {md_inline(r['target'])}"
+    return f"role {md_inline(r['target'])} at {', '.join(r['facts'].get('sites', []))}"
+
+
+def _rec_line(r, multi):
+    return f"{PRIORITY_ICON[r['priority']]} **{r['id']} · P{r['priority']}** {_rec_target(r, multi)}"
+
+
+def render_md_summary(result, multi):
+    """Section 1: site status (A2) and the top recommendations, from templates (design §6.3.3)."""
+    dg = result["diagnosis"]
+    recs = dg["recommendations"]
+    md = ["## 1. Executive summary", ""]
+    rows = []
+    for st in dg["summary"]:
+        here = collections.Counter(r["priority"] for r in recs if r["site"] == st["site"])
+        rows.append([st["site"], st["hosts"],
+                     f"{st['clean']} ({st['clean_pct']}%)" if st["clean_pct"] is not None else None,
+                     " / ".join(str(st["by_verdict"][k]) for k in ("CRIT", "WARN", "UNKNOWN")),
+                     _MD(f"{STATUS_ICON[st['status']]} **{st['status']}**"), " / ".join(str(here[p]) for p in PRIORITIES)])
+    md += [md_table(["Site", "Hosts", "Clean (of collected)", "Hosts CRIT / WARN / UNKNOWN", "Status",
+                     "Actions P1 / P2 / P3 / P4"], rows), ""]
+    if not dg["catalogs"]:
+        md += ["No rule catalog loaded: no recommendations (see section 7).", ""]
+        return md
+    if recs:
+        md += [f"**Top recommendations** (all {len(recs)} in section 7, with their rules)", ""]
+        md += [f"- {_rec_line(r, multi)}: {md_inline(r['diagnosis'])}" for r in recs[:TOP_SUMMARY]] + [""]
+    else:
+        md += ["No rule matched: no recommendation.", ""]
+    n = len(dg["unexplained"])
+    md += [f"{n} finding(s) no rule explains, listed in section 7.1 for review." if n
+           else "Every finding is explained by a recommendation.", ""]
+    return md
+
+
+def render_md_actions(result, multi):
+    """Section 7: ranked recommendations (merged per target, cross-site patterns linked) and unexplained findings."""
+    dg = result["diagnosis"]
+    md = ["## 7. Recommended actions (priority order)", ""]
+    if not dg["catalogs"]:
+        return md + [f"No rule catalog was found ({RULES_FILE}); give one with -u/--rules or {RULES_ENV}.", ""]
+    cats = "; ".join(f"{md_inline(c['file'])} (catalog {md_inline(c['catalog_version'])}, {c['rules']} rules"
+                     + (f"; overrides {', '.join(c['overrides'])}" if c["overrides"] else "") + ")" for c in dg["catalogs"])
+    md += [f"Rule catalogs: {cats}. Ranked by priority (P1 act now … P4 informational) after modifiers and service "
+           "impact, then activity in the window, number of hosts and place. Matches on one target are merged into one "
+           "recommendation that cites every rule.", ""]
+    if not dg["recommendations"]:
+        md += ["No rule matched.", ""]
+    for r in dg["recommendations"]:
+        md.append(f"- {_rec_line(r, multi)}")
+        md.append(f"  - Diagnosis: {md_inline(r['diagnosis'])}")
+        md.append(f"  - Action: {md_inline(r['action'])}")
+        for m in r["modifiers"]:
+            md.append(f"  - Also: {md_inline(m['diagnosis'])} {md_inline(m['action'])}")
+        for p in r["patterns"]:
+            also = [x for x in p["links"] if x != r["id"]]
+            md.append(f"  - Pattern ({', '.join(p['rules'])}): {md_inline(p['diagnosis'])} {md_inline(p['action'])}"
+                      + (f" Linked: {', '.join(also)}." if also else ""))
+        rules = ", ".join(f"{x['id']} ({'P' + str(x['priority']) if x['priority'] != MODIFIER else MODIFIER})"
+                          for x in r["rules"])
+        adj = "; ".join(r["adjustments"])
+        md.append(f"  - Rules: {rules} · base P{r['base_priority']}" + (f"; {md_inline(adj)}" if adj else ""))
+    md += ["", "### 7.1 Unexplained, needs review", ""]
+    un = dg["unexplained"]
+    md += [md_table(["Host", "Target", "Check", "Severity"],
+                    [[_where(x, multi), x["target"], x["check_id"], _badge(x["severity"])] for x in un]) if un
+           else "None: every finding is covered by a recommendation.", ""]
+    return md
+
+
 def _code(v):
     """A code span the report builds around untrusted text ('*' is literal inside it)."""
     return _MD(f"`{_plain(v).replace('`', chr(39)).replace('|', CELL_PIPE)}`") if v else None
@@ -1753,7 +2982,7 @@ def render_md_suppressed(result, multi):
     sp = result.get("suppressed")
     if not sp:
         return []
-    md = ["## 6. Suppressed known issues", "",
+    md = ["## 8. Suppressed known issues", "",
           f"Rules from {md_inline(sp['file'])}. Matching results are left out of the findings, verdicts, PCIe list and "
           "patterns above (baselines and outlier lists are measurements and stay; patterns built from a suppressed "
           "check are dropped), and listed here.", "",
@@ -1851,6 +3080,8 @@ footer{font-size:7.5pt;break-inside:avoid}
 """ % {"font": FONT_FALLBACK}
 # Lines that start a block in markdown_to_html (everything else continues a paragraph)
 BLOCK_START_RE = re.compile(r"^(#{1,3} |\||- |---$)")
+MD_ENTITIES = {"&amp;": "&", "&lt;": "<", "&gt;": ">"}
+MD_ENTITY_RE = re.compile("|".join(MD_ENTITIES))
 SEV_BADGES = {"CRIT": "CRIT", "WARN": "WARN", "OK": "OK", "UNKNOWN": "UNKNOWN", "N/A": "NA"}
 
 
@@ -1861,7 +3092,8 @@ def _html_inline(text):
         if i % 2:
             out.append(f"<code>{html.escape(part[1:-1])}</code>")
             continue
-        part = html.escape(part, quote=False)
+        # Prose carries md_entities' '&amp;', '&lt;' and '&gt;': decoded once, then escaped (never '&amp;lt;')
+        part = html.escape(MD_ENTITY_RE.sub(lambda m: MD_ENTITIES[m.group(0)], part), quote=False)
         part = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", part)
         for word, cls in SEV_BADGES.items():
             part = part.replace(f"<strong>{word}</strong>", f'<span class="sev sev-{cls}">{word}</span>')
@@ -1969,18 +3201,19 @@ def render_html(result, sites, missing, args, now, paged=False):
     md = render_md(result, sites, missing, args, now)
     body, _, _ = md.rpartition("\n---\n")
     head_md, _, rest = body.partition("\n## ")
-    title = html.escape(title_for(sites, missing, args))
+    title = html.escape(title_for(sites, missing, args, literal=True))
     sections = markdown_to_html("## " + rest if rest else "", paged)
     org = html.escape(theme["org"]) if theme else ""
     logo = (theme or {}).get("logos", {}).get("cover" if paged else "header")
-    label = html.escape(md_inline(args.classification)) if args.classification else ""
+    label = html.escape(md_inline(args.classification, literal=True)) if args.classification else ""
     cover = ('<header class="cover">' + (f'<p class="cover-class">{label}</p>' if paged and label else "")
              + (f'<img class="cover-logo" alt="{org}" src="{logo}">' if logo else "")
              + f'{markdown_to_html(head_md)}\n<p class="attrib">{html.escape(attribution(now))}</p></header>\n')
     css = HTML_CSS + (PRINT_CSS if paged else "") + theme_css(theme, paged)
     running = ""
     if paged:
-        header_title = html.escape(md_inline((theme or {}).get("labels", {}).get("header_title") or title_for(sites, missing, args)))
+        header_title = html.escape(md_inline((theme or {}).get("labels", {}).get("header_title")
+                                             or title_for(sites, missing, args, literal=True), literal=True))
         header_logo = (theme or {}).get("logos", {}).get("header")
         running = (f'<div class="run-title">{header_title}</div>' + (f'<div class="run-class">{label}</div>' if label else "")
                    + (f'<div class="run-logo"><img alt="{org}" src="{header_logo}"></div>' if header_logo else "") + "\n")
@@ -2034,7 +3267,7 @@ def render_json(result, sites, missing, args, now):
     doc = {
         "schema_version": REPORT_SCHEMA_VERSION,
         "generator": {"tool": SCRIPT_NAME, "version": SCRIPT_VERSION, "generated_at": now.isoformat(timespec="seconds")},
-        "title": title_for(sites, missing, args),
+        "title": title_for(sites, missing, args, literal=True),
         "classification": args.classification,
         "selection": {
             "sites": [{"site": s.site, "source": s.source, "sweep": s.stamp, "path": s.path,
@@ -2043,6 +3276,7 @@ def render_json(result, sites, missing, args, now):
             "at": args.at.isoformat() if args.at else None,
             "role_regex": args.role_regex,
             "baseline": args.baseline, "rx_delta_db": args.rx_delta_db, "flap_min": args.flap_min,
+            "lldp_lookback_days": getattr(args, "lldp_lookback", DEFAULT_LLDP_LOOKBACK_DAYS),
             "suppress": getattr(args, "suppress", None),
         },
         **result,
@@ -2067,14 +3301,17 @@ def build_parser():
         description=(f"Version: {SCRIPT_VERSION}\n\n"
                      "Reports on nic-sweep sweeps (and legacy nic-health CSV) for one site, several or all:\n"
                      "coverage, verdicts, every finding with its evidence, baselines and outliers over\n"
-                     "ports with link, patterns within and across sites, and suppressed known issues.\n"
+                     "ports with link, patterns within and across sites, suppressed known issues, and ranked\n"
+                     "recommendations from a declarative rule catalog with an executive summary.\n"
                      "Read-only and offline."),
         epilog=("--import takes SITE and every following path: put SWEEP_DIRs before it, or end its list with --.\n"
                 f"-O pdf needs WeasyPrint ({PDF_PACKAGE_HINT}) and -o FILE.\n"
-                f"Environment: {THEME_ENV}=DIR selects a theme for html and pdf when --theme is not given.\n"
+                f"Environment: {THEME_ENV}=DIR selects a theme for html and pdf when --theme is not given;\n"
+                f"{RULES_ENV}=FILE replaces the packaged rule catalog (default: {RULES_FILE} next to the script,\n"
+                f"in ../share/nic-xray from it, or in {RULES_SYSTEM_DIR}).\n"
                 f"Report files are written atomically with mode {REPORT_MODE:04o} (less the umask).\n\n"
                 "Exit status:\n 0  report written\n 1  input error (unreadable input, unknown schema or site, a site\n"
-                "    selected twice, no data for the selection, an invalid suppress file or theme, theme contrast\n"
+                "    selected twice, no data for the selection, an invalid suppress file, rule catalog or theme, theme contrast\n"
                 f"    below {MIN_CONTRAST}:1 with --strict-theme, WeasyPrint missing or failing for -O pdf) or an\n"
                 "    output file cannot be written\n 3  usage error\n\n"
                 f"See also: nic-sweep.sh(8), nic-health.sh(8), nic-xray.sh(8). Design: {DESIGN_REF}"))
@@ -2095,6 +3332,12 @@ def build_parser():
     p.add_argument("-S", "--suppress", metavar="FILE",
                    help="JSON rules for known tool issues: matching results leave findings, verdicts and patterns "
                         "and are listed in their own section")
+    p.add_argument("-L", "--lldp-lookback", type=int, default=DEFAULT_LLDP_LOOKBACK_DAYS, metavar="DAYS",
+                   help="a port without an LLDP neighbour names the newest one seen in the site's earlier sweeps of "
+                        f"the last DAYS days (default {DEFAULT_LLDP_LOOKBACK_DAYS}; 0: off)")
+    p.add_argument("-u", "--rules", action="append", metavar="FILE",
+                   help=f"diagnosis rules layered on the packaged catalog ({RULES_FILE}): a rule replaces the one "
+                        "with the same id, new ids are added (repeatable, later files win)")
     p.add_argument("-O", "--output-format", choices=("md", "json", "html", "pdf"), default="md",
                    help="md (default), json, html (one self-contained file) or pdf (WeasyPrint; needs -o)")
     p.add_argument("-o", "--output", metavar="FILE", help="write to FILE instead of standard output")
@@ -2137,6 +3380,8 @@ def parse_args(argv):
         p.error("--rx-delta-db must be a positive number")
     if args.flap_min < 1:
         p.error("--flap-min must be at least 1")
+    if not 0 <= args.lldp_lookback <= LLDP_LOOKBACK_MAX_DAYS:
+        p.error(f"--lldp-lookback must be 0 to {LLDP_LOOKBACK_MAX_DAYS} days")
     if args.output_format == "pdf" and not args.output:
         p.error("-O pdf writes a binary file: give -o FILE")
     if args.per_site and not args.output:
@@ -2184,6 +3429,11 @@ def build_outputs(args, now):
     if args.output_format == "pdf":
         _weasyprint()                                   # fail before reading any input
     args.suppress_rules = load_suppress(args.suppress) if args.suppress else None
+    default_rules = default_catalog_path()
+    if default_rules is None:
+        _warn(f"no rule catalog found ({RULES_FILE} next to the script, in ../share/nic-xray or {RULES_SYSTEM_DIR}): "
+              "recommendations use --rules files only")
+    args.catalog = load_catalog(default_rules, args.rules) if default_rules or args.rules else None
     sites, missing = load_selection(args)
     if args.suppress_rules:
         apply_suppress(sites, args.suppress_rules)

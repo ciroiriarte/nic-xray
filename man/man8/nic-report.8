@@ -25,6 +25,10 @@ nic-report \- single- and multi-site NIC health reports from nic-sweep sweeps
 .IR N ]
 .RI [ \-S | \-\-suppress
 .IR FILE ]
+.RI [ \-u | \-\-rules
+.IR FILE ]
+.RI [ \-L | \-\-lldp\-lookback
+.IR DAYS ]
 .RI [ \-O | \-\-output\-format
 .IR md | json | html | pdf ]
 .RI [ \-o | \-\-output
@@ -44,9 +48,14 @@ nic-report \- single- and multi-site NIC health reports from nic-sweep sweeps
 reads the sweeps written by
 .BR nic-sweep.sh (8)
 (and, for older collections, nic-health CSV files) and writes a report for one
-site, several sites, or every site of a sweep tree. The report has five
-sections, plus a sixth with
+site, several sites, or every site of a sweep tree. The report has seven
+sections, plus an eighth with
 .BR \-\-suppress :
+.TP
+.B Executive summary
+Per site: hosts, clean share, hosts per verdict, a status icon and the number of
+recommended actions per priority; then the five most urgent recommendations and
+whether every finding is explained by one.
 .TP
 .B Coverage and comparability
 Hosts, roles, NIC ASICs and ports, ports with link, deep checks evaluated, FEC
@@ -86,6 +95,21 @@ errors are "link errors"; flaps and link-downs "link instability"). Without
 a site's hosts form one group and cross-site patterns are not computed; the
 report says so.
 .TP
+.B Recommended actions (priority order)
+The diagnosis rule catalog (see
+.BR "RULE CATALOG" )
+evaluated over facts per port, ASIC, bond, host, role group and fleet. Each
+recommendation names its site, hosts and target (with the LLDP neighbour when
+nic-xray saw one), a diagnosis, an action and every rule that fired on that
+target; hosts with the same finding are listed together, and a cross-site
+pattern is shown once, linked to the recommendations it spans. A last list,
+.BR "Unexplained, needs review" ,
+holds every finding no rule explains, so gaps in the catalog stay visible: a
+finding is explained only when a rule on its target, a modifier there or a
+cross-site pattern listing its place names its check in
+.BR explains .
+Suppressed results are neither recommendations nor unexplained.
+.TP
 .B Suppressed known issues
 With
 .BR \-\-suppress :
@@ -108,6 +132,25 @@ carried traffic in the sampling window) exist only in typed metrics; the JSON
 report carries them as
 .B service
 on port findings and port lists.
+.PP
+When a sweep holds nic-xray output
+.RB ( nodes/ \fIhost\fR .xray.json ,
+written by
+.BR nic-sweep.sh ),
+it adds LLDP neighbours, LACP state, VLANs, speed, MTU, NUMA node, slot label and
+optics for every NIC vendor, joined to nic-health's ports by interface name.
+nic-health wins for health data (link state, errors, deep module readings);
+nic-xray fills in what nic-health does not collect, including optics on ports
+without deep data. A port with no LLDP neighbour in the reported sweep (its link
+was down, say) names the newest neighbour the same host saw on that interface in
+an earlier sweep of the site, within
+.B \-\-lldp\-lookback
+days and never after the reported sweep; the recommendation and a coverage
+caveat name the sweep it came from. Such a neighbour only names the peer: bond
+redundancy, LAG and VLAN facts use the reported sweep's LLDP alone. Coverage counts, per site, the hosts with nic-xray data and
+the ports whose optics came from deep mode, from nic-xray or from neither. A
+nic-xray file that is malformed or larger than 8 MiB is a coverage caveat, never
+a failure; legacy CSV imports have no nic-xray data.
 .PP
 A nic-health JSON file with invalid UTF-8 is read with U+FFFD in place of the bad
 bytes, and the coverage caveats name it; one larger than 32 MiB is listed as
@@ -214,6 +257,21 @@ remaining severity, shown as for example
 Baselines and outlier lists are measurements and stay; patterns built from a
 suppressed check are dropped. A rule that matches nothing, or names a site not
 in the selection, is reported on standard error.
+.TP
+.BR \-u ", " \-\-rules " " \fIFILE\fR
+A diagnosis rule file layered on the packaged catalog (see
+.BR "RULE CATALOG" ):
+a rule replaces the loaded rule with the same
+.BR id ,
+keeping its place; new ids are added. Repeatable; later files win. Keep site
+knowledge (local cabling standards, known bad part batches) in such a file, next
+to the site's data, rather than in the packaged catalog.
+.TP
+.BR \-L ", " \-\-lldp\-lookback " " \fIDAYS\fR
+How far back (default 30 days, at most 3650; 0 turns it off) to look in the
+site's earlier sweeps for the LLDP neighbour of a port that has none in the
+reported sweep. Up to 50 earlier sweeps are read, newest first; one whose files
+do not read is skipped.
 .TP
 .BR \-O ", " \-\-output\-format " " \fImd\fR|\fIjson\fR|\fIhtml\fR|\fIpdf\fR
 Markdown (default), JSON with every computed value, HTML: one self-contained
@@ -346,6 +404,95 @@ searches the target and the first 4096 characters of the evidence. Keep rules
 simple and anchored. The evidence is written by the host that was checked, so a
 host could word it to match a rule: that is why every suppressed result is
 listed in the report.
+.SH RULE CATALOG
+The packaged catalog is
+.BR nic-report-rules.json ,
+looked up next to the script, then in
+.B ../share/nic-xray
+relative to it, then in
+.BR /usr/share/nic-xray ;
+.B NIC_REPORT_RULES
+replaces that lookup. Without a catalog the report says so and only
+.B \-\-rules
+files are used. Section 7 lists every catalog file loaded, its
+.B catalog_version
+and the ids it overrides. A file is a JSON object:
+.PP
+.RS
+.nf
+{"schema_version": 1, "catalog_version": "2026.10.1-site1",
+ "description": "SITE1 cabling standard",
+ "rules": [
+  {"id": "SITE1-BREAKOUT", "scope": "port",
+   "when": {"all": [
+     {"fact": "rx_low", "op": "eq", "value": true},
+     {"fact": "role", "op": "in", "value": ["stor1", "stor2"]}]},
+   "diagnosis": "Low Rx {rx_dbm} dBm on a storage breakout leg",
+   "action": "Replace the breakout harness to {peer|the leaf switch}",
+   "priority": 1, "ref": "SITE1 runbook 4.2"}]}
+.fi
+.RE
+.PP
+.B scope
+is one of
+.BR port ", " asic ", " bond ", " host ", " group " or " fleet .
+.B when
+is a condition on one fact
+.RB ( fact ", " op ", " value )
+or a list of conditions under
+.B all
+or
+.BR any ,
+nested up to 8 levels and 200 conditions per rule. The operators are
+.BR "eq ne gt ge lt le in exists" ;
+nothing in a rule is evaluated as code. A condition on a fact the data does not
+give never matches, except
+.B exists
+with
+.BR false .
+.B priority
+is 1 (act now) to 4 (informational), or
+.B modifier
+with
+.B modifies
+(rule ids of the same scope) and
+.B raise
+(levels, 1 to 3, default 1): a modifier recommends nothing on its own and raises
+the rules it modifies on the same target; its diagnosis and action are shown
+after theirs.
+.B explains
+(optional) lists the nic-health check ids the rule accounts for, at most 64 of
+up to 64 characters (for example
+.BR mlx5.phy.errors ;
+an empty list for none); without it, the checks whose facts the
+.B when
+condition reads
+.RB ( active
+counts as symbol errors, flaps and link look-back). Discard ports that were
+pinned to an ASIC as the host's only one below capability are said to be
+assumed. Templates fill
+.BI { fact }
+from the target's facts, or
+.BI { fact | text }
+with
+.I text
+when the fact is absent; each filled placeholder is cut at 200 characters and a
+list shows its first 6 items. The optional catalog
+.B description
+is a string of up to 1000 characters. Unknown keys, scopes, operators, facts or
+placeholders, a duplicate id in one file, a bad priority or
+.BR explains ,
+and files over 1 MiB are input errors that name the rule. Optical readings
+outside \-60 to +30 dBm are dropped as implausible. The JSON report lists every fact per scope with the
+number of targets that have it.
+.PP
+Recommendations are ranked by the rule's base priority, raised by modifiers and
+by half a level for a bond member with bond link failures, link drops or
+traffic in the window, and lowered one level for a port that is up but unused
+(not in use and no traffic, from nic-health service-impact facts); then by
+activity (growing in the window before history only), service impact, number of
+hosts and place. The order and the text are the same on every run over the same
+data.
 .SH THEMES
 A theme folder holds
 .B theme.json
@@ -403,6 +550,9 @@ An example lives in
 of the source tree.
 .SH ENVIRONMENT
 .TP
+.B NIC_REPORT_RULES
+Rule catalog to use instead of the packaged one.
+.TP
 .B NIC_REPORT_THEME
 Theme folder for HTML and PDF output when
 .B \-\-theme
@@ -416,7 +566,7 @@ Report written.
 Input error: unreadable input, an unsupported sweep schema, an unknown site, a
 site selected twice, no data for the selection (for example
 .B \-\-at
-before every sweep), an invalid suppress file or theme, a theme contrast
+before every sweep), an invalid suppress file, rule catalog or theme, a theme contrast
 below 4.5:1 with
 .BR \-\-strict\-theme ,
 or WeasyPrint missing or failing for
@@ -455,6 +605,12 @@ One PDF per site plus the combined one, branded, known issues suppressed:
 .PP
 .RS
 .B nic-report.py \-R sweeps \-S known.json \-T ~/themes/acme \-O pdf \-o fleet.pdf \-P
+.RE
+.PP
+Layer a site's own rules on the packaged catalog:
+.PP
+.RS
+.B nic-report.py \-R sweeps \-s SITE1 \-u site1/rules.json
 .RE
 .PP
 Check a theme strictly before using it:

@@ -15,7 +15,7 @@ _nic_report() {
 			_filedir
 			return
 			;;
-		-S|--suppress)
+		-S|--suppress|-u|--rules)
 			_filedir json
 			return
 			;;
@@ -27,7 +27,7 @@ _nic_report() {
 			COMPREPLY=($(compgen -W "scope all" -- "$cur"))
 			return
 			;;
-		-d|--rx-delta-db|-f|--flap-min)
+		-d|--rx-delta-db|-f|--flap-min|-L|--lldp-lookback)
 			return
 			;;
 		-s|--site)
@@ -70,6 +70,8 @@ _nic_report() {
 			-d --rx-delta-db
 			-f --flap-min
 			-S --suppress
+			-u --rules
+			-L --lldp-lookback
 			-O --output-format
 			-o --output
 			-P --per-site

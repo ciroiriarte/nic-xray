@@ -318,6 +318,7 @@ sudo chmod +x /usr/local/bin/nic-sweep.sh
 # Reports from sweeps (optional, operator host only; Python 3.9+, WeasyPrint for PDF)
 sudo cp nic-report.py /usr/local/bin/
 sudo chmod +x /usr/local/bin/nic-report.py
+sudo make install-rules              # diagnosis rule catalog → /usr/local/share/nic-xray/
 ```
 
 #### Man page
@@ -985,12 +986,14 @@ Host status: `ok`, `ssh-fail`, `sudo-fail`, `tool-missing`, `timeout`, `bad-outp
 
 | Section | One site | Several sites |
 |---|---|---|
-| 1. Coverage and comparability | columns per role | columns per site |
-| 2. Verdicts | per role and per host | per site, then per role |
-| 3. Findings | by host | by site → host |
-| 4. Baselines and outliers | the site's own medians (or the fleet's with `-b all`) | medians across the selected sites |
-| 5. Patterns | same issue on the same port/ASIC across hosts of a role | also: same issue on the same role at two or more sites |
-| 6. Suppressed known issues (with `-S`) | rules, reasons, counts and every suppressed result | same |
+| 1. Executive summary | site status, actions per priority, top five recommendations | same, per site |
+| 2. Coverage and comparability | columns per role | columns per site |
+| 3. Verdicts | per role and per host | per site, then per role |
+| 4. Findings | by host | by site → host |
+| 5. Baselines and outliers | the site's own medians (or the fleet's with `-b all`) | medians across the selected sites |
+| 6. Patterns | same issue on the same port/ASIC across hosts of a role | also: same issue on the same role at two or more sites |
+| 7. Recommended actions (priority order) | rule catalog over the site's facts | also: cross-site pattern rules |
+| 8. Suppressed known issues (with `-S`) | rules, reasons, counts and every suppressed result | same |
 
 Coverage counts hosts, ASICs, ports, ports with link, deep checks and FEC modes; lists every host not collected; and flags what limits a comparison (mixed nic-health versions or windows, different days, imported data without metadata, sites with no sweep at the requested date). Findings list every WARN/CRIT/UNKNOWN result with its evidence and hint. Baselines are computed over ports with link: receive power per module type, outliers (at least `-d` dB, default 5, below the median **and** a robust median/MAD score of 3.5; multi-lane modules are their own type, judged by the lowest lane), errors since boot, carrier changes above `-f` (default 100), discards, temperatures and PCIe links below capability. Patterns group related checks into one issue (symbol/CRC/BER → "link errors") and need `-r` for roles; without it a site's hosts form one group and the report says so.
 
@@ -1006,10 +1009,26 @@ nic-report.py -R sweeps -s SITE3 -b all -O html -o s3.html # one site against th
 nic-report.py -R sweeps -r '^[^-]+-[^-]+-(?P<role>[a-z]+\d+[a-z]*)-\d+'             # roles from host names
 nic-report.py -R sweeps -O pdf -o fleet.pdf -c 'confidential site data'                 # PDF (WeasyPrint)
 nic-report.py -R sweeps -O pdf -o fleet.pdf -P             # plus fleet-SITE1.pdf, fleet-SITE2.pdf, ... (same baseline)
-nic-report.py -R sweeps -S known-issues.json               # leave known tool issues out, listed in section 6
+nic-report.py -R sweeps -S known-issues.json               # leave known tool issues out, listed in section 8
+nic-report.py -R sweeps -s SITE1 -u site1/rules.json       # layer a site's own diagnosis rules on the catalog
 nic-report.py -R sweeps -T ~/themes/acme -X -O html -o fleet.html                       # branded; strict contrast check
 ```
 
+- 🧭 **Recommendations** (section 7, A8): a versioned **diagnosis rule catalog** ([`nic-report-rules.json`](nic-report-rules.json), 17 starter rules: attenuated or latent optics, marginal lanes, past flapping, PCIe below capability (shared cause, one host, or a few hosts of the role; raised when RX discards grow), FEC mismatch, signal integrity, cross-site patterns, LAG split, bond speed/MTU mismatch, bond on a single switch, VLAN drift, weak optics on NICs without vendor tools) is evaluated over facts per port, ASIC, bond, host, role and fleet. Each recommendation gives a diagnosis, an action, the target with its LLDP neighbour and every rule that fired; it is ranked by the rule's priority (P1 act now … P4 informational), raised for a bond member with link failures, link drops or traffic in the window, lowered for a port that is up but unused, then by activity in the window. Findings no rule explains are listed as **Unexplained, needs review**: explanations are per check, through each rule's `explains` list of nic-health check ids (default: the checks whose facts its `when` reads). The text is filled from templates, so it is plain but exact, and identical on every run.
+- 🔗 **nic-xray data:** when a sweep holds `nodes/<host>.xray.json` (written by `nic-sweep`), the report adds LLDP neighbours, LACP, VLANs, speed, MTU, placement (NUMA node, slot) and optics for every NIC vendor. nic-health wins for health data; nic-xray fills in the rest. A port with no LLDP neighbour in the reported sweep (link down at collection, say) names the newest one seen on it in the site's earlier sweeps, marked `(LLDP from sweep …)`; `-L`/`--lldp-lookback DAYS` bounds the search (default 30, `0` off). Such a neighbour only names the peer: bond, LAG and VLAN facts use the reported sweep. Coverage counts hosts with nic-xray and ports with optics from deep mode, from nic-xray or neither.
+- 📚 **`-u`/`--rules FILE`** (repeatable): rules layered on the packaged catalog; a rule with the same `id` replaces it, new ids are added, later files win, and section 7 lists every catalog file, version and override. The catalog is looked up next to the script, in `../share/nic-xray`, then `/usr/share/nic-xray` (`NIC_REPORT_RULES=FILE` replaces the lookup). Keep site knowledge (local cabling standards, known bad part batches) in a rules file next to the site's data, not in the packaged catalog:
+
+  ```json
+  {"schema_version": 1, "catalog_version": "2026.10.1-site1", "rules": [
+    {"id": "SITE1-BREAKOUT", "scope": "port",
+     "when": {"all": [{"fact": "rx_low", "op": "eq", "value": true},
+                      {"fact": "role", "op": "in", "value": ["stor1", "stor2"]}]},
+     "diagnosis": "Low Rx {rx_dbm} dBm on a storage breakout leg",
+     "action": "Replace the breakout harness to {peer|the leaf switch}",
+     "priority": 1, "ref": "SITE1 runbook 4.2"}]}
+  ```
+
+  Conditions use only `eq ne gt ge lt le in exists`, nested in `all`/`any` (nothing is evaluated as code); `{fact|text}` falls back to `text` when the fact is absent; `priority` is 1–4 or `"modifier"` (with `modifies` and `raise`; its diagnosis and action are shown as "Also:"); `explains` (optional, up to 64 check ids such as `mlx5.phy.errors`, `[]` for none) says which findings the rule accounts for. Unknown facts, operators or placeholders are errors naming the rule. The JSON report lists every fact with how many targets have it.
 - 📄 **PDF:** A4 cover (title, data, classification, logo with a theme, attribution), contents with page numbers, a page break before each section, a running header with the section name, "Page N of M" and the classification on every page, landscape pages only for tables too wide for portrait.
 - 🙈 **`-S`/`--suppress FILE`** (known tool issues): `{"schema_version": 1, "suppress": [{"check_id": "mlx5.deep.ber", "match": "BER=3E-9", "hosts": "^prd-site1-", "sites": ["SITE1"], "reason": "…"}]}`. `check_id` (exact) and `reason` are required; `match` is a regex searched in the target and the evidence, `hosts` a regex on the host name. Matching WARN/CRIT/UNKNOWN results leave the findings, verdict counts, PCIe list and patterns, a host's verdict is recomputed from its remaining results (`OK (was WARN)`), and everything suppressed is listed in its own section and in the JSON: nothing is dropped silently. Baselines and outlier lists are measurements and stay; patterns built from a suppressed check are dropped. `match` searches the first 4096 characters of the evidence; keep rules simple and anchored (a host writes its own evidence, which is why every suppressed result is listed). Unknown keys or bad regexes are errors; a rule that matches nothing is reported on stderr.
 - 🗂️ **`-P`/`--per-site`:** with `-o FILE.ext`, also `FILE-SITE.ext` per site, single-site layout, with the combined report's baseline so outliers agree.
@@ -1017,9 +1036,9 @@ nic-report.py -R sweeps -T ~/themes/acme -X -O html -o fleet.html               
 - 🎨 **Themes** (`-T`/`--theme DIR` or `NIC_REPORT_THEME`; `-T ''` for none): `theme.json` with brand colours, fonts, logos (PNG/JPEG/SVG, embedded as `data:` URIs) and labels (header title, classification; `-c` overrides it). HTML and PDF only: Markdown and JSON never read a theme. No free-form CSS: a theme cannot change content, severity colours, classification or attribution, which keep fixed colours (an `extra.css` file is ignored with a warning). Contrast below 4.5:1 is a warning, an error with `-X`/`--strict-theme`. Example: [`tests/fixtures/themes/example/`](tests/fixtures/themes/example/); keep real company themes outside the repo.
 - 🏷️ **Attribution:** `Generated by nic-report vX.Y.Z — © YEAR Ciro Iriarte · timestamp` in every format (Markdown last line, HTML title block and footer, PDF cover and closing footer, JSON `generator`, PDF Creator).
 
-Options: `-R`/`--sweep-root`, `-s`/`--site`, `-a`/`--at`, `-i`/`--import` (takes every following path: put sweep directories first or end it with `--`), `-r`/`--role-regex`, `-b`/`--baseline scope|all`, `-d`/`--rx-delta-db`, `-f`/`--flap-min`, `-S`/`--suppress`, `-O`/`--output-format md|json|html|pdf`, `-o`/`--output`, `-P`/`--per-site`, `-T`/`--theme`, `-X`/`--strict-theme`, `-t`/`--title`, `-c`/`--classification`, `-v`/`--version`, `-h`/`--help`. Odd or damaged input ends in a `❌` message, never a traceback; a host whose result file is missing or malformed is listed as `unreadable-result` instead of failing the report. Data from nic-health older than 2.12.0 has no link state: ports are counted from link-flap records and ports with link shown as unknown.
+Options: `-R`/`--sweep-root`, `-s`/`--site`, `-a`/`--at`, `-i`/`--import` (takes every following path: put sweep directories first or end it with `--`), `-r`/`--role-regex`, `-b`/`--baseline scope|all`, `-d`/`--rx-delta-db`, `-f`/`--flap-min`, `-S`/`--suppress`, `-u`/`--rules`, `-L`/`--lldp-lookback`, `-O`/`--output-format md|json|html|pdf`, `-o`/`--output`, `-P`/`--per-site`, `-T`/`--theme`, `-X`/`--strict-theme`, `-t`/`--title`, `-c`/`--classification`, `-v`/`--version`, `-h`/`--help`. Odd or damaged input ends in a `❌` message, never a traceback; a host whose result file is missing or malformed is listed as `unreadable-result` instead of failing the report. Data from nic-health older than 2.12.0 has no link state: ports are counted from link-flap records and ports with link shown as unknown.
 
-Exit status: `0` report written, `1` input error (unreadable input, unknown schema or site, a site selected twice, no data for the selection, an invalid suppress file or theme, low theme contrast with `-X`, WeasyPrint missing or failing for `-O pdf`) or an output file cannot be written, `3` usage error (including `-O pdf` or `-P` without `-o`). Design: [`docs/design/nic-sweep.md`](docs/design/nic-sweep.md) §6. HTML is one self-contained page (inline style, no scripts or remote resources); the PDF engine is limited to `data:` URIs, so neither ever reaches the network. Recommendations follow in a later phase.
+Exit status: `0` report written, `1` input error (unreadable input, unknown schema or site, a site selected twice, no data for the selection, an invalid suppress file, rule catalog or theme, low theme contrast with `-X`, WeasyPrint missing or failing for `-O pdf`) or an output file cannot be written, `3` usage error (including `-O pdf` or `-P` without `-o`). Design: [`docs/design/nic-sweep.md`](docs/design/nic-sweep.md) §6. HTML is one self-contained page (inline style, no scripts or remote resources); the PDF engine is limited to `data:` URIs, so neither ever reaches the network.
 
 ## 📄 License
 

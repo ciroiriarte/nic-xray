@@ -1,0 +1,212 @@
+{
+  "schema_version": 1,
+  "catalog_version": "2026.10.1",
+  "description": "Starter diagnosis catalog of nic-report.py (docs/design/nic-sweep.md §6.3.1). Generic and public: site rules go in a separate file layered on with --rules.",
+  "rules": [
+    {
+      "id": "OPT-ATTEN-ACTIVE",
+      "scope": "port",
+      "when": { "all": [
+        { "fact": "rx_low", "op": "eq", "value": true },
+        { "fact": "active", "op": "eq", "value": 2 } ] },
+      "diagnosis": "Attenuated optical path: Rx {rx_dbm} dBm is {rx_delta_db} dB from its peers' median, and the link is failing now ({link_down_recent|no count of} link-down messages in the look-back window, {carrier_changes|unknown} carrier changes since driver load, {phy_err_window|an unknown number of} symbol errors in the window).",
+      "action": "Clean or inspect both fibre ends, then replace the optic and the cable leg to {peer|the switch port (no LLDP neighbour at collection)}; check the switch side's Tx and DOM for that lane.",
+      "priority": 1,
+      "explains": ["mlx5.deep.module", "mlx5.phy.errors", "mlx5.frame.errors", "mlx5.deep.ber", "generic.link.flaps", "generic.link.lookback",
+                   "mlx5.link.phy_down", "generic.link.state"],
+      "ref": "docs/design/nic-health.md §6.2"
+    },
+    {
+      "id": "OPT-ATTEN-LATENT",
+      "scope": "port",
+      "when": { "all": [
+        { "fact": "rx_low", "op": "eq", "value": true },
+        { "fact": "phy_err_total", "op": "gt", "value": 0 },
+        { "fact": "active", "op": "lt", "value": 2 } ] },
+      "diagnosis": "Latent attenuation: Rx {rx_dbm} dBm is {rx_delta_db} dB from its peers' median, with {phy_err_total} symbol errors since boot and {phy_err_window|an unknown number of} new ones in the window: the same fault between bursts.",
+      "action": "Same remediation as an active attenuated path, before the next burst: clean or inspect both fibre ends, then replace the optic and the cable leg to {peer|the switch port (no LLDP neighbour at collection)}.",
+      "priority": 2,
+      "explains": ["mlx5.deep.module", "mlx5.phy.errors", "mlx5.frame.errors", "mlx5.deep.ber"],
+      "ref": "docs/design/nic-health.md §6.2"
+    },
+    {
+      "id": "OPT-LANE",
+      "scope": "port",
+      "when": { "all": [
+        { "fact": "rx_low", "op": "eq", "value": false },
+        { "fact": "phy_err_growing", "op": "eq", "value": true } ] },
+      "diagnosis": "Marginal transceiver or breakout lane: errors keep growing ({phy_err_window} symbol errors in the window, {phy_err_total} since boot) while Rx {rx_dbm} dBm is normal for its type, so not attenuation.",
+      "action": "Replace the optic or that breakout lane; check the peer port {peer|(no LLDP neighbour at collection)} and its sibling lanes.",
+      "priority": 1,
+      "explains": ["mlx5.phy.errors", "mlx5.frame.errors", "mlx5.deep.ber"],
+      "ref": "docs/design/nic-health.md §6.2"
+    },
+    {
+      "id": "LINK-FLAP-HIST",
+      "scope": "port",
+      "when": { "all": [
+        { "fact": "flaps_high", "op": "eq", "value": true },
+        { "fact": "active", "op": "lt", "value": 2 } ] },
+      "diagnosis": "Past flapping: {carrier_changes} carrier changes since driver load, {flaps_window|an unknown number} in the window.",
+      "action": "Watch with a longer window (nic-health -I 60 or more) and inspect the cable to {peer|the switch port}.",
+      "priority": 4,
+      "explains": ["generic.link.flaps", "mlx5.link.phy_down"],
+      "ref": "docs/design/nic-health.md §6.1"
+    },
+    {
+      "id": "PCIE-SHARED",
+      "scope": "asic",
+      "when": { "all": [
+        { "fact": "pcie_below_cap", "op": "eq", "value": true },
+        { "fact": "role_hosts_pcie", "op": "ge", "value": 2 },
+        { "fact": "role_share_pcie", "op": "ge", "value": 0.5 } ] },
+      "diagnosis": "PCIe link trained at {pcie_trained} where card and slot support {pcie_supported}, on {role_hosts_pcie} of {role_hosts} hosts of the role: a shared cause.",
+      "action": "Check the BIOS PCIe slot speed and bifurcation profile of {slot_label|that slot} before replacing hardware; then reseat the card or riser.",
+      "priority": 3,
+      "explains": ["generic.pcie.link"],
+      "ref": "docs/design/nic-health.md §6.1"
+    },
+    {
+      "id": "PCIE-SEAT",
+      "scope": "asic",
+      "when": { "all": [
+        { "fact": "pcie_below_cap", "op": "eq", "value": true },
+        { "fact": "role_hosts_pcie", "op": "eq", "value": 1 } ] },
+      "diagnosis": "PCIe link trained at {pcie_trained} where card and slot support {pcie_supported}, on this host only.",
+      "action": "Reseat the card (and its riser) in {slot_label|its slot}; check the slot's BIOS link speed.",
+      "priority": 3,
+      "explains": ["generic.pcie.link"],
+      "ref": "docs/design/nic-health.md §6.1"
+    },
+    {
+      "id": "PCIE-SEAT-FEW",
+      "scope": "asic",
+      "when": { "all": [
+        { "fact": "pcie_below_cap", "op": "eq", "value": true },
+        { "fact": "role_hosts_pcie", "op": "ge", "value": 2 },
+        { "fact": "role_share_pcie", "op": "lt", "value": 0.5 } ] },
+      "diagnosis": "PCIe link trained at {pcie_trained} where card and slot support {pcie_supported}, on {role_hosts_pcie} of {role_hosts} hosts of the role (fewer than half): more likely seating or a riser on each than a shared cause.",
+      "action": "Reseat the card (and its riser) in {slot_label|its slot}; check the slot's BIOS link speed.",
+      "priority": 3,
+      "explains": ["generic.pcie.link"],
+      "ref": "docs/design/nic-health.md §6.1"
+    },
+    {
+      "id": "PCIE-DISCARDS",
+      "scope": "asic",
+      "when": { "all": [
+        { "fact": "pcie_below_cap", "op": "eq", "value": true },
+        { "fact": "rx_discards_growing", "op": "eq", "value": true } ] },
+      "diagnosis": "The bus is a bottleneck: receive buffer discards keep growing on {rx_discards_ports}.",
+      "action": "Fixing the PCIe link speed should stop the discards; re-check them afterwards.",
+      "priority": "modifier",
+      "raise": 1,
+      "modifies": ["PCIE-SHARED", "PCIE-SEAT", "PCIE-SEAT-FEW"],
+      "explains": ["mlx5.nic.discards"],
+      "ref": "docs/design/nic-health.md §6.2"
+    },
+    {
+      "id": "FEC-MISMATCH",
+      "scope": "port",
+      "when": { "fact": "fec_mismatch", "op": "eq", "value": true },
+      "diagnosis": "Configuration: the module needs FEC but the link runs {fec|without the FEC it requires}.",
+      "action": "Enable RS-FEC on the NIC port and on the switch port {peer|(no LLDP neighbour at collection)}.",
+      "priority": 2,
+      "explains": ["mlx5.deep.fec"],
+      "ref": "docs/design/nic-health.md §7"
+    },
+    {
+      "id": "SIG-INTEGRITY",
+      "scope": "port",
+      "when": { "any": [
+        { "fact": "deep_signal_integrity", "op": "eq", "value": true },
+        { "fact": "deep_opcode", "op": "in", "value": [15] } ] },
+      "diagnosis": "The NIC's link troubleshooting reports bad signal integrity (opcode {deep_opcode}: {deep_recommendation|no recommendation}).",
+      "action": "Inspect or replace the cable or that lane to {peer|the switch port}.",
+      "priority": 3,
+      "explains": ["mlx5.deep.troubleshooting"],
+      "ref": "docs/design/nic-health.md §7"
+    },
+    {
+      "id": "PATTERN-CROSS-SITE",
+      "scope": "fleet",
+      "when": { "fact": "sites_with", "op": "ge", "value": 2 },
+      "diagnosis": "The same issue ({issues}) on role {role} at {sites_with} sites ({sites}): a systemic weakness such as a cabling standard, breakout harness or part batch.",
+      "action": "Audit that position on role {role} at every site.",
+      "priority": 2,
+      "explains": ["mlx5.deep.module", "mlx5.phy.errors", "mlx5.frame.errors", "mlx5.deep.ber", "generic.link.flaps", "generic.link.lookback",
+                   "mlx5.link.phy_down", "generic.pcie.link", "mlx5.nic.discards", "mlx5.deep.fec",
+                   "mlx5.deep.troubleshooting"],
+      "ref": "docs/design/nic-sweep.md §6.3 (A5)"
+    },
+    {
+      "id": "LAG-SPLIT",
+      "scope": "bond",
+      "when": { "fact": "bond_lacp_split", "op": "eq", "value": true },
+      "diagnosis": "Mis-cabled or misconfigured LAG: the members of {bond} are on different LACP aggregators or partners, so part of the bond is not aggregated.",
+      "action": "Check the switch LAG/MC-LAG membership of {peers|the members' switch ports}.",
+      "priority": 1,
+      "explains": [],
+      "ref": "docs/design/nic-sweep.md §6.3.1"
+    },
+    {
+      "id": "BOND-SPEED-MISMATCH",
+      "scope": "bond",
+      "when": { "fact": "bond_speed_mismatch", "op": "eq", "value": true },
+      "diagnosis": "A member of {bond} negotiated a different speed ({bond_speeds} Mb/s): wrong optic, autonegotiation or breakout mode.",
+      "action": "Check the optic type and the switch port speed of {peers|the members' switch ports}.",
+      "priority": 2,
+      "explains": [],
+      "ref": "docs/design/nic-sweep.md §6.3.1"
+    },
+    {
+      "id": "BOND-MTU-MISMATCH",
+      "scope": "bond",
+      "when": { "fact": "bond_mtu_mismatch", "op": "eq", "value": true },
+      "diagnosis": "Members of {bond} have different MTUs ({bond_mtus}): large frames are dropped on one path.",
+      "action": "Align the MTU on the members of {bond}.",
+      "priority": 2,
+      "explains": [],
+      "ref": "docs/design/nic-sweep.md §6.3.1"
+    },
+    {
+      "id": "BOND-SINGLE-SWITCH",
+      "scope": "bond",
+      "when": { "all": [
+        { "fact": "members", "op": "ge", "value": 2 },
+        { "fact": "bond_lldp_complete", "op": "eq", "value": true },
+        { "fact": "bond_peer_switch_count", "op": "eq", "value": 1 } ] },
+      "diagnosis": "No switch redundancy: every member of {bond} reaches {bond_peer_switches}, so losing that switch takes the bond down.",
+      "action": "Re-patch one member of {bond} to the second switch.",
+      "priority": 3,
+      "explains": [],
+      "ref": "docs/design/nic-sweep.md §6.3.1"
+    },
+    {
+      "id": "VLAN-DRIFT",
+      "scope": "port",
+      "when": { "fact": "role_vlan_drift", "op": "eq", "value": true },
+      "diagnosis": "The switch port advertises VLANs {vlans|none} where most hosts of the role get {role_vlans} on this port (only as reliable as the switch's LLDP VLAN TLVs).",
+      "action": "Compare the configuration of {peer|the switch port} with its role peers' ports.",
+      "priority": 3,
+      "explains": [],
+      "ref": "docs/design/nic-sweep.md §6.3.1"
+    },
+    {
+      "id": "OPT-WEAK-ANY-VENDOR",
+      "scope": "port",
+      "when": { "all": [
+        { "fact": "rx_low", "op": "eq", "value": true },
+        { "fact": "optics_source", "op": "eq", "value": "nic-xray" },
+        { "fact": "active", "op": "lt", "value": 2 },
+        { "any": [
+          { "fact": "phy_err_total", "op": "exists", "value": false },
+          { "fact": "phy_err_total", "op": "eq", "value": 0 } ] } ] },
+      "diagnosis": "Weak optical signal on a NIC without vendor deep data: Rx {rx_dbm} dBm is {rx_delta_db} dB from its peers' median (nic-xray, ethtool -m).",
+      "action": "Clean or inspect both fibre ends, then replace the optic and the cable leg to {peer|the switch port (no LLDP neighbour at collection)}.",
+      "priority": 2,
+      "explains": ["mlx5.deep.module"],
+      "ref": "docs/design/nic-sweep.md §6.3.1"
+    }
+  ]
+}
