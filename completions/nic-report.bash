@@ -17,8 +17,12 @@ _nic_report() {
 			_filedir -d
 			return
 			;;
-		-o|--output)
+		-o|--output|-A|--ai-brief|-n|--narrative)
 			_filedir
+			return
+			;;
+		-U|--audience)
+			COMPREPLY=($(compgen -W "engineer management field" -- "$cur"))
 			return
 			;;
 		-S|--suppress|-u|--rules)
@@ -79,6 +83,10 @@ _nic_report() {
 			-S --suppress
 			-u --rules
 			-L --lldp-lookback
+			-A --ai-brief
+			-U --audience
+			-n --narrative
+			-N --strict-narrative
 			-O --output-format
 			-o --output
 			-P --per-site
