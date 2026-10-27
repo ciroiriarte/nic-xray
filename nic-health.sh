@@ -49,9 +49,9 @@
 #                 other linked ports with the same module is WARN (3 peers needed), so attenuation
 #                 shows before errors start, while Rx is still inside the module's range
 #
-# Version: 2.15.0
+# Version: 2.16.0
 
-SCRIPT_VERSION="2.15.0"
+SCRIPT_VERSION="2.16.0"
 SCRIPT_NAME="nic-health.sh"
 JSON_SCHEMA_VERSION=2
 DESIGN_REF="docs/design/nic-health.md"

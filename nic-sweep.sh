@@ -21,9 +21,9 @@
 #                 manifest, merged CSV with collection metadata, exit codes, progress bar
 #   - 2026-10-27: -L/--lookback passed to nic-health (link-down look-back, e.g. 1440 for 24 h)
 #
-# Version: 2.15.0
+# Version: 2.16.0
 
-SCRIPT_VERSION="2.15.0"
+SCRIPT_VERSION="2.16.0"
 SCRIPT_NAME="nic-sweep.sh"
 SWEEP_SCHEMA_VERSION=1
 DESIGN_REF="docs/design/nic-sweep.md"

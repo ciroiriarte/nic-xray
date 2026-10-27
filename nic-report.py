@@ -53,7 +53,7 @@
 #                 LLDP) no longer counts as traffic, so an unused port can be idle; the narrative check reads the
 #                 report's own compound durations ('17 h 13 min') as one number
 #
-# Version: 2.15.0
+# Version: 2.16.0
 """nic-report.py: single- and multi-site reports from nic-sweep sweeps and legacy nic-health CSV."""
 
 import argparse
@@ -76,7 +76,7 @@ import stat
 import statistics
 import sys
 
-SCRIPT_VERSION = "2.15.0"
+SCRIPT_VERSION = "2.16.0"
 SCRIPT_NAME = "nic-report.py"
 REPORT_SCHEMA_VERSION = 1
 SWEEP_SCHEMA_MAJOR = 1          # newest sweep.json major version this tool understands
