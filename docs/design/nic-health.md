@@ -336,7 +336,7 @@ Explicit consent boundary. Never runs unless requested.
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "tool": "nic-health.sh",
   "version": "x.y.z",
   "host": "…",
@@ -349,11 +349,36 @@ Explicit consent boundary. Never runs unless requested.
   "capabilities": { "devlink": true, "mstlink": false, "mlxlink": false },
   "summary": { "ok": 41, "warn": 2, "crit": 0, "unknown": 1, "na": 6 },
   "exit_code": 1,
-  "results": [ { "scope": "port", "target": "ens1f0np0", "check_id": "…", "severity": "WARN", "…": "…" } ]
+  "results": [ { "scope": "port", "target": "ens1f0np0", "check_id": "…", "severity": "WARN", "…": "…",
+                  "metrics": { "rx_dbm": -8.827, "rx_dbm_low": -11.308, "rx_dbm_high": 3.398, "…": "…" } } ]
 }
 ```
 
-- **`uptime_s` / `boot_id`:** host uptime in whole seconds and the kernel boot ID (`/proc/sys/kernel/random/boot_id`), both read at `collected_at`, `null` when unreadable or malformed. They let a later comparison turn since-boot totals into rates and tell a counter reset (new `boot_id`) from counter growth (`docs/design/nic-sweep.md` §7, P1). Additive: `schema_version` stays 1.
+- **`uptime_s` / `boot_id`:** host uptime in whole seconds and the kernel boot ID (`/proc/sys/kernel/random/boot_id`), both read at `collected_at`, `null` when unreadable or malformed. They let a later comparison turn since-boot totals into rates and tell a counter reset (new `boot_id`) from counter growth (`docs/design/nic-sweep.md` §7, P1). Additive: they kept `schema_version` 1; `metrics` (P2) raised it to 2.
+- **`metrics` (`schema_version` 2):** an optional object per result with the values behind its evidence as typed JSON, so a consumer such as `nic-report.py` does not parse human text with regular expressions (`docs/design/nic-sweep.md` §7, P2 and P3). JSON only: the evidence text stays byte-for-byte the same, and the table and CSV are unchanged. Rules:
+  - **Sampled counters** are the values read at both ends of the sampling window (T0 and T1), written as `{"total": N, "delta": N}`: the total at T1 since driver load (or boot) and the growth in the window. `delta` only with a window (`-I` > 0), and left out when it cannot be computed (counter reset, or new at T1). They are: every `mlx5.*` rule counter, `generic.pcie.aer` `cor`/`nonfatal`/`fatal`, `generic.link.flaps` `carrier_changes`, and `generic.link.state` `rx_bytes`/`tx_bytes`. Totals keep all 20 digits of a 64-bit counter.
+  - **Plain integers** are read once, at T1 or from the deep tool: `carrier_up_count`, `carrier_down_count`, `bond_link_failures`, `link_downs`, `carrier_down_count` of the look-back, `window_min`, `effective_errors`, `link_down_counter`, `raw_errors_per_lane`, the opcodes and the `*_pct` gauges.
+  - **Measurements** are JSON numbers copied from the text they were read from (sysfs, `ethtool`, the deep tool) after a strict check, so they are exact, finite and independent of the locale: never `nan` or `inf`. A scientific value whose exponent could overflow a double is left out.
+  - **Text** goes through the JSON escaper, like every other string.
+  - **Absent or unparseable values are left out**, never written as 0 (e.g. a deep tool's `N/A`, mstflint 4.26 without `Link Down Counter`). Results without a reading carry no `metrics` (most N/A results, and UNKNOWN for a vanished, reset or unparseable value). An N/A result that has a reading does carry them: a temperature sensor with no threshold, and `generic.link.state` of an administratively down or spare port, which always carries its service-impact facts.
+
+| `check_id` | `metrics` keys |
+|---|---|
+| `generic.pcie.link` | `speed_gts`, `width` (trained); `max_speed_gts`, `max_width` (card); `upstream_max_speed_gts`, `upstream_max_width` (slot, when readable); `expected_speed_gts`, `expected_width` (what both support); `slot_limited`, `below_capability` (bool) |
+| `generic.pcie.aer` | `cor`, `nonfatal`, `fatal`: counters summed over the card's functions (a kind without a sysfs file is left out) |
+| `generic.temperature` | `label`; `temp_c`, `warn_c`, `crit_c`, `max_c`, `highest_c` (degrees, exact from millidegrees; thresholds at or below 0 are no thresholds and left out); `alarm` (bool) |
+| `generic.link.state` | `carrier` (bool), `operstate`, `carrier_up_count`, `carrier_down_count`; service impact (P3): `in_use` (bool) and `in_use_reasons` (subset of `bond`, `bridge`, `upper`, `sriov_vfs`, `global_address`, in that order), `in_use_reasons_complete` (only `false`, when addresses could not be checked), `bond`, `bond_link_failures`, `rx_bytes`, `tx_bytes` (sampled counters) |
+| `generic.link.flaps` | `carrier_changes` (counter) |
+| `generic.link.lookback` | `link_downs`, `window_min`, `carrier_down_count` |
+| `mlx5.*` (§6.2 rules) | every counter of the rule the driver exposes, by its `ethtool -S` name (counter; zeros included, INFO counters and `rx_bits_phy` too); `mlx5.pcie.path`: `outbound_pci_stalled_rd_pct`, `outbound_pci_stalled_wr_pct`, `outbound_pci_buffer_overflow_pct` (gauges); `mlx5.phy.errors`: `pre_fec_ber`, `pre_fec_ber_estimated` (from link speed × window), `pre_fec_ber_judged` (false on PAM4 lanes) |
+| `mlx5.deep.troubleshooting` | `status_opcode`, `group_opcode` (integers), `recommendation` |
+| `mlx5.deep.fec` | `fec`, `compliance`, `fec_mismatch` (bool) |
+| `mlx5.deep.ber` | `effective_ber`, `raw_ber` (as printed, e.g. `15e-255` for "no errors"), `effective_errors`, `raw_errors_per_lane` (list), `link_down_counter`, `since_clear_min` |
+| `mlx5.deep.module` | `temperature_c`, `voltage_mv`, `bias_ma`, `rx_dbm`, `tx_dbm`, each with `_low`/`_high` (the module's own range) and, on multi-lane modules, `_lanes` (then the value is the lowest lane); `rx_dbm_judged` (false without link); `tx_fault`, `rx_los`, `tx_cdr_lol`, `rx_cdr_lol` (lists: one flag per lane, or the tool's lane mask on single-lane modules); `vendor`, `part_number`, `compliance` |
+
+`generic.devlink.health.*` has no `metrics`: its value already carries the state and counters, and no consumer needs them typed yet.
+
+- **Service impact (P3) on `generic.link.state`:** why the port counts as in use comes from the same scan that judges a port without link (#12): its master (`bond` when the master has `bonding/`, `bridge` when it has `bridge/`, else `upper`, e.g. OVS or team), its other upper devices (`upper`, e.g. a VLAN; not the master's own `upper_*` link), SR-IOV VFs (`sriov_vfs`) and a global address (`global_address`; one `ip -o addr show scope global` per run, first address per interface). The evidence of a port without link still names the first reason only. `in_use`/`in_use_reasons` are left out when the scan cannot tell (no reason found and `ip` missing or failing); when it found a reason but could not check addresses, the reasons may be incomplete and `in_use_reasons_complete` is `false`. `bond_link_failures` is the slave's `Link Failure Count` in `/proc/net/bonding/<bond>`. `rx_bytes`/`tx_bytes` are the `statistics/` byte counters sampled with the others: their `delta` says whether the port carries traffic now, which totals since boot cannot (LLDP and ARP alone make them grow). All read with Bash only.
 - **CSV:** one row per result record (RFC 4180, reusing the `csv_escape` approach).
 
 ---

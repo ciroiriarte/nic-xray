@@ -1,0 +1,70 @@
+{
+  "schema_version": 2,
+  "tool": "nic-health.sh",
+  "version": "2.13.0",
+  "host": "server-01.example.net",
+  "collected_at": "2026-10-26T12:00:00Z",
+  "uptime_s": 1987654,
+  "boot_id": "3f2a6c1e-8b4d-4e7f-9a10-5c6d7e8f9a0b",
+  "level": "basic",
+  "lookback_min": 60,
+  "mode": "absolute",
+  "interval_s": 0,
+  "elapsed_s": 0,
+  "capabilities": {"ethtool": true, "getopt": true, "readlink": true, "lspci": false, "devlink": true, "ip": false, "timeout": false, "journalctl": false, "mlxlink": false, "mstlink": false},
+  "summary": {"OK": 14, "WARN": 6, "CRIT": 1, "UNKNOWN": 3, "N/A": 3},
+  "verdict": "CRIT",
+  "exit_code": 2,
+  "asics": [
+    {
+      "id": "0000:01:00",
+      "model": "PCI 15b3:101f",
+      "driver": "mlx5_core",
+      "firmware": "1.2.3 (STUB)",
+      "ports": [{"iface": "eth0", "pci": "0000:01:00.0", "operstate": "up", "virtual_function": false}, {"iface": "eth1", "pci": "0000:01:00.1", "operstate": "up", "virtual_function": false}]
+    },
+    {
+      "id": "0000:02:00",
+      "model": "PCI 15b3:101f",
+      "driver": "sfc",
+      "firmware": "1.2.3 (STUB)",
+      "ports": [{"iface": "eth2", "pci": "0000:02:00.0", "operstate": "up", "virtual_function": false}]
+    },
+    {
+      "id": "0000:03:00",
+      "model": "PCI 15b3:101f",
+      "driver": "ixgbe",
+      "firmware": "1.2.3 (STUB)",
+      "ports": [{"iface": "eth3", "pci": "0000:03:00.0", "operstate": "up", "virtual_function": false}]
+    }
+  ],
+  "results": [
+    {"severity": "OK", "scope": "asic", "target": "0000:01:00", "check_id": "generic.pcie.link", "value": "16.0 GT/s x8", "unit": "", "threshold": "16.0 GT/s x8", "evidence": "current_link_speed=16.0 GT/s PCIe current_link_width=8 max_link_speed=16.0 GT/s PCIe max_link_width=8; no upstream port link attributes: card maxima used", "hint": "", "ref": "docs/design/nic-health.md §6.1", "metrics": {"speed_gts": 16.0, "width": 8, "max_speed_gts": 16.0, "max_width": 8, "expected_speed_gts": 16.0, "expected_width": 8, "slot_limited": false, "below_capability": false}},
+    {"severity": "WARN", "scope": "asic", "target": "0000:01:00", "check_id": "generic.pcie.aer", "value": "cor=3 nonfatal=0 fatal=0", "unit": "errors/boot", "threshold": "fatal/nonfatal>0 CRIT, cor>0 WARN", "evidence": "totals since boot: cor=3 nonfatal=0 fatal=0", "hint": "Historical correctable PCIe errors since boot; re-run with -I to see if they recur", "ref": "docs/design/nic-health.md §6.1", "metrics": {"cor": {"total": 3}, "nonfatal": {"total": 0}, "fatal": {"total": 0}}},
+    {"severity": "OK", "scope": "asic", "target": "0000:01:00 (asic)", "check_id": "generic.temperature", "value": "67", "unit": "C", "threshold": "warn>=95 crit>=105", "evidence": "label=asic input=67000 crit=105000 max=- highest=- alarm=- (millidegrees C)", "hint": "", "ref": "docs/design/nic-health.md §6.1", "metrics": {"label": "asic", "temp_c": 67, "warn_c": 95, "crit_c": 105}},
+    {"severity": "CRIT", "scope": "asic", "target": "0000:01:00 (Module0)", "check_id": "generic.temperature", "value": "99", "unit": "C", "threshold": "warn>=75 crit>=85", "evidence": "label=Module0 input=99000 crit=85000 max=- highest=- alarm=- (millidegrees C)", "hint": "At or above critical temperature: check airflow, fan speed, transceiver load; risk of thermal shutdown", "ref": "docs/design/nic-health.md §6.1", "metrics": {"label": "Module0", "temp_c": 99, "warn_c": 75, "crit_c": 85}},
+    {"severity": "OK", "scope": "asic", "target": "0000:01:00 (Module1)", "check_id": "generic.temperature", "value": "46", "unit": "C", "threshold": "warn>=75 crit>=85", "evidence": "label=Module1 input=46000 crit=85000 max=- highest=- alarm=- (millidegrees C)", "hint": "", "ref": "docs/design/nic-health.md §6.1", "metrics": {"label": "Module1", "temp_c": 46, "warn_c": 75, "crit_c": 85}},
+    {"severity": "WARN", "scope": "asic", "target": "0000:02:00", "check_id": "generic.pcie.link", "value": "8.0 GT/s x4", "unit": "", "threshold": "8.0 GT/s x8", "evidence": "current_link_speed=8.0 GT/s PCIe current_link_width=4 max_link_speed=8.0 GT/s PCIe max_link_width=8; no upstream port link attributes: card maxima used", "hint": "Link trained below what the card and its slot support: check BIOS PCIe settings, riser and seating; reseat. Slot limits unknown: a slot narrower than the card is permanent", "ref": "docs/design/nic-health.md §6.1", "metrics": {"speed_gts": 8.0, "width": 4, "max_speed_gts": 8.0, "max_width": 8, "expected_speed_gts": 8.0, "expected_width": 8, "slot_limited": false, "below_capability": true}},
+    {"severity": "N/A", "scope": "asic", "target": "0000:02:00", "check_id": "generic.pcie.aer", "value": "-", "unit": "", "threshold": "-", "evidence": "no aer_dev_* attributes in sysfs", "hint": "Kernel does not report AER for this device (CONFIG_PCIEAER off or no AER capability)", "ref": "docs/design/nic-health.md §6.1"},
+    {"severity": "WARN", "scope": "asic", "target": "0000:02:00 (Controller board temp.)", "check_id": "generic.temperature", "value": "72", "unit": "C", "threshold": "warn>=70 crit>=85", "evidence": "label=Controller board temp. input=72000 crit=85000 max=70000 highest=- alarm=- (millidegrees C)", "hint": "Approaching critical temperature: check airflow and fan speed", "ref": "docs/design/nic-health.md §6.1", "metrics": {"label": "Controller board temp.", "temp_c": 72, "warn_c": 70, "crit_c": 85, "max_c": 70}},
+    {"severity": "OK", "scope": "asic", "target": "0000:03:00", "check_id": "generic.pcie.link", "value": "5.0 GT/s x8", "unit": "", "threshold": "5.0 GT/s x8", "evidence": "current_link_speed=5.0 GT/s PCIe current_link_width=8 max_link_speed=5.0 GT/s PCIe max_link_width=8; no upstream port link attributes: card maxima used", "hint": "", "ref": "docs/design/nic-health.md §6.1", "metrics": {"speed_gts": 5.0, "width": 8, "max_speed_gts": 5.0, "max_width": 8, "expected_speed_gts": 5.0, "expected_width": 8, "slot_limited": false, "below_capability": false}},
+    {"severity": "WARN", "scope": "asic", "target": "0000:03:00", "check_id": "generic.pcie.aer", "value": "cor=0 nonfatal=0 fatal=4", "unit": "errors/boot", "threshold": "fatal/nonfatal>0 CRIT, cor>0 WARN", "evidence": "totals since boot: cor=0 nonfatal=0 fatal=4", "hint": "Historical uncorrectable PCIe errors since boot; re-run with -I to see if they recur", "ref": "docs/design/nic-health.md §6.1", "metrics": {"cor": {"total": 0}, "nonfatal": {"total": 0}, "fatal": {"total": 4}}},
+    {"severity": "WARN", "scope": "asic", "target": "0000:03:00 (loc2)", "check_id": "generic.temperature", "value": "88", "unit": "C", "threshold": "warn>=85 crit>=95", "evidence": "label=loc2 input=88000 crit=95000 max=105000 highest=- alarm=- (millidegrees C)", "hint": "Approaching critical temperature: check airflow and fan speed", "ref": "docs/design/nic-health.md §6.1", "metrics": {"label": "loc2", "temp_c": 88, "warn_c": 85, "crit_c": 95, "max_c": 105}},
+    {"severity": "UNKNOWN", "scope": "asic", "target": "0000:03:00 (broken)", "check_id": "generic.temperature", "value": "-", "unit": "C", "threshold": "-", "evidence": "label=broken input=? crit=- max=- highest=- alarm=- (millidegrees C); read: (bash read error)", "hint": "Sensor present but unreadable", "ref": "docs/design/nic-health.md §6.1"},
+    {"severity": "OK", "scope": "port", "target": "eth0", "check_id": "generic.link.flaps", "value": "2", "unit": "transitions/driver-load", "threshold": "informational", "evidence": "carrier_changes=2", "hint": "Historical total, informational only; re-run with -I to detect active flapping", "ref": "docs/design/nic-health.md §6.1", "metrics": {"carrier_changes": {"total": 2}}},
+    {"severity": "OK", "scope": "port", "target": "eth0", "check_id": "generic.link.state", "value": "up", "unit": "", "threshold": "carrier on ports in use", "evidence": "operstate=up; carrier_up_count=n/a carrier_down_count=n/a", "hint": "", "ref": "docs/design/nic-health.md §6.1", "metrics": {"carrier": true, "operstate": "up"}},
+    {"severity": "OK", "scope": "port", "target": "eth1", "check_id": "generic.link.flaps", "value": "4", "unit": "transitions/driver-load", "threshold": "informational", "evidence": "carrier_changes=4", "hint": "Historical total, informational only; re-run with -I to detect active flapping", "ref": "docs/design/nic-health.md §6.1", "metrics": {"carrier_changes": {"total": 4}}},
+    {"severity": "OK", "scope": "port", "target": "eth1", "check_id": "generic.link.state", "value": "up", "unit": "", "threshold": "carrier on ports in use", "evidence": "operstate=up; carrier_up_count=n/a carrier_down_count=n/a", "hint": "", "ref": "docs/design/nic-health.md §6.1", "metrics": {"carrier": true, "operstate": "up"}},
+    {"severity": "OK", "scope": "port", "target": "eth2", "check_id": "generic.link.flaps", "value": "2", "unit": "transitions/driver-load", "threshold": "informational", "evidence": "carrier_changes=2", "hint": "Historical total, informational only; re-run with -I to detect active flapping", "ref": "docs/design/nic-health.md §6.1", "metrics": {"carrier_changes": {"total": 2}}},
+    {"severity": "OK", "scope": "port", "target": "eth2", "check_id": "generic.link.state", "value": "up", "unit": "", "threshold": "carrier on ports in use", "evidence": "operstate=up; carrier_up_count=n/a carrier_down_count=n/a", "hint": "", "ref": "docs/design/nic-health.md §6.1", "metrics": {"carrier": true, "operstate": "up"}},
+    {"severity": "OK", "scope": "port", "target": "eth3", "check_id": "generic.link.flaps", "value": "0", "unit": "transitions/driver-load", "threshold": "informational", "evidence": "carrier_changes=0", "hint": "Historical total, informational only; re-run with -I to detect active flapping", "ref": "docs/design/nic-health.md §6.1", "metrics": {"carrier_changes": {"total": 0}}},
+    {"severity": "OK", "scope": "port", "target": "eth3", "check_id": "generic.link.state", "value": "up", "unit": "", "threshold": "carrier on ports in use", "evidence": "operstate=up; carrier_up_count=n/a carrier_down_count=n/a", "hint": "", "ref": "docs/design/nic-health.md §6.1", "metrics": {"carrier": true, "operstate": "up"}},
+    {"severity": "WARN", "scope": "asic", "target": "0000:01:00.0", "check_id": "generic.devlink.health.fw", "value": "state=healthy error=5 recover=5", "unit": "events/driver-load", "threshold": "state!=healthy CRIT, error>0 WARN", "evidence": "pci/0000:01:00.0 reporter fw: state=healthy error=5 recover=5", "hint": "Historical reporter errors since driver load; re-run with -I to see if they recur", "ref": "docs/design/nic-health.md §6.1"},
+    {"severity": "OK", "scope": "asic", "target": "0000:01:00.0", "check_id": "generic.devlink.health.fw_fatal", "value": "state=healthy error=0 recover=0", "unit": "events/driver-load", "threshold": "state!=healthy CRIT, error>0 WARN", "evidence": "pci/0000:01:00.0 reporter fw_fatal: state=healthy error=0 recover=0", "hint": "", "ref": "docs/design/nic-health.md §6.1"},
+    {"severity": "OK", "scope": "port", "target": "eth0", "check_id": "generic.devlink.health.tx", "value": "state=healthy error=0 recover=0", "unit": "events/driver-load", "threshold": "state!=healthy CRIT, error>0 WARN", "evidence": "auxiliary/mlx5_core.eth.0/65535 reporter tx: state=healthy error=0 recover=0", "hint": "", "ref": "docs/design/nic-health.md §6.1"},
+    {"severity": "N/A", "scope": "asic", "target": "0000:02:00", "check_id": "generic.devlink.health", "value": "-", "unit": "", "threshold": "-", "evidence": "no devlink health reporters for this ASIC", "hint": "Driver exposes no devlink health reporters (driver or kernel too old, or not implemented)", "ref": "docs/design/nic-health.md §6.1"},
+    {"severity": "N/A", "scope": "asic", "target": "0000:03:00", "check_id": "generic.devlink.health", "value": "-", "unit": "", "threshold": "-", "evidence": "no devlink health reporters for this ASIC", "hint": "Driver exposes no devlink health reporters (driver or kernel too old, or not implemented)", "ref": "docs/design/nic-health.md §6.1"},
+    {"severity": "UNKNOWN", "scope": "port", "target": "eth0", "check_id": "mlx5.ethtool", "value": "-", "unit": "", "threshold": "-", "evidence": "ethtool -S failed: no stats available", "hint": "mlx5 counters unavailable for this port", "ref": "docs/design/nic-health.md §6.2"},
+    {"severity": "UNKNOWN", "scope": "port", "target": "eth1", "check_id": "mlx5.ethtool", "value": "-", "unit": "", "threshold": "-", "evidence": "ethtool -S failed: no stats available", "hint": "mlx5 counters unavailable for this port", "ref": "docs/design/nic-health.md §6.2"}
+  ]
+}

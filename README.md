@@ -829,6 +829,8 @@ sudo nic-health.sh -O json > health.json   # for monitoring or later comparison
 | `-t`, `--check-tools` | List tools, what each enables, and where to get it |
 | `-v`, `--version` / `-h`, `--help` | Version / usage |
 
+🧾 **JSON** (`schema_version` 2) adds an optional `metrics` object to each result: the values behind its evidence as typed JSON (counters as `{"total": N, "delta": N}`, optics, BER, FEC, PCIe link, temperatures), so tools need not parse the evidence text. On `generic.link.state` it also records each port's service impact: `in_use` and why (`bond`, `bridge`, `upper`, `sriov_vfs`, `global_address`), its `bond` and `bond_link_failures` (from `/proc/net/bonding`), and `rx_bytes`/`tx_bytes` (whose `delta` shows traffic in the window). Values that are absent are left out, never written as 0. The evidence, the table and CSV are unchanged. Keys per check: `man nic-health` (JSON) or [`docs/design/nic-health.md`](docs/design/nic-health.md) §10.
+
 ### 🔬 Deep mode safety
 
 With `-l deep`, each ConnectX physical function gets exactly one query: `timeout -k 2 10 mlxlink -d <BDF> -m -c`, or `mstlink` when MFT is absent. An allowlist gate checks the tool, the exact argument template, the PCI address format and a forbidden-flag list before every call. Eye scans, PRBS, link/FEC changes, counter clears, register access, firmware operations, `mst start` and devlink dumps/recovery are **never** run. `mlxconfig`/`mstconfig` are not used: they cost several seconds of kernel time per device.
@@ -991,6 +993,8 @@ Host status: `ok`, `ssh-fail`, `sudo-fail`, `tool-missing`, `timeout`, `bad-outp
 | 6. Suppressed known issues (with `-S`) | rules, reasons, counts and every suppressed result | same |
 
 Coverage counts hosts, ASICs, ports, ports with link, deep checks and FEC modes; lists every host not collected; and flags what limits a comparison (mixed nic-health versions or windows, different days, imported data without metadata, sites with no sweep at the requested date). Findings list every WARN/CRIT/UNKNOWN result with its evidence and hint. Baselines are computed over ports with link: receive power per module type, outliers (at least `-d` dB, default 5, below the median **and** a robust median/MAD score of 3.5; multi-lane modules are their own type, judged by the lowest lane), errors since boot, carrier changes above `-f` (default 100), discards, temperatures and PCIe links below capability. Patterns group related checks into one issue (symbol/CRC/BER → "link errors") and need `-r` for roles; without it a site's hosts form one group and the report says so.
+
+🎯 **Fidelity:** values come from nic-health's typed `metrics` when the JSON has them (schema 2), value by value, and otherwise from the evidence text (older nic-health, CSV imports, or a value missing or mistyped in `metrics`); both give the same report. Coverage shows, per group, how many hosts had typed metrics and how many recorded service-impact facts, with a caveat when a selection mixes the two. With those facts, port findings name the port's bond and use, e.g. `(bond0 member, in use, 3 bond link failures)`; the JSON report also carries them as `service` on port findings and port lists (with `has_traffic` only when the window measured traffic). A node file with invalid UTF-8 is read with U+FFFD in place of the bad bytes and named in a caveat; one larger than 32 MiB is unreadable.
 
 ```bash
 nic-report.py -R sweeps                                    # latest sweep of every site

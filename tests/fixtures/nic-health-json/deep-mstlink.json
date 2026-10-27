@@ -1,0 +1,51 @@
+{
+  "schema_version": 2,
+  "tool": "nic-health.sh",
+  "version": "2.13.0",
+  "host": "server-01.example.net",
+  "collected_at": "2026-10-26T12:00:00Z",
+  "uptime_s": 1987654,
+  "boot_id": "3f2a6c1e-8b4d-4e7f-9a10-5c6d7e8f9a0b",
+  "level": "basic",
+  "lookback_min": 60,
+  "mode": "delta",
+  "interval_s": 5,
+  "elapsed_s": 5.01,
+  "capabilities": {"ethtool": true, "getopt": true, "readlink": true, "lspci": false, "devlink": true, "ip": false, "timeout": true, "journalctl": false, "mlxlink": false, "mstlink": true},
+  "summary": {"OK": 5, "WARN": 3, "CRIT": 0, "UNKNOWN": 0, "N/A": 0},
+  "verdict": "WARN",
+  "exit_code": 1,
+  "asics": [
+    {
+      "id": "0000:01:00",
+      "model": "PCI 15b3:101f",
+      "driver": "mlx5_core",
+      "firmware": "1.2.3 (STUB)",
+      "ports": [{"iface": "eth0", "pci": "0000:01:00.0", "operstate": "up", "virtual_function": false}, {"iface": "eth1", "pci": "0000:01:00.1", "operstate": "up", "virtual_function": false}]
+    },
+    {
+      "id": "0000:02:00",
+      "model": "PCI 15b3:101f",
+      "driver": "sfc",
+      "firmware": "1.2.3 (STUB)",
+      "ports": [{"iface": "eth2", "pci": "0000:02:00.0", "operstate": "up", "virtual_function": false}]
+    },
+    {
+      "id": "0000:03:00",
+      "model": "PCI 15b3:101f",
+      "driver": "ixgbe",
+      "firmware": "1.2.3 (STUB)",
+      "ports": [{"iface": "eth3", "pci": "0000:03:00.0", "operstate": "up", "virtual_function": false}]
+    }
+  ],
+  "results": [
+    {"severity": "OK", "scope": "port", "target": "eth0", "check_id": "mlx5.deep.troubleshooting", "value": "opcode 0", "unit": "", "threshold": "0", "evidence": "mstlink: No issue was observed", "hint": "", "ref": "docs/design/nic-health.md §7", "metrics": {"status_opcode": 0, "recommendation": "No issue was observed"}},
+    {"severity": "WARN", "scope": "port", "target": "eth0", "check_id": "mlx5.deep.fec", "value": "link: No FEC", "unit": "", "threshold": "module FEC = link FEC", "evidence": "FEC=No FEC; module Compliance=100G AOC (Active Optical Cable) or 25GAUI C2M AOC with FEC", "hint": "Module is specified for operation with FEC but the link runs without it: enable RS-FEC on both ends (NIC and switch port)", "ref": "docs/design/nic-health.md §7", "metrics": {"fec": "No FEC", "compliance": "100G AOC (Active Optical Cable) or 25GAUI C2M AOC with FEC", "fec_mismatch": true}},
+    {"severity": "WARN", "scope": "port", "target": "eth0", "check_id": "mlx5.deep.ber", "value": "effective 5E-10 raw 5E-10", "unit": "", "threshold": "effective<1E-12", "evidence": "Effective Physical BER=5E-10 Raw Physical BER=5E-10 Effective Physical Errors=61179413 Raw Physical Errors Per Lane=61179413 Link Down Counter=0 since 71726.0 min", "hint": "Average since the last counter clear (71726.0 min) exceeds 1E-12: clean/replace the optic or cable, check FEC; mlx5.phy.errors shows whether errors are still growing", "ref": "docs/design/nic-health.md §7", "metrics": {"effective_ber": 5e-10, "raw_ber": 5e-10, "effective_errors": 61179413, "raw_errors_per_lane": [61179413], "link_down_counter": 0, "since_clear_min": 71726.0}},
+    {"severity": "OK", "scope": "port", "target": "eth0", "check_id": "mlx5.deep.module", "value": "Temperature=45 Voltage=3290.8 Bias=6.808 Rx=-0.079 Tx=0.607", "unit": "", "threshold": "within module ranges, no lane faults", "evidence": "Temperature [C]=45 [-45..90]; Voltage [mV]=3290.8 [3000..3600]; Bias Current [mA]=6.808 [1..15]; Rx Power Current [dBm]=-0.079 [-13.01..4.4]; Tx Power Current [dBm]=0.607 [-9.431..3.398]; Tx Fault [per lane]=0; Rx LOS [per lane]=0; Tx CDR LOL [per lane]=0; Rx CDR LOL [per lane]=0; module FS SFP-25G-AO03", "hint": "", "ref": "docs/design/nic-health.md §7", "metrics": {"temperature_c": 45, "temperature_c_low": -45, "temperature_c_high": 90, "voltage_mv": 3290.8, "voltage_mv_low": 3000, "voltage_mv_high": 3600, "bias_ma": 6.808, "bias_ma_low": 1, "bias_ma_high": 15, "rx_dbm": -0.079, "rx_dbm_low": -13.01, "rx_dbm_high": 4.4, "rx_dbm_judged": true, "tx_dbm": 0.607, "tx_dbm_low": -9.431, "tx_dbm_high": 3.398, "tx_fault": [0], "rx_los": [0], "tx_cdr_lol": [0], "rx_cdr_lol": [0], "vendor": "FS", "part_number": "SFP-25G-AO03", "compliance": "100G AOC (Active Optical Cable) or 25GAUI C2M AOC with FEC"}},
+    {"severity": "OK", "scope": "port", "target": "eth1", "check_id": "mlx5.deep.troubleshooting", "value": "opcode 0", "unit": "", "threshold": "0", "evidence": "mstlink: No issue was observed", "hint": "", "ref": "docs/design/nic-health.md §7", "metrics": {"status_opcode": 0, "recommendation": "No issue was observed"}},
+    {"severity": "WARN", "scope": "port", "target": "eth1", "check_id": "mlx5.deep.fec", "value": "link: No FEC", "unit": "", "threshold": "module FEC = link FEC", "evidence": "FEC=No FEC; module Compliance=100G AOC (Active Optical Cable) or 25GAUI C2M AOC with FEC", "hint": "Module is specified for operation with FEC but the link runs without it: enable RS-FEC on both ends (NIC and switch port)", "ref": "docs/design/nic-health.md §7", "metrics": {"fec": "No FEC", "compliance": "100G AOC (Active Optical Cable) or 25GAUI C2M AOC with FEC", "fec_mismatch": true}},
+    {"severity": "OK", "scope": "port", "target": "eth1", "check_id": "mlx5.deep.ber", "value": "effective ~0 raw ~0", "unit": "", "threshold": "effective<1E-12", "evidence": "Effective Physical BER=15E-255 Raw Physical BER=15E-255 Effective Physical Errors=0 Raw Physical Errors Per Lane=0 Link Down Counter=0 since 71726.0 min", "hint": "", "ref": "docs/design/nic-health.md §7", "metrics": {"effective_ber": 15e-255, "raw_ber": 15e-255, "effective_errors": 0, "raw_errors_per_lane": [0], "link_down_counter": 0, "since_clear_min": 71726.0}},
+    {"severity": "OK", "scope": "port", "target": "eth1", "check_id": "mlx5.deep.module", "value": "Temperature=42 Voltage=3287.1 Bias=6.798 Rx=0.158 Tx=0.599", "unit": "", "threshold": "within module ranges, no lane faults", "evidence": "Temperature [C]=42 [-45..90]; Voltage [mV]=3287.1 [3000..3600]; Bias Current [mA]=6.798 [1..15]; Rx Power Current [dBm]=0.158 [-13.01..4.4]; Tx Power Current [dBm]=0.599 [-9.431..3.398]; Tx Fault [per lane]=0; Rx LOS [per lane]=0; Tx CDR LOL [per lane]=0; Rx CDR LOL [per lane]=0; module FS SFP-25G-AO03", "hint": "", "ref": "docs/design/nic-health.md §7", "metrics": {"temperature_c": 42, "temperature_c_low": -45, "temperature_c_high": 90, "voltage_mv": 3287.1, "voltage_mv_low": 3000, "voltage_mv_high": 3600, "bias_ma": 6.798, "bias_ma_low": 1, "bias_ma_high": 15, "rx_dbm": 0.158, "rx_dbm_low": -13.01, "rx_dbm_high": 4.4, "rx_dbm_judged": true, "tx_dbm": 0.599, "tx_dbm_low": -9.431, "tx_dbm_high": 3.398, "tx_fault": [0], "rx_los": [0], "tx_cdr_lol": [0], "rx_cdr_lol": [0], "vendor": "FS", "part_number": "SFP-25G-AO03", "compliance": "100G AOC (Active Optical Cable) or 25GAUI C2M AOC with FEC"}}
+  ]
+}

@@ -25,6 +25,12 @@
 #   - 2026-10-26: Phase 5: PDF via WeasyPrint (cover, contents with page numbers, running header and
 #                 footer with the classification, landscape pages for wide tables), --suppress (A7),
 #                 --per-site, themes (--theme, NIC_REPORT_THEME, --strict-theme) and attribution
+#   - 2026-10-26: Phase 6: typed nic-health metrics (JSON schema 2) preferred over the evidence
+#                 extractors, field by field, with the extractors as fallback (older JSON, CSV import,
+#                 a missing or mistyped value); service-impact facts (in use and why, bond, bond link
+#                 failures, traffic) on port findings and lists; coverage counts both. The link-flap
+#                 extractor also reads a window's "carrier_changes T0=… T1=…" evidence. Node files: invalid
+#                 UTF-8 replaced (with a caveat) and a 32 MiB limit; host text cannot form Markdown links
 #
 # Version: 2.13.0
 """nic-report.py: single- and multi-site reports from nic-sweep sweeps and legacy nic-health CSV."""
@@ -81,7 +87,10 @@ NOT_AVAILABLE = ("", "-", "n/a", "N/A")
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 # C0/C1 controls (tab, newline and the like are folded to spaces instead) and bidi overrides/isolates,
 # which could make untrusted text display differently from what it is
-CONTROL_RE = re.compile("[\x00-\x08\x0e-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
+CONTROL_RE = re.compile("[\x00-\x08\x0e-\x1f\x7f-\x9f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2060-\u2069\ufeff]")
+# Markdown link syntax in untrusted text ("[text](url)", "[text][ref]"): the ']' becomes a fullwidth one, so
+# no Markdown viewer turns host-written text into a link; "[dBm]" and the like stay as they are
+MD_LINK_RE = re.compile(r"\](?=[(\[])")
 SWEEP_TS_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$")
 AT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?Z?)?$")
 # Terminal captures wrapped long fields with a run of spaces between two non-space characters (legacy
@@ -111,6 +120,14 @@ TOP_N = 10                      # rows of "highest" lists
 TOP_HOT = 5                     # hottest modules listed
 PATTERN_ITEMS_SHOWN = 6         # places listed per pattern row before "and N more"
 MAX_COUNTER_DIGITS = 20         # 64-bit counters; longer digit runs in untrusted input are not counters
+MLX5_BITS_COUNTER = "rx_bits_phy"   # BER denominator: nic-health never lists it in the evidence
+# Service-impact facts (nic-health generic.link.state metrics, design §7 P3)
+IMPACT_KEYS = ("in_use", "in_use_reasons", "in_use_reasons_complete", "bond", "bond_link_failures", "rx_bytes", "tx_bytes")
+USE_REASONS = ("bond", "bridge", "upper", "sriov_vfs", "global_address")   # nic-health's in_use_reasons tokens
+# An interface name as the kernel allows it (1-15 characters, no whitespace, '/' or ':'); CONTROL_RE characters
+# (bidi and the like) are refused as well
+IFNAME_RE = re.compile(r"^[^\s/:\x00-\x1f\x7f-\x9f]{1,15}$")
+NODE_MAX_BYTES = 32 * 1024 * 1024    # a nodes/<host>.json larger than this is unreadable, not loaded
 SECONDS_PER_HOUR = 3600
 BASELINES = ("scope", "all")
 OUTLIER_KIND = "Rx outlier (low)"
@@ -244,7 +261,9 @@ def extract_discards(evidence):
 
 
 def extract_carrier_changes(evidence):
-    m = re.search(r"\bcarrier_changes=(\d{1,%d})\b" % MAX_COUNTER_DIGITS, evidence or "")
+    """Since driver load: 'carrier_changes=N', or T1 of a window that saw flaps ('carrier_changes T0=A T1=N')."""
+    m = re.search(r"\bcarrier_changes(?:=| T0=\d{1,%d} T1=)(\d{1,%d})\b" % (MAX_COUNTER_DIGITS, MAX_COUNTER_DIGITS),
+                  evidence or "")
     return int(m.group(1)) if m else None
 
 
@@ -296,45 +315,177 @@ def extract_module_part(evidence):
     return m.group(1).strip() if m and m.group(1).strip() not in NOT_AVAILABLE else None
 
 
-def metrics_for(check_id, value, evidence):
-    """Structured values for one record (design §6.1 'metrics'), by check."""
+# --------------------------------------------------------------------------------- typed metrics
+# nic-health JSON schema 2 adds a typed "metrics" object per record (design §7 P2). Each function reads
+# one value from it with the extractor's semantics and returns MISSING when the object does not carry
+# it with the right types (untrusted input): metrics_for then falls back to the extractor for that value.
+
+MISSING = object()
+
+
+def _num(v):
+    """A finite JSON number as float, else None (bool is not a number here)."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    try:
+        f = float(v)
+    except OverflowError:
+        return None
+    return f if math.isfinite(f) else None
+
+
+def _uint(v):
+    """A counter: an int in 0 .. 10^MAX_COUNTER_DIGITS - 1, else None."""
+    return v if isinstance(v, int) and not isinstance(v, bool) and 0 <= v < 10 ** MAX_COUNTER_DIGITS else None
+
+
+def _text_value(v):
+    return v.strip() if isinstance(v, str) and v.strip() not in NOT_AVAILABLE else None
+
+
+def _counter_obj(v):
+    """{"total": N[, "delta": N]} with valid counters, else None."""
+    if not isinstance(v, dict) or _uint(v.get("total")) is None:
+        return None
+    if "delta" in v and _uint(v["delta"]) is None:
+        return None
+    return v
+
+
+def typed_power(t, key, extract):
+    """'rx_dbm'/'tx_dbm' (+ _lanes, _low, _high, _judged) as extract_rx_dbm builds it. Without _judged (nic-health
+    writes it for Rx only) whether the value was judged comes from the evidence, through extract."""
+    v, lo, hi = _num(t.get(key)), _num(t.get(key + "_low")), _num(t.get(key + "_high"))
+    lanes = t.get(key + "_lanes")
+    if key + "_judged" in t:
+        judged = t[key + "_judged"]
+    else:
+        from_evidence = extract()
+        judged = from_evidence["judged"] if from_evidence else True
+    if v is None or lo is None or hi is None or not isinstance(judged, bool):
+        return MISSING
+    if lanes is not None:
+        lanes = [_num(x) for x in lanes] if isinstance(lanes, list) and lanes else [None]
+        if any(x is None for x in lanes):
+            return MISSING
+    vals = lanes or [v]
+    return {"dbm": min(vals), "lanes": vals if len(vals) > 1 else None, "low": lo, "high": hi, "judged": judged}
+
+
+def typed_module_temp(t):
+    v, lo, hi, lanes = (_num(t.get("temperature_c")), _num(t.get("temperature_c_low")), _num(t.get("temperature_c_high")),
+                        t.get("temperature_c_lanes"))
+    if lanes is not None:
+        v = _num(lanes[0]) if isinstance(lanes, list) and lanes else None
+    if v is None or lo is None or hi is None:
+        return MISSING
+    return {"c": v, "low": lo, "high": hi}
+
+
+def typed_part(t):
+    vendor, part = _text_value(t.get("vendor")), _text_value(t.get("part_number"))
+    return f"{vendor} {part}" if vendor and part else MISSING
+
+
+def typed_counter(t, name):
+    """A counter as the evidence shows it: listed when its total is not 0; {0, 0} when every counter of the
+    check is 0 ('all N counters are 0'); None when it is 0 next to others that are not."""
+    c = _counter_obj(t.get(name))
+    if c is None:
+        return MISSING
+    if c["total"]:
+        return {"total": c["total"], "delta": c.get("delta")}
+    others = [_counter_obj(v) for k, v in t.items() if k != MLX5_BITS_COUNTER and isinstance(v, dict)]
+    if any(o is None for o in others):
+        return MISSING
+    return {"total": 0, "delta": 0} if all(o["total"] == 0 for o in others) else None
+
+
+def typed_carrier_changes(t):
+    c = _counter_obj(t.get("carrier_changes"))
+    return MISSING if c is None else c["total"]
+
+
+def typed_aer(t):
+    kinds = {k: _counter_obj(t.get(k)) for k in ("cor", "nonfatal", "fatal") if k in t}
+    if not kinds or any(c is None for c in kinds.values()):
+        return MISSING
+    # nic-health's evidence prints 0 for a kind the device has no file for
+    return {k: kinds[k]["total"] if k in kinds else 0 for k in ("cor", "nonfatal", "fatal")}
+
+
+def _ber_number(v):
+    v = _num(v)
+    return None if v is None else (0.0 if v < BER_UNDERFLOW else v)
+
+
+def typed_ber(t):
+    eff = _ber_number(t.get("effective_ber"))
+    if eff is None:
+        return MISSING
+    return {"effective": eff, "raw": _ber_number(t.get("raw_ber")), "since_min": _num(t.get("since_clear_min"))}
+
+
+def typed_text(t, key):
+    if key not in t:
+        return MISSING
+    return _text_value(t[key]) if isinstance(t[key], str) else MISSING
+
+
+def typed_impact(t):
+    """Service-impact facts of generic.link.state (P3), each kept only when well typed: reasons only from nic-health's
+    tokens (deduplicated, in order), a bond only with an interface name, traffic as counters."""
     out = {}
+    if isinstance(t.get("in_use"), bool):
+        out["in_use"] = t["in_use"]
+    reasons = t.get("in_use_reasons")
+    if isinstance(reasons, list) and all(isinstance(x, str) and x in USE_REASONS for x in reasons):
+        out["in_use_reasons"] = list(dict.fromkeys(reasons))
+    if isinstance(t.get("in_use_reasons_complete"), bool):
+        out["in_use_reasons_complete"] = t["in_use_reasons_complete"]
+    if isinstance(t.get("bond"), str) and IFNAME_RE.match(t["bond"]) and not CONTROL_RE.search(t["bond"]):
+        out["bond"] = t["bond"]
+    if _uint(t.get("bond_link_failures")) is not None:
+        out["bond_link_failures"] = t["bond_link_failures"]
+    for key in ("rx_bytes", "tx_bytes"):
+        if _counter_obj(t.get(key)) is not None:
+            out[key] = {k: t[key][k] for k in ("total", "delta") if k in t[key]}
+    return out
+
+
+def metrics_for(check_id, value, evidence, typed=None):
+    """Structured values for one record (design §6.1 'metrics'), by check: from nic-health's typed metrics
+    (dict, schema 2) where they carry the value with the right types, else from the evidence extractors."""
+    t = typed if isinstance(typed, dict) else {}
+    out = {}
+
+    def put(key, typed_value, extract):
+        v = typed_value if typed_value is not MISSING else extract()
+        if v is not None:
+            out[key] = v
+
     if check_id == "mlx5.deep.module":
-        for key, fn in (("rx", extract_rx_dbm), ("tx", extract_tx_dbm), ("temp", extract_module_temp_c),
-                        ("part", extract_module_part)):
-            v = fn(evidence)
-            if v is not None:
-                out[key] = v
+        put("rx", typed_power(t, "rx_dbm", lambda: extract_rx_dbm(evidence)), lambda: extract_rx_dbm(evidence))
+        put("tx", typed_power(t, "tx_dbm", lambda: extract_tx_dbm(evidence)), lambda: extract_tx_dbm(evidence))
+        put("temp", typed_module_temp(t), lambda: extract_module_temp_c(evidence))
+        put("part", typed_part(t), lambda: extract_module_part(evidence))
     elif check_id == "mlx5.phy.errors":
-        v = extract_symbol_errors(evidence)
-        if v is not None:
-            out["symbol_errors"] = v
+        put("symbol_errors", typed_counter(t, "rx_symbol_err_phy"), lambda: extract_symbol_errors(evidence))
     elif check_id == "mlx5.frame.errors":
-        v = extract_crc_errors(evidence)
-        if v is not None:
-            out["crc_errors"] = v
+        put("crc_errors", typed_counter(t, "rx_crc_errors_phy"), lambda: extract_crc_errors(evidence))
     elif check_id == "mlx5.nic.discards":
-        v = extract_discards(evidence)
-        if v is not None:
-            out["discards"] = v
-    elif check_id == "generic.link.flaps":
-        v = extract_carrier_changes(evidence)
-        if v is not None:
-            out["carrier_changes"] = v
+        put("discards", typed_counter(t, "rx_discards_phy"), lambda: extract_discards(evidence))
+    elif check_id == LINK_FLAPS:
+        put("carrier_changes", typed_carrier_changes(t), lambda: extract_carrier_changes(evidence))
     elif check_id == "generic.pcie.aer":
-        v = extract_aer_totals(evidence)
-        if v is not None:
-            out["aer"] = v
+        put("aer", typed_aer(t), lambda: extract_aer_totals(evidence))
     elif check_id == "mlx5.deep.ber":
-        v = extract_ber(evidence)
-        if v is not None:
-            out["ber"] = v
+        put("ber", typed_ber(t), lambda: extract_ber(evidence))
     elif check_id == DEEP_FEC:
-        fec, comp = extract_fec(value), extract_compliance(evidence)
-        if fec is not None:
-            out["fec"] = fec
-        if comp is not None:
-            out["compliance"] = comp
+        put("fec", typed_text(t, "fec"), lambda: extract_fec(value))
+        put("compliance", typed_text(t, "compliance"), lambda: extract_compliance(evidence))
+    elif check_id == LINK_STATE:
+        out.update(typed_impact(t))           # no evidence fallback: older nic-health did not record these
     return out
 
 
@@ -352,6 +503,8 @@ class Host:
         self.records = []               # normalised records (finalize)
         self.problem = None             # why a collected host's result could not be read
         self.verdict_before = None      # verdict before --suppress recomputed it (only when it did)
+        self.typed_metrics = False      # its nic-health JSON carries typed metrics (schema 2)
+        self.invalid_utf8 = False       # its nic-health JSON had invalid UTF-8, read with U+FFFD in its place
 
     @property
     def collected(self):
@@ -391,7 +544,7 @@ def make_record(host, raw):
     rec["site"], rec["host"], rec["role"] = host.site, host.name, host.role
     for key in ("collected_at", "tool_version", "level", "mode", "interval_s", "uptime_s", "boot_id"):
         rec[key] = host.meta.get(key)
-    rec["metrics"] = metrics_for(rec["check_id"], rec["value"], rec["evidence"])
+    rec["metrics"] = metrics_for(rec["check_id"], rec["value"], rec["evidence"], raw.get("metrics"))
     return rec
 
 
@@ -408,14 +561,22 @@ def sweep_stamp_dt(stamp):
         return None
 
 
-def read_json(path, limit=None):
-    """A JSON document; with limit, a file larger than limit bytes is an input error (read bounded)."""
+def read_json(path, limit=None, replaced=None):
+    """A JSON document; with limit, a file larger than limit bytes is an input error (read bounded). With a list
+    as replaced, invalid UTF-8 is replaced by U+FFFD instead of failing, and path is appended to that list."""
     try:
         with open(path, "rb") as fh:
             data = fh.read() if limit is None else fh.read(limit + 1)
         if limit is not None and len(data) > limit:
             raise InputError(f"{path}: larger than {limit // 1024} KiB")
-        return json.loads(data.decode("utf-8"))
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            if replaced is None:
+                raise
+            text = data.decode("utf-8", errors="replace")
+            replaced.append(path)
+        return json.loads(text)
     except (OSError, ValueError, RecursionError) as exc:      # RecursionError: absurdly deep nesting
         raise InputError(f"{path}: {exc}") from exc
 
@@ -464,8 +625,10 @@ def load_node(path, host):
     """Read nodes/<host>.json of a collected host. A missing or malformed file marks that host
     unreadable (listed with the hosts not collected) instead of failing the whole report."""
     node = os.path.join(path, "nodes", host.name + ".json")
+    replaced = []
     try:
-        doc = read_json(node)
+        # One bad byte (a module's EEPROM vendor string, say) must not hide the host's results
+        doc = read_json(node, NODE_MAX_BYTES, replaced)
         if not isinstance(doc, dict):
             raise InputError(f"{node}: not a nic-health JSON object")
         results = doc.get("results")
@@ -479,6 +642,8 @@ def load_node(path, host):
                  "interval_s": _typed(doc.get("interval_s"), int), "uptime_s": _typed(doc.get("uptime_s"), int),
                  "boot_id": _typed(doc.get("boot_id"), str)}
     host.raw_results = results
+    host.invalid_utf8 = bool(replaced)
+    host.typed_metrics = any(isinstance(r.get("metrics"), dict) for r in results)
     if host.verdict is None:
         # The manifest's verdict column was missing or invalid: the document's, else from the records
         host.verdict = doc.get("verdict") if doc.get("verdict") in VERDICTS else worst_verdict(results)
@@ -836,6 +1001,7 @@ def coverage(sites, missing, multi):
         # generic.pcie.link runs exactly once per ASIC (other ASIC-scope targets carry sensor labels or functions)
         asics = {(r["host"], r["target"]) for r in recs if r["check_id"] == PCIE_LINK}
         fec = collections.Counter(r["metrics"]["fec"] for r in recs if r["check_id"] == DEEP_FEC and "fec" in r["metrics"])
+        impact = {r["host"] for r in recs if r["check_id"] == LINK_STATE and set(IMPACT_KEYS) & set(r["metrics"])}
         cols.append({
             "group": key,
             "hosts": len(hosts),
@@ -847,6 +1013,8 @@ def coverage(sites, missing, multi):
             "hosts_without_link_state": no_state,
             "deep_checks_evaluated": sum(1 for r in recs if r["check_id"].startswith(DEEP_PREFIX) and r["severity"] != "N/A"),
             "fec": dict(fec.most_common()),
+            "hosts_with_typed_metrics": sum(1 for h in hosts if h.collected and h.typed_metrics),
+            "hosts_with_impact_facts": len(impact),
             "tool_versions": sorted({h.meta.get("tool_version") for h in hosts if h.meta.get("tool_version")}),
             "levels": sorted({h.meta.get("level") for h in hosts if h.meta.get("level")}),
             "intervals_s": sorted({h.meta.get("interval_s") for h in hosts if h.meta.get("interval_s") is not None}),
@@ -856,6 +1024,10 @@ def coverage(sites, missing, multi):
                       "problem": h.problem}
                      for s in sites for h in sorted(s.hosts.values(), key=lambda h: h.name) if not h.collected]
     caveats = []
+    typed, collected = sum(c["hosts_with_typed_metrics"] for c in cols), sum(c["collected"] for c in cols)
+    if 0 < typed < collected:
+        caveats.append(f"Typed metrics from {typed} of {collected} collected host(s); the others' values were read "
+                       "from evidence text (nic-health without typed metrics, or CSV import).")
     versions = sorted({v for c in cols for v in c["tool_versions"]})
     if len(versions) > 1:
         caveats.append(f"Mixed nic-health versions: {', '.join(versions)}.")
@@ -876,6 +1048,9 @@ def coverage(sites, missing, multi):
     if no_state:
         caveats.append(f"{len(no_state)} host(s) have no link state (nic-health older than {LINK_STATE_MIN_VERSION}): "
                        "ports counted from link-flap records, ports with link unknown.")
+    bad_utf8 = [f"{h.site}/{h.name}" for s in sites for h in sorted(s.hosts.values(), key=lambda h: h.name) if h.invalid_utf8]
+    if bad_utf8:
+        caveats.append(f"{len(bad_utf8)} host file(s) contained invalid UTF-8, replaced with U+FFFD: {'; '.join(bad_utf8)}.")
     unreadable = [h for h in not_collected if h["status"] == ST_UNREADABLE]
     if unreadable:
         caveats.append(f"{len(unreadable)} collected host(s) have a missing or malformed result file: "
@@ -939,6 +1114,9 @@ def port_facts(sites):
                 m, cid = r["metrics"], r["check_id"]
                 if cid == LINK_STATE:
                     p["link"] = r["value"] == LINK_UP
+                    service = impact_facts(m)
+                    if service:
+                        p["service"] = service
                 elif cid == "mlx5.deep.module":
                     for k in ("rx", "tx", "temp", "part"):
                         if k in m:
@@ -968,6 +1146,22 @@ def port_facts(sites):
         p["linked"] = p["link"] if p["link"] is not None else bool(
             p.get("fec") and rx and rx["judged"] and rx["dbm"] > NO_LIGHT_DBM)
     return list(ports.values())
+
+
+def impact_facts(m):
+    """Service-impact facts of a port from its generic.link.state metrics (P3): in_use, in_use_reasons (and
+    in_use_reasons_complete when nic-health could not check addresses), bond, bond_link_failures, and has_traffic:
+    bytes received or sent in the sampling window. Totals since boot do not tell (LLDP and ARP alone make them grow),
+    so without a window has_traffic is left out: true when either direction moved, false only when both have a
+    window and neither moved (a counter reset leaves its direction unknown). Each only when known."""
+    out = {k: m[k] for k in ("in_use", "in_use_reasons", "in_use_reasons_complete", "bond", "bond_link_failures")
+           if k in m}
+    window = [m[k].get("delta") if isinstance(m.get(k), dict) else None for k in ("rx_bytes", "tx_bytes")]
+    if any(window):
+        out["has_traffic"] = True
+    elif all(d is not None for d in window):
+        out["has_traffic"] = False
+    return out
 
 
 def module_type(p):
@@ -1061,7 +1255,10 @@ def baselines_and_outliers(report_ports, baseline_ports, args):
 
 
 def _who(p):
-    return {"site": p["site"], "host": p["host"], "role": p["role"], "port": p["port"]}
+    who = {"site": p["site"], "host": p["host"], "role": p["role"], "port": p["port"]}
+    if p.get("service"):
+        who["service"] = p["service"]
+    return who
 
 
 def pcie_summary(sites):
@@ -1143,8 +1340,14 @@ def analyse(sites, missing, args=None, baseline_sites=None):
         cov["caveats"].append(f"Known issues suppressed with {supp['file']}: {len(supp['results'])} result(s) by "
                               f"{used} of {len(supp['rules'])} rule(s), listed in their own section"
                               + (f"; verdicts recomputed from the remaining results: {adjusted}" if adjusted else "") + ".")
+    # Port findings carry their port's service-impact facts when nic-health recorded them (P3)
+    service = {(p["site"], p["host"], p["port"]): p["service"] for p in report_ports if p.get("service")}
+    fnd = []
+    for r in findings(sites):
+        key = (r["site"], r["host"], r["target"])
+        fnd.append({**r, "service": service[key]} if r["scope"] == "port" and key in service else r)
     return {"multi_site": multi, "coverage": cov,
-            "verdicts": verdicts(sites), "findings": findings(sites), "baselines": a4,
+            "verdicts": verdicts(sites), "findings": fnd, "baselines": a4,
             "patterns": patterns(sites, a4, pcie, multi), "suppressed": supp}
 
 
@@ -1281,12 +1484,12 @@ def md_cell(v):
     if isinstance(v, _MD):
         return v.replace("|", "/")
     # '*' neutralised: untrusted text must not turn into bold or a severity badge
-    return "—" if v is None or v == "" else _plain(v).replace("*", "∗").replace("|", "/")
+    return "—" if v is None or v == "" else MD_LINK_RE.sub("］", _plain(v)).replace("*", "∗").replace("|", "/")
 
 
 def md_inline(v):
-    """Untrusted text inside Markdown prose or a code span: one line, no backticks, no markup."""
-    return _plain(v).replace("`", "'").replace("*", "∗")
+    """Untrusted text inside Markdown prose or a code span: one line, no backticks, links or other markup."""
+    return MD_LINK_RE.sub("］", _plain(v)).replace("`", "'").replace("*", "∗")
 
 
 def _badge(v):
@@ -1343,6 +1546,8 @@ def render_md(result, sites, missing, args, now):
         ["Deep checks evaluated", *[c["deep_checks_evaluated"] for c in cov["groups"]]],
         ["FEC in use", *[" · ".join(f"{k} {v}" for k, v in c["fec"].items()) for c in cov["groups"]]],
         ["nic-health version", *[", ".join(c["tool_versions"]) for c in cov["groups"]]],
+        ["Typed metrics / impact facts", *[f"{c['hosts_with_typed_metrics']} of {c['collected']} / "
+                                           f"{c['hosts_with_impact_facts']}" for c in cov["groups"]]],
         ["Window", *[", ".join(f"{i} s" for i in c["intervals_s"]) for c in cov["groups"]]],
         ["Collected on", *[", ".join(c["dates"]) for c in cov["groups"]]],
     ]
@@ -1389,8 +1594,9 @@ def render_md(result, sites, missing, args, now):
                 md += [f"### {r['site'] + ' · ' if multi else ''}{r['host']}", ""]
             ev = md_inline(r["evidence"])
             ev = ev if len(ev) <= MAX_EVIDENCE else ev[:MAX_EVIDENCE] + "…"
+            svc = service_label(r.get("service"))
             md.append(f"- **{r['severity']}** `{md_inline(r['target'])}` `{md_inline(r['check_id'])}`: "
-                      f"{md_inline(r['value']) or '—'}")
+                      f"{md_inline(r['value']) or '—'}" + (f" ({md_inline(svc)})" if svc else ""))
             if ev:
                 md.append(f"  - Evidence: {ev}")
             if r["hint"]:
@@ -1401,6 +1607,18 @@ def render_md(result, sites, missing, args, now):
     md += render_md_suppressed(result, multi)
     md += ["---", "", attribution(now), ""]
     return "\n".join(md)
+
+
+def service_label(s):
+    """'bond0 member, in use, 3 bond link failures' from a port's service-impact facts; '' when none."""
+    if not s:
+        return ""
+    parts = [f"{s['bond']} member"] if s.get("bond") else []
+    if "in_use" in s:
+        parts.append("in use" if s["in_use"] else "not in use")
+    if s.get("bond") and s.get("bond_link_failures"):
+        parts.append(f"{s['bond_link_failures']:,} bond link failures")
+    return ", ".join(parts)
 
 
 def _f(v, digits=2):

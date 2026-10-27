@@ -43,7 +43,60 @@ count_of() {  # count_of <check_id> <target>
 
 reset_results() {
     REC_SCOPE=(); REC_TARGET=(); REC_CHECK=(); REC_VALUE=(); REC_UNIT=()
-    REC_THRESHOLD=(); REC_SEV=(); REC_EVIDENCE=(); REC_HINT=(); REC_REF=()
+    REC_THRESHOLD=(); REC_SEV=(); REC_EVIDENCE=(); REC_HINT=(); REC_REF=(); REC_METRICS=()
+    ADDR_STATE=""       # addresses are read once per run: every test case is a new run
+}
+
+# Typed metrics (JSON object members) of the first record matching check_id and target
+metrics_of() {
+    local i
+    for i in "${!REC_SEV[@]}"; do
+        [[ "${REC_CHECK[i]}" == "$1" && "${REC_TARGET[i]}" == "$2" ]] && { printf '%s' "${REC_METRICS[i]:-}"; return; }
+    done
+}
+
+# JSON fixtures for nic-report (tests/fixtures/nic-health-json/, README there): render_json of
+# scenarios below, from mocks only. Every run writes them to JSON_OUT and compares them with the
+# checked-in copies at the end; NIC_HEALTH_UPDATE_FIXTURES=1 (make fixtures) rewrites the copies
+JSON_FIXTURES="$TEST_DIR/fixtures/nic-health-json"
+JSON_OUT="$FIX/json"
+mkdir -p "$JSON_OUT"
+dump_json() {  # dump_json <name>: the current records as nic-health JSON, host-independent
+    local OUT RE
+    OUT=$(compute_verdict; HOSTNAME="server-01.example.net" COLLECTED_AT="2026-10-26T12:00:00Z" HOST_UPTIME_S=1987654 \
+        HOST_BOOT_ID="3f2a6c1e-8b4d-4e7f-9a10-5c6d7e8f9a0b" render_json)
+    # bash's own read error text names the script path and a line number, and varies by version
+    RE='; read: [^"]*nic-health\.sh[^"]*"'
+    while [[ "$OUT" =~ $RE ]]; do OUT="${OUT//"${BASH_REMATCH[0]}"/; read: (bash read error)\"}"; done
+    printf '%s\n' "$OUT" > "$JSON_OUT/$1.json"
+}
+
+# render_json is strict JSON with schema_version 2, every metrics value an object, and no
+# non-finite number anywhere (python3, else jq; skipped without either)
+json_strict_check() {  # json_strict_check <description>
+    local OUT
+    OUT=$(render_json)
+    if command -v python3 &>/dev/null; then
+        if python3 -I -c '
+import json, math, sys
+def bad(c):
+    raise ValueError(c)
+d = json.loads(sys.stdin.read(), parse_constant=bad)
+def finite(v):
+    if isinstance(v, float):
+        assert math.isfinite(v)
+    for x in (v.values() if isinstance(v, dict) else v if isinstance(v, list) else ()):
+        finite(x)
+finite(d)
+assert d["schema_version"] == 2
+assert all(isinstance(r.get("metrics", {}), dict) for r in d["results"])
+' <<< "$OUT" 2>/dev/null; then (( ++PASS )); else (( ++FAIL )); echo "❌ $1: render_json is not strict schema-2 JSON"; fi
+    elif command -v jq &>/dev/null; then
+        if [[ "$(jq -r '.schema_version == 2 and ([.. | numbers | select(isinfinite or isnan)] | length == 0) and all(.results[]; (.metrics // {}) | type == "object")' <<< "$OUT" 2>/dev/null)" == "true" ]]; then
+            (( ++PASS )); else (( ++FAIL )); echo "❌ $1: render_json is not strict schema-2 JSON"; fi
+    else
+        echo "⏭️  SKIP $1: neither python3 nor jq found"
+    fi
 }
 
 # --- Pure helpers ---
@@ -65,6 +118,41 @@ PROC_UPTIME="$FIX/uptime"
 assert_eq "uptime centiseconds" "484414908" "$(uptime_cs)"
 
 assert_eq "json_escape control chars" 'a\"b\\c\nd\u001be' "$(json_escape $'a"b\\c\nd\x1be')"
+
+# Typed metrics helpers (JSON numbers copied from text after a strict check)
+jn() { JSON_NUM=""; "$@" || { printf 'fail'; return; }; printf '%s' "$JSON_NUM"; }
+assert_eq "json_uint leading zeros" "120" "$(jn json_uint 000120)"
+assert_eq "json_uint zero" "0" "$(jn json_uint 000)"
+assert_eq "json_uint 20 digits" "18446744073709551615" "$(jn json_uint 18446744073709551615)"
+assert_eq "json_uint 21 digits refused" "fail" "$(jn json_uint 184467440737095516150)"
+assert_eq "json_uint sign refused" "fail" "$(jn json_uint -1)"
+assert_eq "json_decimal negative" "-0.079" "$(jn json_decimal -0.079)"
+assert_eq "json_decimal leading zeros" "7.50" "$(jn json_decimal 007.50)"
+assert_eq "json_decimal -0 keeps its sign" "-0.0" "$(jn json_decimal -0)"
+for BAD in "" "?" "1." ".5" "1e5" "nan" "inf" "-" "1,2" "0x10"; do
+    assert_eq "json_decimal refuses '$BAD'" "fail" "$(jn json_decimal "$BAD")"
+done
+assert_eq "json_sci tool BER" "15e-255" "$(jn json_sci 15E-255)"
+assert_eq "json_sci fmt_sci output" "1.2e-8" "$(jn json_sci 1.2e-08)"
+assert_eq "json_sci zero" "0e0" "$(jn json_sci 0E0)"
+assert_eq "json_sci plus exponent" "5e10" "$(jn json_sci 5E+10)"
+assert_eq "json_sci overflow refused" "fail" "$(jn json_sci 1E400)"
+assert_eq "json_sci near-overflow refused" "fail" "$(jn json_sci 99E299)"
+assert_eq "json_sci N/A refused" "fail" "$(jn json_sci N/A)"
+mt() { local METRICS=""; "$@"; printf '%s' "$METRICS"; }
+assert_eq "metric_counter with delta" '"c": {"total": 12, "delta": 3}' "$(mt metric_counter c 0012 3)"
+assert_eq "metric_counter absolute" '"c": {"total": 12}' "$(mt metric_counter c 12)"
+assert_eq "metric_counter not a counter: left out" "" "$(mt metric_counter c '?' 3)"
+assert_eq "metric_list decimals" '"l": [-1.445, -0.405]' "$(mt metric_list l "-1.445,-0.405" json_decimal)"
+assert_eq "metric_list one bad item: left out" "" "$(mt metric_list l "1,x,3" json_uint)"
+assert_eq "metric_milli exact" '"t": 54.5' "$(mt metric_milli t 54500)"
+assert_eq "metric_milli integer" '"t": 67' "$(mt metric_milli t 67000)"
+assert_eq "metric_milli negative" '"t": -5.25' "$(mt metric_milli t -5250)"
+assert_eq "metric_milli empty: left out" "" "$(mt metric_milli t "")"
+assert_eq "metric_str N/A and empty left out" "" "$(mt metric_str a "N/A"; mt metric_str b "")"
+assert_eq "metric_str escaped" '"s": "a\"b"' "$(mt metric_str s 'a"b')"
+assert_eq "metric_bool" '"x": true, "y": false' "$(mt eval 'metric_bool x true; metric_bool y false')"
+assert_eq "metric_tenths" '"s": 16.0' "$(mt metric_tenths s 160)"
 assert_eq "milli_to_c" "67" "$(milli_to_c 67999)"
 
 SNAP0=(["a"]=10 ["b"]=10 ["c"]=x)
@@ -268,6 +356,30 @@ assert_eq "devlink no reporters N/A"       "N/A"     "$(sev_of generic.devlink.h
 
 compute_verdict
 assert_eq "verdict CRIT wins" "CRIT 2" "$VERDICT $EXIT_CODE"
+dump_json delta-generic
+
+# Typed metrics (JSON only, nic-sweep design P2): typed values, absent ones left out, none on records
+# that measured nothing
+assert_eq "metrics pcie link OK" '"speed_gts": 16.0, "width": 8, "max_speed_gts": 16.0, "max_width": 8, "expected_speed_gts": 16.0, "expected_width": 8, "slot_limited": false, "below_capability": false' \
+    "$(metrics_of generic.pcie.link 0000:01:00)"
+assert_eq "metrics pcie link below capability" '"speed_gts": 8.0, "width": 4, "max_speed_gts": 8.0, "max_width": 8, "expected_speed_gts": 8.0, "expected_width": 8, "slot_limited": false, "below_capability": true' \
+    "$(metrics_of generic.pcie.link 0000:02:00)"
+assert_eq "metrics AER summed over functions" '"cor": {"total": 3, "delta": 2}, "nonfatal": {"total": 0, "delta": 0}, "fatal": {"total": 0, "delta": 0}' \
+    "$(metrics_of generic.pcie.aer 0000:01:00)"
+assert_eq "metrics AER absent: none" "" "$(metrics_of generic.pcie.aer 0000:02:00)"
+assert_eq "metrics temperature" '"label": "Module0", "temp_c": 99, "warn_c": 75, "crit_c": 85' "$(metrics_of generic.temperature "0000:01:00 (Module0)")"
+assert_eq "metrics temperature with max" '"label": "Controller board temp.", "temp_c": 72, "warn_c": 70, "crit_c": 85, "max_c": 70' \
+    "$(metrics_of generic.temperature "0000:02:00 (Controller board temp.)")"
+assert_eq "metrics temperature unreadable: none" "" "$(metrics_of generic.temperature "0000:03:00 (broken)")"
+assert_eq "metrics flaps unchanged" '"carrier_changes": {"total": 2, "delta": 0}' "$(metrics_of generic.link.flaps eth0)"
+assert_eq "metrics flaps growth" '"carrier_changes": {"total": 4, "delta": 2}' "$(metrics_of generic.link.flaps eth1)"
+assert_eq "metrics flaps reset (UNKNOWN): none" "" "$(metrics_of generic.link.flaps eth3)"
+assert_eq "metrics evidence unchanged (flaps growth)" "carrier_changes T0=2 T1=4" "$(for i in "${!REC_SEV[@]}"; do [[ "${REC_CHECK[i]}" == generic.link.flaps && "${REC_TARGET[i]}" == eth1 ]] && printf '%s' "${REC_EVIDENCE[i]}"; done)"
+assert_eq "metrics not in CSV" "0" "$(render_csv | grep -c '"total"')"
+assert_eq "metrics not in the table" "0" "$(SHOW_ALL=true; render_table | grep -c 'total')"
+COLLECTED_AT="2026-10-20T00:00:00Z"
+json_strict_check "delta mode JSON"
+assert_eq "json metrics member follows ref" "1" "$(render_json | grep -c '"check_id": "generic.link.flaps", "value": "+2", .*"ref": "[^"]*", "metrics": {"carrier_changes": {"total": 4, "delta": 2}}}')"
 
 if command -v python3 &>/dev/null; then
     COLLECTED_AT="2026-10-20T00:00:00Z"
@@ -292,6 +404,9 @@ run_checks
 assert_eq "absolute AER fatal capped WARN"  "WARN" "$(sev_of generic.pcie.aer 0000:03:00)"
 assert_eq "absolute devlink errors WARN"    "WARN" "$(sev_of generic.devlink.health.fw 0000:01:00.0)"
 assert_eq "absolute flaps informational OK" "OK"   "$(sev_of generic.link.flaps eth1)"
+dump_json absolute-generic
+assert_eq "absolute metrics: totals, no delta" '"carrier_changes": {"total": 4}' "$(metrics_of generic.link.flaps eth1)"
+assert_eq "absolute AER metrics: totals, no delta" '"cor": {"total": 0}, "nonfatal": {"total": 0}, "fatal": {"total": 4}' "$(metrics_of generic.pcie.aer 0000:03:00)"
 
 # --- devlink missing ---
 reset_results
@@ -446,7 +561,15 @@ assert_eq "mlx5 PHY no rx_bits_phy OK"    "OK"      "$(sev_of mlx5.phy.errors et
 assert_eq "mlx5 lane skew hint" "Context only: rx_corrected_bits_phy +1000, rx_err_lane_2_phy +1000. Corrected bits concentrated on rx_err_lane_2_phy: suspect that lane/fiber of the optic or cable" "$(mlx5_rec REC_HINT mlx5.phy.errors eth0)"
 assert_eq "mlx5 BER not computed note" "yes" "$([[ "$(mlx5_rec REC_EVIDENCE mlx5.phy.errors eth0)" == *"rx_bits_phy not exposed"* ]] && echo yes)"
 assert_eq "mlx5 ethtool -S failure UNKNOWN" "UNKNOWN" "$(sev_of mlx5.ethtool eth1)"
+dump_json mlx5-delta
 assert_eq "mlx5 not run on other drivers" "MISSING" "$(sev_of mlx5.rx.starvation eth2)"
+assert_eq "mlx5 metrics: every counter of the rule, zeros included" '"rx_out_of_buffer": {"total": 5, "delta": 5}, "rx_buff_alloc_err": {"total": 0, "delta": 0}' \
+    "$(metrics_of mlx5.rx.starvation eth0)"
+assert_eq "mlx5 metrics: evidence unchanged" "rx_out_of_buffer=5 (+5)" "$(mlx5_rec REC_EVIDENCE mlx5.rx.starvation eth0)"
+assert_eq "mlx5 metrics: lane and INFO counters typed" '"rx_symbol_err_phy": {"total": 0, "delta": 0}, "rx_pcs_symbol_err_phy": {"total": 0, "delta": 0}, "rx_corrected_bits_phy": {"total": 1000, "delta": 1000}, "rx_err_lane_0_phy": {"total": 0, "delta": 0}, "rx_err_lane_1_phy": {"total": 0, "delta": 0}, "rx_err_lane_2_phy": {"total": 1000, "delta": 1000}, "rx_err_lane_3_phy": {"total": 0, "delta": 0}' \
+    "$(metrics_of mlx5.phy.errors eth0)"
+assert_eq "mlx5 metrics: gauges as percent" "yes" "$([[ "$(metrics_of mlx5.pcie.path eth0)" == *'"outbound_pci_stalled_rd_pct": 0, "outbound_pci_stalled_wr_pct": 0' ]] && echo yes)"
+assert_eq "mlx5 metrics: ethtool -S failure has none" "" "$(metrics_of mlx5.ethtool eth1)"
 PORT_VF[1]=true
 RC=0; mlx5_port_eligible 1 || RC=$?
 assert_eq "mlx5 skips virtual functions" "1" "$RC"
@@ -468,6 +591,8 @@ check_mlx5_port 1
 assert_eq "mlx5 counter reset UNKNOWN"   "UNKNOWN" "$(sev_of mlx5.phy.errors eth0)"
 assert_eq "mlx5 PFC discard WARN"        "WARN"    "$(sev_of mlx5.congestion eth0)"
 assert_eq "mlx5 absent counters N/A"     "N/A"     "$(sev_of mlx5.module eth1)"
+assert_eq "mlx5 metrics: counter reset (UNKNOWN) has none" "" "$(metrics_of mlx5.phy.errors eth0)"
+assert_eq "mlx5 metrics: absent counters (N/A) have none" "" "$(metrics_of mlx5.module eth1)"
 reset_results
 ets_write eth0 rx_bits_phy=0
 grow2() { ets_write eth0 rx_bits_phy=1000000000 rx_corrected_bits_phy=2000; }
@@ -475,6 +600,8 @@ snap_pair grow2
 check_mlx5_port 0
 assert_eq "mlx5 pre-FEC BER>1e-6 WARN"   "WARN"    "$(sev_of mlx5.phy.errors eth0)"
 assert_eq "mlx5 BER value"               "pre-FEC BER=2.0e-06" "$(mlx5_rec REC_VALUE mlx5.phy.errors eth0)"
+dump_json mlx5-ber
+assert_eq "mlx5 metrics: pre-FEC BER typed" "yes" "$([[ "$(metrics_of mlx5.phy.errors eth0)" == *'"rx_bits_phy": {"total": 1000000000, "delta": 1000000000}, "pre_fec_ber": 2.0e-6, "pre_fec_ber_estimated": false, "pre_fec_ber_judged": true' ]] && echo yes)"
 reset_results
 ets_write eth0 rx_bits_phy=0
 grow3() { ets_write eth0 rx_bits_phy=1000000000 rx_corrected_bits_phy=20 rx_symbol_err_phy=1; }
@@ -505,6 +632,10 @@ DL_ORDER=()
 snapshot SNAP1 DL_ORDER
 ( set -euo pipefail; check_mlx5_port 0; sev_of mlx5.datapath.faults eth0; echo; sev_of mlx5.rx.starvation eth0; echo; mlx5_rec REC_VALUE mlx5.datapath.faults eth0; echo; mlx5_rec REC_VALUE mlx5.rx.starvation eth0 ) > "$FIX/out" 2>&1
 assert_eq "mlx5 absolute capped WARN, others OK, unsigned values (strict)" "WARN OK tx_cqe_err=3 0" "$(tr '\n' ' ' < "$FIX/out" | sed 's/ $//')"
+check_mlx5_port 0
+assert_eq "mlx5 absolute metrics: totals only" '"tx_cqe_err": {"total": 3}, "rx_wqe_err": {"total": 0}, "tx_recover": {"total": 0}, "rx_recover": {"total": 0}' \
+    "$(metrics_of mlx5.datapath.faults eth0)"
+dump_json mlx5-absolute
 INTERVAL=5
 
 # --- Review regressions (Phase 3) ---
@@ -594,6 +725,8 @@ ets_write eth0
 ber_est corr_low
 assert_eq "estimated BER low: OK"     "OK" "$(sev_of mlx5.phy.errors eth0)"
 assert_eq "estimated BER value"       "pre-FEC BER~1.5e-08" "$(mlx5_rec REC_VALUE mlx5.phy.errors eth0)"
+dump_json mlx5-ber-estimated
+assert_eq "estimated BER metrics" "yes" "$([[ "$(metrics_of mlx5.phy.errors eth0)" == *'"pre_fec_ber": 1.5e-8, "pre_fec_ber_estimated": true, "pre_fec_ber_judged": true' ]] && echo yes)"
 assert_eq "estimated BER evidence"    "yes" "$([[ "$(mlx5_rec REC_EVIDENCE mlx5.phy.errors eth0)" == *"pre-FEC BER estimated from link speed x window"* ]] && echo yes)"
 ets_write eth0
 ber_est corr_high
@@ -614,6 +747,8 @@ printf '2\n' > "$FIX/lanes_eth0"
 ets_write eth0
 ber_est corr_100g
 assert_eq "100G over 2 lanes (PAM4): not judged" "OK" "$(sev_of mlx5.phy.errors eth0)"
+assert_eq "PAM4 estimate metrics: not judged" "yes" "$([[ "$(metrics_of mlx5.phy.errors eth0)" == *'"pre_fec_ber_estimated": true, "pre_fec_ber_judged": false' ]] && echo yes)"
+dump_json mlx5-ber-pam4
 printf '4\n' > "$FIX/lanes_eth0"
 ets_write eth0
 ber_est corr_100g
@@ -655,6 +790,7 @@ assert_eq "history: unit"               "avg since boot" "$(mlx5_rec REC_UNIT ml
 assert_eq "history: hint suggests longer window" "yes" "$([[ "$(mlx5_rec REC_HINT mlx5.frame.errors eth0)" == "None in this 5s window, but high totals since boot: bursty errors or a past incident. Watch with -I $TROUBLESHOOT_INTERVAL or longer, or -l deep for the link BER; the totals only reset at driver reload or reboot. Frame errors:"* ]] && echo yes)"
 assert_eq "history: threshold"          ">0 WARN, history>=60/h WARN" "$(mlx5_rec REC_THRESHOLD mlx5.frame.errors eth0)"
 assert_eq "history: other rules untouched" "OK" "$(sev_of mlx5.rx.starvation eth0)"
+dump_json mlx5-history
 # Corrected-bit growth in the window stays visible as context when the floor fires
 hist_ctx() { ets_write eth0 rx_symbol_err_phy=160341353 rx_corrected_bits_phy=900000050; }
 ets_write eth0 rx_symbol_err_phy=160341353 rx_corrected_bits_phy=900000000
@@ -811,6 +947,19 @@ assert_eq "deep BER clean OK"                "OK"   "$(sev_of mlx5.deep.ber eth1
 assert_eq "deep BER clean shown ~0"          "effective ~0 raw ~0" "$(mlx5_rec REC_VALUE mlx5.deep.ber eth1)"
 assert_eq "deep module in range OK"          "OK"   "$(sev_of mlx5.deep.module eth0)"
 assert_eq "deep module value" "Temperature=45 Voltage=3290.8 Bias=6.808 Rx=-0.079 Tx=0.607" "$(mlx5_rec REC_VALUE mlx5.deep.module eth0)"
+assert_eq "deep metrics troubleshooting (Group Opcode N/A left out)" '"status_opcode": 0, "recommendation": "No issue was observed"' "$(metrics_of mlx5.deep.troubleshooting eth0)"
+assert_eq "deep metrics FEC mismatch" '"fec": "No FEC", "compliance": "100G AOC (Active Optical Cable) or 25GAUI C2M AOC with FEC", "fec_mismatch": true' \
+    "$(metrics_of mlx5.deep.fec eth0)"
+assert_eq "deep metrics BER" '"effective_ber": 5e-10, "raw_ber": 5e-10, "effective_errors": 61179413, "raw_errors_per_lane": [61179413], "link_down_counter": 0, "since_clear_min": 71726.0' \
+    "$(metrics_of mlx5.deep.ber eth0)"
+assert_eq "deep metrics BER underflow kept as printed" "yes" "$([[ "$(metrics_of mlx5.deep.ber eth1)" == '"effective_ber": 15e-255, "raw_ber": 15e-255,'* ]] && echo yes)"
+assert_eq "deep metrics module" '"temperature_c": 45, "temperature_c_low": -45, "temperature_c_high": 90, "voltage_mv": 3290.8, "voltage_mv_low": 3000, "voltage_mv_high": 3600, "bias_ma": 6.808, "bias_ma_low": 1, "bias_ma_high": 15, "rx_dbm": -0.079, "rx_dbm_low": -13.01, "rx_dbm_high": 4.4, "rx_dbm_judged": true, "tx_dbm": 0.607, "tx_dbm_low": -9.431, "tx_dbm_high": 3.398, "tx_fault": [0], "rx_los": [0], "tx_cdr_lol": [0], "rx_cdr_lol": [0], "vendor": "FS", "part_number": "SFP-25G-AO03", "compliance": "100G AOC (Active Optical Cable) or 25GAUI C2M AOC with FEC"' \
+    "$(metrics_of mlx5.deep.module eth0)"
+assert_eq "deep module evidence unchanged" "Temperature [C]=45 [-45..90]; Voltage [mV]=3290.8 [3000..3600]; Bias Current [mA]=6.808 [1..15]; Rx Power Current [dBm]=-0.079 [-13.01..4.4]; Tx Power Current [dBm]=0.607 [-9.431..3.398]; Tx Fault [per lane]=0; Rx LOS [per lane]=0; Tx CDR LOL [per lane]=0; Rx CDR LOL [per lane]=0; module FS SFP-25G-AO03" \
+    "$(mlx5_rec REC_EVIDENCE mlx5.deep.module eth0)"
+dump_json deep-mstlink
+COLLECTED_AT="2026-10-20T00:00:00Z"
+json_strict_check "deep mode JSON"
 
 # Module out of range and lane faults
 sed -e 's/^Rx Power Current \[dBm\]          : .*/Rx Power Current [dBm]          : -20.5 [-13.01..4.4]/' \
@@ -851,7 +1000,11 @@ assert_eq "mlxlink FEC active OK"            "OK"   "$(sev_of mlx5.deep.fec eth0
 assert_eq "mlxlink BER 3E-9 WARN"            "WARN" "$(sev_of mlx5.deep.ber eth0)"
 assert_eq "mlxlink BER value"                "effective 3E-9 raw 7E-7" "$(mlx5_rec REC_VALUE mlx5.deep.ber eth0)"
 assert_eq "mlxlink module (Rx -8.069 in range) OK" "OK" "$(sev_of mlx5.deep.module eth0)"
+assert_eq "mlxlink BER metrics" '"effective_ber": 3e-9, "raw_ber": 7e-7, "effective_errors": 44005345, "raw_errors_per_lane": [9503137409], "link_down_counter": 331, "since_clear_min": 9145.9' \
+    "$(metrics_of mlx5.deep.ber eth0)"
+assert_eq "mlxlink FEC metrics" '"fec": "Firecode FEC", "compliance": "100GBASE-SR4 or 25GBASE-SR", "fec_mismatch": false' "$(metrics_of mlx5.deep.fec eth0)"
 assert_eq "mlxlink BER evidence (all counters)" "Effective Physical BER=3E-9 Raw Physical BER=7E-7 Effective Physical Errors=44005345 Raw Physical Errors Per Lane=9503137409 Link Down Counter=331 since 9145.9 min" "$(mlx5_rec REC_EVIDENCE mlx5.deep.ber eth0)"
+dump_json deep-mlxlink
 assert_eq "mlxlink troubleshooting evidence" "mlxlink: No issue was observed" "$(mlx5_rec REC_EVIDENCE mlx5.deep.troubleshooting eth0)"
 # Kernel says the port has link, so the tool's opcode 2 is still reported
 assert_eq "mlxlink opcode WARN while kernel has carrier" "WARN" "$(sev_of mlx5.deep.troubleshooting eth1)"
@@ -865,6 +1018,9 @@ assert_eq "no-link deep BER N/A (not UNKNOWN)" "N/A" "$(sev_of mlx5.deep.ber eth
 assert_eq "no-link deep evidence points to link.state" "no link (operstate=down): see generic.link.state" "$(mlx5_rec REC_EVIDENCE mlx5.deep.ber eth1)"
 assert_eq "no-link module: Rx -40 dBm not judged" "OK" "$(sev_of mlx5.deep.module eth1)"
 assert_eq "no-link module evidence says why" "yes" "$([[ "$(mlx5_rec REC_EVIDENCE mlx5.deep.module eth1)" == *"[dBm]=-40 [-11.308..3.398] (not judged: no link)"* ]] && echo yes)"
+assert_eq "no-link module metrics: Rx not judged" "yes" "$([[ "$(metrics_of mlx5.deep.module eth1)" == *'"rx_dbm": -40, "rx_dbm_low": -11.308, "rx_dbm_high": 3.398, "rx_dbm_judged": false, "tx_dbm"'* ]] && echo yes)"
+assert_eq "no-link deep link rows: no metrics" "||" "$(metrics_of mlx5.deep.troubleshooting eth1)|$(metrics_of mlx5.deep.fec eth1)|$(metrics_of mlx5.deep.ber eth1)"
+dump_json deep-nolink
 # Dark optic: Rx LOS / Rx CDR LOL set are expected without link; a Tx fault is still a fault
 sed -E -e 's/^(Rx LOS \[per lane\] +: )0/\11/' -e 's/^(Rx CDR LOL \[per lane\] +: )0/\11/' \
     "$FIXTURES/mlxlink-cx6lx-25g-sr-nolink.txt" > "$FIX/mlxlink-dark.txt"
@@ -905,6 +1061,10 @@ assert_eq "qsfp28 value shows lane min..max" "Temperature=52 Voltage=3295.3 Bias
     "$(mlx5_rec REC_VALUE mlx5.deep.module eth0)"
 assert_eq "qsfp28 evidence keeps every Rx lane" "yes" \
     "$([[ "$(mlx5_rec REC_EVIDENCE mlx5.deep.module eth0)" == *"Rx Power Current [dBm]=-1.445,-0.405,-0.372,-1.284 [-14.089..3.398]"* ]] && echo yes)"
+assert_eq "qsfp28 metrics: lowest lane and every lane" "yes" \
+    "$([[ "$(metrics_of mlx5.deep.module eth0)" == *'"rx_dbm": -1.445, "rx_dbm_lanes": [-1.445, -0.405, -0.372, -1.284], "rx_dbm_low": -14.089, "rx_dbm_high": 3.398, "rx_dbm_judged": true'* ]] && echo yes)"
+assert_eq "qsfp28 metrics: lane flags" "yes" "$([[ "$(metrics_of mlx5.deep.module eth0)" == *'"tx_fault": [0, 0, 0, 0], "rx_los": [0, 0, 0, 0]'* ]] && echo yes)"
+dump_json deep-qsfp28
 assert_eq "qsfp28 evidence keeps lane flags" "yes" \
     "$([[ "$(mlx5_rec REC_EVIDENCE mlx5.deep.module eth0)" == *"Tx Fault [per lane]=0,0,0,0; Rx LOS [per lane]=0,0,0,0"* ]] && echo yes)"
 # One weak lane is a WARN naming the lane
@@ -937,6 +1097,7 @@ DEEP_KV=(); DEEP_ERR=(); DEEP_TOOL_USED=()
 deep_query mstlink eth0 0000:01:00.0
 reset_results; check_deep_port 0
 assert_eq "qsfp28 no link: dark lanes not judged" "OK" "$(sev_of mlx5.deep.module eth0)"
+dump_json deep-qsfp28-dark
 printf 'up\n' > "$SYSFS_NET/eth0/operstate"
 # shellcheck disable=SC2329
 mstlink() { cat "$FIXTURES/mstlink-4.26-cx6lx-25g-sr-ber-errors.txt"; }
@@ -951,6 +1112,11 @@ assert_eq "optional counter printed empty is left out" "Effective Physical BER=3
 DEEP_KV=(["eth0|Effective Physical BER"]="3E-9" ["eth0|Raw Physical BER"]="7E-7" ["eth0|Identifier"]="N/A")
 reset_results; check_deep_port 0
 assert_eq "missing required BER counter shown as ?" "Effective Physical BER=3E-9 Raw Physical BER=7E-7 Effective Physical Errors=? since ? min" "$(mlx5_rec REC_EVIDENCE mlx5.deep.ber eth0)"
+assert_eq "missing BER values left out of metrics (never 0)" '"effective_ber": 3e-9, "raw_ber": 7e-7' "$(metrics_of mlx5.deep.ber eth0)"
+DEEP_KV=(["eth0|Effective Physical BER"]="N/A" ["eth0|Identifier"]="N/A")
+reset_results; check_deep_port 0
+assert_eq "unparseable BER (UNKNOWN): no metrics" "UNKNOWN|" "$(sev_of mlx5.deep.ber eth0)|$(metrics_of mlx5.deep.ber eth0)"
+assert_eq "no module (N/A): no metrics" "N/A|" "$(sev_of mlx5.deep.module eth0)|$(metrics_of mlx5.deep.module eth0)"
 
 # Failures: timeout, tool error, tool missing; mlxlink preferred
 # shellcheck disable=SC2329
@@ -1074,7 +1240,13 @@ link_state() {  # link_state <iface>: severity, value and evidence of generic.li
     done
 }
 # shellcheck disable=SC2329  # reached through TOOL_PATH[ip]
-ip() { [[ "$5" == "eth3" && -e "$FIX/eth3_has_addr" ]] && echo "4: eth3    inet 192.0.2.10/24 brd 192.0.2.255 scope global eth3"; return 0; }
+ip() {  # one query for every interface; eth30 must not match eth3, the first address wins
+    [[ "$*" == "-o addr show scope global" ]] || return 9; 
+    echo "9: eth30    inet 198.51.100.1/24 scope global eth30"
+    [[ -e "$FIX/eth3_has_addr" ]] && printf '%s\n' "4: eth3    inet 192.0.2.10/24 brd 192.0.2.255 scope global eth3" \
+        "4: eth3    inet 192.0.2.11/24 scope global secondary eth3"
+    return 0
+}
 TOOL_PATH[ip]=ip
 for P in eth0 eth1 eth2 eth3; do printf '0x1003\n' > "$SYSFS_NET/$P/flags"; done
 printf '1\n' > "$SYSFS_NET/eth0/carrier"
@@ -1135,8 +1307,101 @@ assert_eq "PF with VFs in use" "yes" "$([[ "$(link_state eth3)" == "WARN|no link
 rm -f "$FIX/bus/pci/devices/0000:03:00.0/sriov_numvfs"
 # IPv6-only global address
 # shellcheck disable=SC2329
-ip() { [[ "$5" == "eth3" ]] && echo "4: eth3    inet6 2001:db8::1/64 scope global"; return 0; }
+ip() { [[ "$*" == "-o addr show scope global" ]] || return 9; echo "4: eth3    inet6 2001:db8::1/64 scope global"; }
 assert_eq "IPv6-only address in use" "yes" "$([[ "$(link_state eth3)" == "WARN|no link|"*"in use: address=2001:db8::1/64" ]] && echo yes)"
+TOOL_PATH[ip]=""
+
+# Service-impact facts in generic.link.state metrics (nic-sweep design P3): every port, up or down;
+# the reasons come from the same scan that judges a port without link
+SAVED_PROC_BONDING="$PROC_BONDING"
+PROC_BONDING="$FIX/proc_bonding"
+mkdir -p "$PROC_BONDING" "$SYSFS_NET/eth0/statistics" "$SYSFS_NET/eth1/statistics" "$SYSFS_NET/bond7/bonding" "$SYSFS_NET/br7/bridge" "$SYSFS_NET/ovs-system"
+cat > "$PROC_BONDING/bond7" <<'EOF'
+Ethernet Channel Bonding Driver: v6.8.0
+
+Bonding Mode: IEEE 802.3ad Dynamic link aggregation
+MII Status: up
+
+Slave Interface: eth0
+MII Status: up
+Speed: 25000 Mbps
+Link Failure Count: 0
+Permanent HW addr: aa:bb:cc:00:00:01
+
+Slave Interface: eth1
+MII Status: down
+Speed: Unknown
+Link Failure Count: 3
+EOF
+printf 'up\n' > "$SYSFS_NET/bond7/operstate"
+printf '123456789\n' > "$SYSFS_NET/eth0/statistics/rx_bytes"; printf '42\n' > "$SYSFS_NET/eth0/statistics/tx_bytes"
+for P in eth0 eth1; do ln -s "$SYSFS_NET/bond7" "$SYSFS_NET/$P/master"; ln -s "$SYSFS_NET/bond7" "$SYSFS_NET/$P/upper_bond7"; done
+# shellcheck disable=SC2329  # reached through TOOL_PATH[ip]
+ip() { [[ "$*" == "-o addr show scope global" ]] || return 9; echo "4: eth3    inet 192.0.2.10/24 brd 192.0.2.255 scope global eth3"; }
+TOOL_PATH[ip]=ip
+assert_eq "bond_link_failures per slave" "0 3" "$(bond_link_failures bond7 eth0) $(bond_link_failures bond7 eth1)"
+assert_eq "bond_link_failures: slave not listed" "fail" "$(bond_link_failures bond7 eth9 || echo fail)"
+assert_eq "bond_link_failures: no state file" "fail" "$(bond_link_failures bond9 eth0 || echo fail)"
+INTERVAL=5
+snapshot SNAP0 DL_SCRATCH
+assert_eq "traffic counters sampled with the others" "123456789 42" "${SNAP0[stat|eth0|rx_bytes]} ${SNAP0[stat|eth0|tx_bytes]}"
+SNAP1=(["stat|eth0|rx_bytes"]=123999999 ["stat|eth0|tx_bytes"]=42 ["stat|eth1|rx_bytes"]=5 ["stat|eth1|tx_bytes"]=3)
+SNAP0=(["stat|eth0|rx_bytes"]=123456789 ["stat|eth0|tx_bytes"]=42 ["stat|eth1|rx_bytes"]=9)
+reset_results; check_link_state "${IFACE_PORT[eth0]}"
+assert_eq "P3 bond member with link: facts, traffic in the window" '"carrier": true, "operstate": "up", "in_use": true, "in_use_reasons": ["bond"], "bond": "bond7", "bond_link_failures": 0, "rx_bytes": {"total": 123999999, "delta": 543210}, "tx_bytes": {"total": 42, "delta": 0}' \
+    "$(metrics_of generic.link.state eth0)"
+# shellcheck disable=SC2329  # the counting stub is reached through TOOL_PATH[ip]
+assert_eq "one ip query for every port" "1" "$(reset_results; : > "$FIX/ip_calls"
+    ip() { echo x >> "$FIX/ip_calls"; return 0; }
+    for P in eth0 eth1 eth2 eth3; do check_link_state "${IFACE_PORT[$P]}"; done; wc -l < "$FIX/ip_calls" | tr -d ' ')"
+assert_eq "P3 bond member with link: value and evidence unchanged" "OK|up|operstate=up; carrier_up_count=n/a carrier_down_count=n/a" "$(link_state eth0)"
+reset_results; check_link_state "${IFACE_PORT[eth1]}"
+assert_eq "P3 bond member without link: a reset or a counter new at T1 gives the total only" '"carrier": false, "operstate": "up", "carrier_up_count": 1, "carrier_down_count": 1, "in_use": true, "in_use_reasons": ["bond"], "bond": "bond7", "bond_link_failures": 3, "rx_bytes": {"total": 5}, "tx_bytes": {"total": 3}' \
+    "$(metrics_of generic.link.state eth1)"
+INTERVAL=0
+reset_results; check_link_state "${IFACE_PORT[eth0]}"
+assert_eq "P3 absolute mode: traffic totals only" "yes" "$([[ "$(metrics_of generic.link.state eth0)" == *'"rx_bytes": {"total": 123999999}, "tx_bytes": {"total": 42}' ]] && echo yes)"
+INTERVAL=5
+assert_eq "P3 bond member without link: evidence unchanged" "WARN|no link|operstate=up; carrier_up_count=1 carrier_down_count=1; in use: master=bond7" "$(link_state eth1)"
+COLLECTED_AT="2026-10-20T00:00:00Z"
+json_strict_check "JSON with service-impact facts"
+# Bridge member with a VLAN upper, VFs and an address: every reason, in order; the master's own upper
+# link is not a second reason
+ln -s "$SYSFS_NET/br7" "$SYSFS_NET/eth3/master"; ln -s "$SYSFS_NET/br7" "$SYSFS_NET/eth3/upper_br7"
+ln -s "$SYSFS_NET/eth0" "$SYSFS_NET/eth3/upper_eth3.100"
+printf '4\n' > "$FIX/bus/pci/devices/0000:03:00.0/sriov_numvfs"
+reset_results; check_link_state "${IFACE_PORT[eth3]}"
+assert_eq "P3 all reasons" '"in_use": true, "in_use_reasons": ["bridge", "upper", "sriov_vfs", "global_address"]' \
+    "$(metrics_of generic.link.state eth3 | grep -o '"in_use".*\]')"
+assert_eq "P3 all reasons: evidence names the first" "yes" "$([[ "$(link_state eth3)" == "WARN|no link|"*"; in use: master=br7" ]] && echo yes)"
+assert_eq "P3 bridge: no bond fact" "no" "$([[ "$(metrics_of generic.link.state eth3)" == *'"bond'* ]] && echo yes || echo no)"
+reset_results
+for P in eth0 eth1 eth2 eth3; do check_link_state "${IFACE_PORT[$P]}"; done
+dump_json p3-link-state
+rm -f "${SYSFS_NET:?}/eth3/master" "${SYSFS_NET:?}/eth3/upper_br7"
+ln -s "$SYSFS_NET/ovs-system" "$SYSFS_NET/eth3/master"
+reset_results; check_link_state "${IFACE_PORT[eth3]}"
+assert_eq "P3 other master (OVS) is an upper" '"in_use_reasons": ["upper", "sriov_vfs", "global_address"]' "$(metrics_of generic.link.state eth3 | grep -o '"in_use_reasons".*\]')"
+rm -f "${SYSFS_NET:?}/eth3/master" "${SYSFS_NET:?}/eth3/upper_eth3.100" "${FIX:?}/bus/pci/devices/0000:03:00.0/sriov_numvfs"
+# Spare port: not in use, no reasons; ip failing: in_use left out, never guessed
+reset_results; check_link_state "${IFACE_PORT[eth2]}"
+assert_eq "P3 spare port" '"in_use": false, "in_use_reasons": []' "$(metrics_of generic.link.state eth2 | grep -o '"in_use".*\]')"
+# shellcheck disable=SC2329
+ip() { echo "Cannot open netlink socket"; return 2; }
+reset_results; check_link_state "${IFACE_PORT[eth2]}"
+assert_eq "P3 use undetermined: in_use left out" "no" "$([[ "$(metrics_of generic.link.state eth2)" == *in_use* ]] && echo yes || echo no)"
+reset_results; check_link_state "${IFACE_PORT[eth0]}"
+assert_eq "P3 ip failing does not hide the bond, reasons marked incomplete" "yes" "$([[ "$(metrics_of generic.link.state eth0)" == *'"in_use": true, "in_use_reasons": ["bond"], "in_use_reasons_complete": false'* ]] && echo yes)"
+reset_results; check_link_state "${IFACE_PORT[eth1]}"
+assert_eq "P3 ip failing: evidence of a port without link unchanged" "yes" "$([[ "$(link_state eth1)" == "WARN|no link|"*"; in use: master=bond7" ]] && echo yes)"
+# Admin down: facts still recorded
+printf '0x1002\n' > "$SYSFS_NET/eth0/flags"
+reset_results; check_link_state "${IFACE_PORT[eth0]}"
+assert_eq "P3 admin down still has facts" "N/A|yes" "$(sev_of generic.link.state eth0)|$([[ "$(metrics_of generic.link.state eth0)" == *'"bond": "bond7"'* ]] && echo yes)"
+printf '0x1003\n' > "$SYSFS_NET/eth0/flags"
+for P in eth0 eth1; do rm -f "${SYSFS_NET:?}/${P:?}/master" "${SYSFS_NET:?}/${P:?}/upper_bond7"; done
+rm -rf "${SYSFS_NET:?}/eth0/statistics" "${SYSFS_NET:?}/eth1/statistics" "${SYSFS_NET:?}/bond7" "${SYSFS_NET:?}/br7" "${SYSFS_NET:?}/ovs-system" "${FIX:?}/proc_bonding"
+PROC_BONDING="$SAVED_PROC_BONDING"
 TOOL_PATH[ip]=""
 # Admin down is operator intent, not a fault
 printf '0x1002\n' > "$SYSFS_NET/eth1/flags"
@@ -1344,7 +1609,7 @@ assert_eq "unknown uptime and boot ID are empty" "|" "$HOST_UPTIME_S|$HOST_BOOT_
 assert_eq "json uptime_s null" "yes" "$(render_json | grep -q '"uptime_s": null,' && echo yes)"
 assert_eq "json boot_id null" "yes" "$(render_json | grep -q '"boot_id": null,' && echo yes)"
 if command -v python3 &>/dev/null; then
-    if render_json | python3 -I -c 'import json,sys; d=json.load(sys.stdin); assert d["uptime_s"] is None and d["boot_id"] is None and d["schema_version"] == 1' 2>/dev/null; then
+    if render_json | python3 -I -c 'import json,sys; d=json.load(sys.stdin); assert d["uptime_s"] is None and d["boot_id"] is None and d["schema_version"] == 2' 2>/dev/null; then
         (( ++PASS ))
     else
         (( ++FAIL )); echo "❌ render_json with unknown uptime/boot ID is not valid JSON"
@@ -1372,6 +1637,20 @@ for CASE in "-l deep -v:0" "--level=basic -v:0" "-l bogus:3" "-a -v:0" "--all -v
 done
 bash "$SCRIPT" -i '' >/dev/null 2>&1
 assert_eq "exit code for empty -i" "3" "$?"
+
+# JSON fixtures: regenerate on request, else they must match what this script writes now
+if [[ "${NIC_HEALTH_UPDATE_FIXTURES:-}" == "1" ]]; then
+    mkdir -p "$JSON_FIXTURES"
+    cp "$JSON_OUT"/*.json "$JSON_FIXTURES/"
+    echo "📝 JSON fixtures written to $JSON_FIXTURES"
+fi
+for F in "$JSON_OUT"/*.json; do
+    assert_eq "JSON fixture ${F##*/} is current (make fixtures)" "same" \
+        "$(cmp -s "$F" "$JSON_FIXTURES/${F##*/}" && echo same || echo differs)"
+done
+FIXTURE_NAMES=""
+for F in "$JSON_FIXTURES"/*.json; do [[ -e "$JSON_OUT/${F##*/}" ]] || FIXTURE_NAMES+="${F##*/} "; done
+assert_eq "no stale JSON fixture" "" "$FIXTURE_NAMES"
 
 echo
 if (( FAIL > 0 )); then

@@ -392,7 +392,80 @@ lookback_min (0 when the look-back is off), mode
 interval_s, elapsed_s (null if the clock was unreadable), capabilities (tool
 availability), summary (count per severity), verdict, exit_code, asics (model,
 driver, firmware, ports) and results (one object per result, same fields as
-CSV).
+CSV, plus an optional
+.B metrics
+object).
+.PP
+.B schema_version
+is 2: a result may carry
+.BR metrics ,
+the values behind its evidence as typed JSON. Counters read at both ends of the
+sampling window (mlx5 rule counters, AER, carrier_changes, rx_bytes, tx_bytes) are
+written as
+.B {\(dqtotal\(dq: N, \(dqdelta\(dq: N}
+(total since driver load or boot;
+.B delta
+only with a sampling window, and left out after a counter reset); other counts are
+plain integers. Measurements are numbers, copied from the text they were read from,
+so they are always finite; text is a JSON string. A value that is absent or
+unparseable is left out, never written as 0. Results without a reading (most N/A,
+and UNKNOWN for a reset, vanished or unparseable value) have no
+.BR metrics ;
+an N/A temperature with a reading and the link state of an administratively down
+or spare port do.
+The evidence text, the table and CSV are unchanged. Keys per check:
+.TP
+.B generic.pcie.link
+speed_gts, width, max_speed_gts, max_width (card), upstream_max_speed_gts,
+upstream_max_width (slot), expected_speed_gts, expected_width (what both support),
+slot_limited, below_capability.
+.TP
+.B generic.pcie.aer
+cor, nonfatal, fatal (counters, summed over the card's functions).
+.TP
+.B generic.temperature
+label, temp_c, warn_c, crit_c, max_c, highest_c, alarm.
+.TP
+.B generic.link.state
+carrier, operstate, carrier_up_count, carrier_down_count, and the service-impact
+facts of every port, with or without link: in_use and in_use_reasons (bond, bridge,
+upper, sriov_vfs, global_address; the same scan that judges a port without link,
+left out when it cannot tell, e.g. without
+.BR ip ;
+in_use_reasons_complete is false when a reason was found but addresses could not
+be checked),
+bond (the bond the port belongs to), bond_link_failures (its "Link Failure Count" in
+.IR /proc/net/bonding/<bond> ),
+rx_bytes and tx_bytes (sysfs byte counters; their delta shows whether the port
+carries traffic now).
+.TP
+.B generic.link.flaps
+carrier_changes (counter).
+.TP
+.B generic.link.lookback
+link_downs, window_min, carrier_down_count.
+.TP
+.B mlx5.*
+every counter of the rule by its ethtool name (counter), outbound_pci_stalled_rd_pct,
+outbound_pci_stalled_wr_pct and outbound_pci_buffer_overflow_pct (mlx5.pcie.path
+gauges, when exposed); mlx5.phy.errors adds
+pre_fec_ber, pre_fec_ber_estimated and pre_fec_ber_judged.
+.TP
+.B mlx5.deep.troubleshooting
+status_opcode, group_opcode, recommendation.
+.TP
+.B mlx5.deep.fec
+fec, compliance, fec_mismatch.
+.TP
+.B mlx5.deep.ber
+effective_ber, raw_ber, effective_errors, raw_errors_per_lane (list),
+link_down_counter, since_clear_min.
+.TP
+.B mlx5.deep.module
+temperature_c, voltage_mv, bias_ma, rx_dbm, tx_dbm, each with _low and _high (the
+module's own range) and, on multi-lane modules, _lanes (the value is then the lowest
+lane); rx_dbm_judged (false without link); tx_fault, rx_los, tx_cdr_lol, rx_cdr_lol
+(lists, one per lane); vendor, part_number, compliance.
 .SH REQUIREMENTS
 .IP \(bu 2
 Bash 4.4 or newer.

@@ -1,0 +1,47 @@
+{
+  "schema_version": 2,
+  "tool": "nic-health.sh",
+  "version": "2.13.0",
+  "host": "server-01.example.net",
+  "collected_at": "2026-10-26T12:00:00Z",
+  "uptime_s": 1987654,
+  "boot_id": "3f2a6c1e-8b4d-4e7f-9a10-5c6d7e8f9a0b",
+  "level": "basic",
+  "lookback_min": 60,
+  "mode": "delta",
+  "interval_s": 5,
+  "elapsed_s": 5.01,
+  "capabilities": {"ethtool": true, "getopt": true, "readlink": true, "lspci": false, "devlink": true, "ip": true, "timeout": false, "journalctl": false, "mlxlink": false, "mstlink": false},
+  "summary": {"OK": 2, "WARN": 2, "CRIT": 0, "UNKNOWN": 0, "N/A": 0},
+  "verdict": "WARN",
+  "exit_code": 1,
+  "asics": [
+    {
+      "id": "0000:01:00",
+      "model": "PCI 15b3:101f",
+      "driver": "mlx5_core",
+      "firmware": "1.2.3 (STUB)",
+      "ports": [{"iface": "eth0", "pci": "0000:01:00.0", "operstate": "up", "virtual_function": false}, {"iface": "eth1", "pci": "0000:01:00.1", "operstate": "up", "virtual_function": false}]
+    },
+    {
+      "id": "0000:02:00",
+      "model": "PCI 15b3:101f",
+      "driver": "sfc",
+      "firmware": "1.2.3 (STUB)",
+      "ports": [{"iface": "eth2", "pci": "0000:02:00.0", "operstate": "up", "virtual_function": false}]
+    },
+    {
+      "id": "0000:03:00",
+      "model": "PCI 15b3:101f",
+      "driver": "ixgbe",
+      "firmware": "1.2.3 (STUB)",
+      "ports": [{"iface": "eth3", "pci": "0000:03:00.0", "operstate": "up", "virtual_function": false}]
+    }
+  ],
+  "results": [
+    {"severity": "OK", "scope": "port", "target": "eth0", "check_id": "generic.link.state", "value": "up", "unit": "", "threshold": "carrier on ports in use", "evidence": "operstate=up; carrier_up_count=n/a carrier_down_count=n/a", "hint": "", "ref": "docs/design/nic-health.md §6.1", "metrics": {"carrier": true, "operstate": "up", "in_use": true, "in_use_reasons": ["bond"], "bond": "bond7", "bond_link_failures": 0, "rx_bytes": {"total": 123999999, "delta": 543210}, "tx_bytes": {"total": 42, "delta": 0}}},
+    {"severity": "WARN", "scope": "port", "target": "eth1", "check_id": "generic.link.state", "value": "no link", "unit": "", "threshold": "carrier on ports in use", "evidence": "operstate=up; carrier_up_count=1 carrier_down_count=1; in use: master=bond7", "hint": "Port in use has no link (redundancy lost): check cable/optic, the peer port, and generic.link.lookback for when it dropped", "ref": "docs/design/nic-health.md §6.1", "metrics": {"carrier": false, "operstate": "up", "carrier_up_count": 1, "carrier_down_count": 1, "in_use": true, "in_use_reasons": ["bond"], "bond": "bond7", "bond_link_failures": 3, "rx_bytes": {"total": 5}, "tx_bytes": {"total": 3}}},
+    {"severity": "OK", "scope": "port", "target": "eth2", "check_id": "generic.link.state", "value": "up", "unit": "", "threshold": "carrier on ports in use", "evidence": "operstate=up; carrier_up_count=n/a carrier_down_count=n/a", "hint": "", "ref": "docs/design/nic-health.md §6.1", "metrics": {"carrier": true, "operstate": "up", "in_use": false, "in_use_reasons": []}},
+    {"severity": "WARN", "scope": "port", "target": "eth3", "check_id": "generic.link.state", "value": "no link", "unit": "", "threshold": "carrier on ports in use", "evidence": "operstate=up; carrier_up_count=n/a carrier_down_count=n/a; in use: master=br7", "hint": "Port in use has no link (redundancy lost): check cable/optic, the peer port, and generic.link.lookback for when it dropped", "ref": "docs/design/nic-health.md §6.1", "metrics": {"carrier": false, "operstate": "up", "in_use": true, "in_use_reasons": ["bridge", "upper", "sriov_vfs", "global_address"]}}
+  ]
+}

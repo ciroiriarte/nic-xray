@@ -10,7 +10,7 @@ PY_MIN      := (3, 9)
 # Primary script and companions: each ships a man page (section 8) and a completion
 SCRIPTS     := nic-xray nic-health nic-sweep nic-report
 
-.PHONY: install-man uninstall-man install-completion uninstall-completion test lint
+.PHONY: install-man uninstall-man install-completion uninstall-completion test lint fixtures
 
 install-man:
 	install -d $(DESTDIR)$(MANDIR)/man8
@@ -35,6 +35,11 @@ test:
 	else \
 		echo "⏭️  SKIP nic-report tests: Python 3.9+ required ($$($(PYTHON) --version 2>&1))"; \
 	fi
+
+# Rewrite tests/fixtures/nic-health-json/ (nic-health JSON from the test suite's mocks, read by the
+# nic-report tests) after a deliberate change to nic-health's JSON; make test fails while they differ
+fixtures:
+	NIC_HEALTH_UPDATE_FIXTURES=1 bash tests/nic-health-test.sh
 
 # Static analysis of the scripts and the test suite (needs shellcheck)
 lint:

@@ -1,0 +1,53 @@
+{
+  "schema_version": 2,
+  "tool": "nic-health.sh",
+  "version": "2.13.0",
+  "host": "server-01.example.net",
+  "collected_at": "2026-10-26T12:00:00Z",
+  "uptime_s": 1987654,
+  "boot_id": "3f2a6c1e-8b4d-4e7f-9a10-5c6d7e8f9a0b",
+  "level": "basic",
+  "lookback_min": 60,
+  "mode": "delta",
+  "interval_s": 5,
+  "elapsed_s": 5.01,
+  "capabilities": {"ethtool": true, "getopt": true, "readlink": true, "lspci": false, "devlink": true, "ip": false, "timeout": false, "journalctl": false, "mlxlink": false, "mstlink": false},
+  "summary": {"OK": 10, "WARN": 0, "CRIT": 0, "UNKNOWN": 0, "N/A": 0},
+  "verdict": "OK",
+  "exit_code": 0,
+  "asics": [
+    {
+      "id": "0000:01:00",
+      "model": "PCI 15b3:101f",
+      "driver": "mlx5_core",
+      "firmware": "1.2.3 (STUB)",
+      "ports": [{"iface": "eth0", "pci": "0000:01:00.0", "operstate": "up", "virtual_function": false}, {"iface": "eth1", "pci": "0000:01:00.1", "operstate": "up", "virtual_function": false}]
+    },
+    {
+      "id": "0000:02:00",
+      "model": "PCI 15b3:101f",
+      "driver": "sfc",
+      "firmware": "1.2.3 (STUB)",
+      "ports": [{"iface": "eth2", "pci": "0000:02:00.0", "operstate": "up", "virtual_function": false}]
+    },
+    {
+      "id": "0000:03:00",
+      "model": "PCI 15b3:101f",
+      "driver": "ixgbe",
+      "firmware": "1.2.3 (STUB)",
+      "ports": [{"iface": "eth3", "pci": "0000:03:00.0", "operstate": "up", "virtual_function": false}]
+    }
+  ],
+  "results": [
+    {"severity": "OK", "scope": "port", "target": "eth0", "check_id": "mlx5.rx.starvation", "value": "+0", "unit": "per window", "threshold": ">0 WARN", "evidence": "all 2 counters are 0", "hint": "", "ref": "docs/design/nic-health.md §6.2", "metrics": {"rx_out_of_buffer": {"total": 0, "delta": 0}, "rx_buff_alloc_err": {"total": 0, "delta": 0}}},
+    {"severity": "OK", "scope": "port", "target": "eth0", "check_id": "mlx5.nic.discards", "value": "+0", "unit": "per window", "threshold": ">0 WARN", "evidence": "all 2 counters are 0", "hint": "", "ref": "docs/design/nic-health.md §6.2", "metrics": {"rx_discards_phy": {"total": 0, "delta": 0}, "tx_discards_phy": {"total": 0, "delta": 0}}},
+    {"severity": "OK", "scope": "port", "target": "eth0", "check_id": "mlx5.phy.errors", "value": "pre-FEC BER~1.5e-06", "unit": "per window", "threshold": ">0 CRIT, pre-FEC BER>1e-06 WARN, history>=60/h WARN", "evidence": "rx_corrected_bits_phy=800000 (+800000); rx_bits_phy not exposed: pre-FEC BER estimated from link speed x window (not judged: lanes above 25000 Mb/s may be PAM4)", "hint": "Context only: rx_corrected_bits_phy +800000", "ref": "docs/design/nic-health.md §6.2", "metrics": {"rx_symbol_err_phy": {"total": 0, "delta": 0}, "rx_pcs_symbol_err_phy": {"total": 0, "delta": 0}, "rx_corrected_bits_phy": {"total": 800000, "delta": 800000}, "rx_err_lane_0_phy": {"total": 0, "delta": 0}, "rx_err_lane_1_phy": {"total": 0, "delta": 0}, "rx_err_lane_2_phy": {"total": 0, "delta": 0}, "rx_err_lane_3_phy": {"total": 0, "delta": 0}, "pre_fec_ber": 1.5e-6, "pre_fec_ber_estimated": true, "pre_fec_ber_judged": false}},
+    {"severity": "OK", "scope": "port", "target": "eth0", "check_id": "mlx5.frame.errors", "value": "+0", "unit": "per window", "threshold": ">0 WARN, history>=60/h WARN", "evidence": "all 5 counters are 0", "hint": "", "ref": "docs/design/nic-health.md §6.2", "metrics": {"rx_crc_errors_phy": {"total": 0, "delta": 0}, "rx_fragments_phy": {"total": 0, "delta": 0}, "rx_jabbers_phy": {"total": 0, "delta": 0}, "rx_undersize_pkts_phy": {"total": 0, "delta": 0}, "rx_oversize_pkts_phy": {"total": 0, "delta": 0}}},
+    {"severity": "OK", "scope": "port", "target": "eth0", "check_id": "mlx5.pcie.path", "value": "+0", "unit": "per window", "threshold": ">0 WARN", "evidence": "all 4 counters are 0; outbound_pci_stalled_rd=0% (gauge); outbound_pci_stalled_wr=0% (gauge)", "hint": "", "ref": "docs/design/nic-health.md §6.2", "metrics": {"rx_pci_signal_integrity": {"total": 0, "delta": 0}, "tx_pci_signal_integrity": {"total": 0, "delta": 0}, "outbound_pci_stalled_rd_events": {"total": 0, "delta": 0}, "outbound_pci_stalled_wr_events": {"total": 0, "delta": 0}, "outbound_pci_stalled_rd_pct": 0, "outbound_pci_stalled_wr_pct": 0}},
+    {"severity": "OK", "scope": "port", "target": "eth0", "check_id": "mlx5.datapath.faults", "value": "+0", "unit": "per window", "threshold": ">0 CRIT", "evidence": "all 4 counters are 0", "hint": "", "ref": "docs/design/nic-health.md §6.2", "metrics": {"tx_cqe_err": {"total": 0, "delta": 0}, "rx_wqe_err": {"total": 0, "delta": 0}, "tx_recover": {"total": 0, "delta": 0}, "rx_recover": {"total": 0, "delta": 0}}},
+    {"severity": "OK", "scope": "port", "target": "eth0", "check_id": "mlx5.congestion", "value": "+0", "unit": "per window", "threshold": ">0 WARN", "evidence": "all 8 counters are 0", "hint": "", "ref": "docs/design/nic-health.md §6.2", "metrics": {"rx_prio0_buf_discard": {"total": 0, "delta": 0}, "rx_prio3_buf_discard": {"total": 0, "delta": 0}, "rx_prio3_cong_discard": {"total": 0, "delta": 0}, "rx_pause_ctrl_phy": {"total": 0, "delta": 0}, "tx_pause_ctrl_phy": {"total": 0, "delta": 0}, "rx_global_pause": {"total": 0, "delta": 0}, "tx_global_pause": {"total": 0, "delta": 0}, "rx_buffer_passed_thres_phy": {"total": 0, "delta": 0}}},
+    {"severity": "OK", "scope": "port", "target": "eth0", "check_id": "mlx5.pause.storm", "value": "+0", "unit": "per window", "threshold": ">0 CRIT/WARN", "evidence": "all 2 counters are 0", "hint": "", "ref": "docs/design/nic-health.md §6.2", "metrics": {"tx_pause_storm_warning_events": {"total": 0, "delta": 0}, "tx_pause_storm_error_events": {"total": 0, "delta": 0}}},
+    {"severity": "OK", "scope": "port", "target": "eth0", "check_id": "mlx5.module", "value": "+0", "unit": "per window", "threshold": ">0 CRIT/WARN", "evidence": "all 4 counters are 0", "hint": "", "ref": "docs/design/nic-health.md §6.2", "metrics": {"module_bus_stuck": {"total": 0, "delta": 0}, "module_bad_shorted": {"total": 0, "delta": 0}, "module_high_temp": {"total": 0, "delta": 0}, "module_unplug": {"total": 0, "delta": 0}}},
+    {"severity": "OK", "scope": "port", "target": "eth0", "check_id": "mlx5.link.phy_down", "value": "+0", "unit": "per window", "threshold": ">0 WARN", "evidence": "all 1 counters are 0", "hint": "", "ref": "docs/design/nic-health.md §6.2", "metrics": {"link_down_events_phy": {"total": 0, "delta": 0}}}
+  ]
+}

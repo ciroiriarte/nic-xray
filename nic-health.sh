@@ -40,12 +40,17 @@
 #   - 2026-10-20: bursty PHY/frame errors no longer read as OK when the window misses them:
 #                 high totals since boot (>=1000, >=60/h over uptime) are WARN; pre-FEC BER is
 #                 estimated from link speed x window when rx_bits_phy is absent (#15)
+#   - 2026-10-26: JSON schema_version 2: optional per-record "metrics" object with typed values
+#                 (optics, counters, BER, FEC, PCIe link, temperatures, look-back) and, on
+#                 generic.link.state, service-impact facts: in_use and why, bond, bond link
+#                 failures, traffic in the window (docs/design/nic-sweep.md §7 P2/P3). Evidence,
+#                 table and CSV unchanged. Global addresses are read with one ip call per run
 #
 # Version: 2.13.0
 
 SCRIPT_VERSION="2.13.0"
 SCRIPT_NAME="nic-health.sh"
-JSON_SCHEMA_VERSION=1
+JSON_SCHEMA_VERSION=2
 DESIGN_REF="docs/design/nic-health.md"
 
 # Runs as root: never resolve commands through a caller-controlled PATH
@@ -88,6 +93,12 @@ PROC_UPTIME="/proc/uptime"
 # Changes on every boot; lets a later comparison tell a counter reset from counter growth
 PROC_BOOT_ID="/proc/sys/kernel/random/boot_id"
 BOOT_ID_PATTERN='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+# Bonding driver state per bond: a slave's "Link Failure Count" (service impact, P3)
+PROC_BONDING="/proc/net/bonding"
+BOND_SLAVE_RE='^Slave Interface: ([^[:space:]]+)[[:space:]]*$'
+BOND_FAILURES_RE='^Link Failure Count: ([0-9]+)[[:space:]]*$'
+# Interface byte counters (statistics/) sampled for generic.link.state metrics: traffic in the window
+TRAFFIC_COUNTERS=("rx_bytes" "tx_bytes")
 
 # Sampling window (seconds); 0 = absolute totals since boot/driver load
 DEFAULT_INTERVAL=5
@@ -127,6 +138,14 @@ OPER_BLOCKED=("dormant" "lowerlayerdown" "testing")
 SPARE_MAX_CARRIER_UP=1
 # Deep module values expected to be "bad" on a dark port (no fiber or peer): shown, not judged
 DEEP_NOLINK_EXEMPT_KEYS=("Rx Power Current [dBm]" "Rx LOS [per lane]" "Rx CDR LOL [per lane]")
+# Why a port counts as in use (generic.link.state metrics, P3), in the order port_use_scan looks:
+# master (bond, bridge or another upper such as OVS or team), upper devices (VLAN, macvlan), SR-IOV
+# VFs, global address
+USE_BOND="bond"
+USE_BRIDGE="bridge"
+USE_UPPER="upper"
+USE_VFS="sriov_vfs"
+USE_ADDRESS="global_address"
 
 # Temperature: WARN this many degrees C below the critical threshold
 TEMP_WARN_MARGIN_C=10
@@ -257,6 +276,21 @@ DEEP_BER_EVIDENCE_KEYS=("Effective Physical BER" "Raw Physical BER" "Effective P
 DEEP_BER_OPTIONAL_KEYS=("Raw Physical Errors Per Lane" "Link Down Counter")
 DEEP_NO_FEC="No FEC"
 DEEP_MODULE_FEC_RE='[Ww]ith FEC'
+# What the deep tools print for a value they do not have
+DEEP_NA="N/A"
+# Typed metric names (JSON) of the module range values and lane flags, parallel to DEEP_RANGE_KEYS
+# and DEEP_FLAG_KEYS; looked up by key below (built by assignment: the keys contain brackets)
+DEEP_RANGE_NAMES=("temperature_c" "voltage_mv" "bias_ma" "rx_dbm" "tx_dbm")
+DEEP_FLAG_NAMES=("tx_fault" "rx_los" "tx_cdr_lol" "rx_cdr_lol")
+declare -A DEEP_RANGE_METRIC=() DEEP_FLAG_METRIC=()
+for DEEP_I in "${!DEEP_RANGE_KEYS[@]}"; do DEEP_RANGE_METRIC["${DEEP_RANGE_KEYS[DEEP_I]}"]="${DEEP_RANGE_NAMES[DEEP_I]}"; done
+for DEEP_I in "${!DEEP_FLAG_KEYS[@]}"; do DEEP_FLAG_METRIC["${DEEP_FLAG_KEYS[DEEP_I]}"]="${DEEP_FLAG_NAMES[DEEP_I]}"; done
+unset DEEP_I
+
+# Typed metrics (JSON only): unsigned counters have at most this many digits (64-bit), and a
+# scientific value (BER) whose exponent could overflow a double is left out
+UINT_MAX_DIGITS=20
+JSON_EXP_MAX=300
 
 # PCIe AER sysfs files and their total-counter keys
 AER_KINDS=("cor" "nonfatal" "fatal")
@@ -359,7 +393,22 @@ REC_SEV=()
 REC_EVIDENCE=()
 REC_HINT=()
 REC_REF=()
+# Typed metrics per record: JSON object members without braces, or empty (no metrics)
+REC_METRICS=()
 declare -A SEV_COUNT=()
+# Set by the json_* number helpers
+JSON_NUM=""
+# Set by port_use_scan: reasons a port is in use (kinds and evidence details), its bond, and why
+# addresses could not be checked
+USE_KINDS=()
+USE_DETAILS=()
+USE_MASTER_BOND=""
+USE_NOTE=""
+# Global addresses, first one per interface, from one 'ip -o addr show scope global' per run
+# (ADDR_STATE: empty until read, then ok or the note why addresses could not be checked)
+declare -A ADDR_OF=()
+ADDR_STATE=""
+ADDR_OK="ok"
 
 # Exact names of every ethtool -S counter the mlx5 rules need (rule counters, gauges, BER
 # denominator). A lookup table, not a regex: mlx5 prints thousands of per-channel lines per port
@@ -484,6 +533,118 @@ json_escape() {
     printf '%s' "$STR"
 }
 
+# --- Typed metrics (JSON only, docs/design/nic-sweep.md §7 P2/P3) ---
+# A check collects its record's metrics in a local METRICS string with the metric_* helpers
+# (dynamic scoping) and passes it as add_record's 11th argument. Absent or malformed values are
+# left out, never written as 0. Numbers are copied from the text they were read from after a strict
+# check, so they are finite, locale-independent and exactly what the evidence shows
+
+# Set JSON_NUM to an unsigned integer (leading zeros dropped); fails if not one or too long
+json_uint() {
+    local V="$1"
+    [[ "$V" =~ ^[0-9]+$ ]] || return 1
+    V="${V#"${V%%[!0]*}"}"
+    (( ${#V} <= UINT_MAX_DIGITS )) || return 1
+    JSON_NUM="${V:-0}"
+}
+
+# Set JSON_NUM to a plain decimal ("-0.079", "007", "3290.8"); fails otherwise. A bare "-0" becomes
+# -0.0 (JSON "-0" reads back as the integer 0, losing the sign the evidence shows)
+json_decimal() {
+    [[ "$1" =~ ^(-?)([0-9]+)(\.[0-9]+)?$ ]] || return 1
+    local SIGN="${BASH_REMATCH[1]}" INT="${BASH_REMATCH[2]}" FRAC="${BASH_REMATCH[3]}"
+    INT="${INT#"${INT%%[!0]*}"}"
+    (( ${#INT} <= UINT_MAX_DIGITS )) || return 1
+    JSON_NUM="$SIGN${INT:-0}$FRAC"
+    [[ "$JSON_NUM" == "-0" ]] && JSON_NUM="-0.0"
+    return 0
+}
+
+# Set JSON_NUM to a value in scientific notation as the deep tools or fmt_sci print it ("15E-255",
+# "1.2e-08", "0E0"); fails when unparseable or when a positive exponent could overflow a double
+json_sci() {
+    [[ "$1" =~ ^([0-9]+)(\.[0-9]+)?[eE]([-+]?)([0-9]+)$ ]] || return 1
+    local INT="${BASH_REMATCH[1]}" FRAC="${BASH_REMATCH[2]}" SIGN="${BASH_REMATCH[3]#+}" EXP="${BASH_REMATCH[4]}"
+    INT="${INT#"${INT%%[!0]*}"}"
+    EXP="${EXP#"${EXP%%[!0]*}"}"
+    EXP="${EXP:-0}"
+    (( ${#INT} <= UINT_MAX_DIGITS && ${#EXP} <= ${#JSON_EXP_MAX} )) || return 1
+    [[ -n "$SIGN" ]] || (( 10#$EXP + ${#INT} <= JSON_EXP_MAX )) || return 1
+    JSON_NUM="${INT:-0}${FRAC}e$SIGN$EXP"
+}
+
+# Append one "key": value member to the caller's METRICS
+metric_raw() {
+    METRICS+="${METRICS:+, }\"$1\": $2"
+}
+
+# metric_int / metric_num / metric_sci KEY TEXT: TEXT as a JSON number when it is one (else nothing)
+metric_int() {
+    json_uint "$2" && metric_raw "$1" "$JSON_NUM"
+    return 0
+}
+
+metric_num() {
+    json_decimal "$2" && metric_raw "$1" "$JSON_NUM"
+    return 0
+}
+
+metric_sci() {
+    { json_sci "$2" || json_decimal "$2"; } && metric_raw "$1" "$JSON_NUM"
+    return 0
+}
+
+# KEY TEXT: a JSON string, unless TEXT is empty or the tool's N/A
+metric_str() {
+    [[ -n "$2" && "$2" != "$DEEP_NA" ]] && metric_raw "$1" "\"$(json_escape "$2")\""
+    return 0
+}
+
+# KEY CONDITION...: true when the command succeeds, else false
+metric_bool() {
+    local KEY="$1"
+    shift
+    if "$@"; then metric_raw "$KEY" true; else metric_raw "$KEY" false; fi
+}
+
+# KEY TOTAL [DELTA]: a counter as {"total": N, "delta": N}; delta only with a sampling window
+metric_counter() {
+    json_uint "$2" || return 0
+    local OBJ="{\"total\": $JSON_NUM"
+    [[ -n "${3:-}" ]] && json_uint "$3" && OBJ+=", \"delta\": $JSON_NUM"
+    metric_raw "$1" "$OBJ}"
+}
+
+# KEY LIST FN: "a,b,c" as a JSON array, each item through FN (json_uint or json_decimal); left out
+# whole when any item is malformed
+metric_list() {
+    local KEY="$1" FN="$3" ITEM OUT=""
+    local -a ITEMS
+    IFS=',' read -ra ITEMS <<< "$2"
+    (( ${#ITEMS[@]} > 0 )) || return 0
+    for ITEM in "${ITEMS[@]}"; do
+        "$FN" "$ITEM" || return 0
+        OUT+="${OUT:+, }$JSON_NUM"
+    done
+    metric_raw "$KEY" "[$OUT]"
+}
+
+# KEY TENTHS: PCIe speed in GT/s from tenths (160 -> 16.0)
+metric_tenths() {
+    [[ "$2" =~ ^[0-9]{1,18}$ ]] && metric_raw "$1" "$(( 10#$2 / 10 )).$(( 10#$2 % 10 ))"
+    return 0
+}
+
+# KEY MILLIDEGREES: degrees C (54500 -> 54.5), exact
+metric_milli() {
+    [[ "$2" =~ ^(-?)([0-9]{1,15})$ ]] || return 0
+    local SIGN="${BASH_REMATCH[1]}" N=$(( 10#${BASH_REMATCH[2]} )) F
+    (( N == 0 )) && SIGN=""
+    printf -v F '%03d' $(( N % 1000 ))
+    while [[ "$F" == *0 ]]; do F="${F%0}"; done
+    metric_raw "$1" "$SIGN$(( N / 1000 ))${F:+.$F}"
+}
+
 # Wrap a CSV field value in double-quotes (RFC 4180)
 csv_escape() {
     local V="$1"
@@ -580,7 +741,7 @@ historical_cap() {
 }
 
 # Append one check result
-# Args: scope target check_id value unit threshold severity evidence hint ref
+# Args: scope target check_id value unit threshold severity evidence hint ref [metrics]
 add_record() {
     REC_SCOPE+=("$1")
     REC_TARGET+=("$2")
@@ -592,6 +753,7 @@ add_record() {
     REC_EVIDENCE+=("$8")
     REC_HINT+=("$9")
     REC_REF+=("${10}")
+    REC_METRICS+=("${11:-}")
 }
 
 # Print VALUE as a plain integer when it is all digits and at most MAX (leading zeros allowed);
@@ -937,6 +1099,10 @@ snapshot() {
 
     for IDX in "${!PORT_IFACE[@]}"; do
         IFACE="${PORT_IFACE[IDX]}"
+        for KIND in "${TRAFFIC_COUNTERS[@]}"; do
+            FILE="$SYSFS_NET/$IFACE/statistics/$KIND"
+            [[ -e "$FILE" ]] && _S["stat|$IFACE|$KIND"]=$(read_attr "$FILE" || printf '?')
+        done
         FILE="$SYSFS_NET/$IFACE/carrier_changes"
         [[ -e "$FILE" ]] || continue
         _S["carrier|$IFACE"]=$(read_attr "$FILE" || printf '?')
@@ -1084,8 +1250,8 @@ check_mlx5_rule() {
     local IDX="$1" R="$2"
     local IFACE="${PORT_IFACE[$1]}"
     local CHECK="${MLX5_RULE_ID[R]}" HINT_TXT="${MLX5_RULE_HINT[R]}" REF="$DESIGN_REF §6.2"
-    local ITEM GLOB CSEV NAME KEY RC SEV="$SEV_OK" HINT="" UNIT
-    local VALUE_PARTS="" CONTEXT="" EVIDENCE="" MATCHED=0 THRESH SHOWN
+    local ITEM GLOB CSEV NAME KEY RC SEV="$SEV_OK" HINT="" UNIT G
+    local VALUE_PARTS="" CONTEXT="" EVIDENCE="" MATCHED=0 THRESH SHOWN METRICS=""
     # History floor (#15): only in delta mode, for the PHY/frame rules, with a readable clock
     local HIST_ON=false HIST="" UP_S=0 RATE
     if (( INTERVAL > 0 )) && [[ " ${MLX5_HISTORY_RULES[*]} " == *" $CHECK "* && "${SNAP1[time]:-}" =~ ^[0-9]+$ ]]; then
@@ -1132,8 +1298,10 @@ check_mlx5_rule() {
                         "Counter appeared during the window; re-run" "$REF"
                     return
                 fi
+                metric_counter "$NAME" "${SNAP1[$KEY]}" "$DELTA"
             else
                 DELTA="${SNAP1[$KEY]}"
+                metric_counter "$NAME" "${SNAP1[$KEY]}"
             fi
             # String tests: 20-digit counters would wrap in arithmetic
             if [[ "${SNAP1[$KEY]}" =~ [1-9] && "$NAME" != "$MLX5_BITS_COUNTER" ]]; then
@@ -1171,7 +1339,10 @@ check_mlx5_rule() {
 
     [[ -z "$EVIDENCE" ]] && EVIDENCE="all $MATCHED counters are 0 "
     EVIDENCE="${EVIDENCE% }"
-    [[ "$CHECK" == "$MLX5_GAUGE_RULE" ]] && EVIDENCE+="$(mlx5_gauge_context "$IFACE")"
+    if [[ "$CHECK" == "$MLX5_GAUGE_RULE" ]]; then
+        EVIDENCE+="$(mlx5_gauge_context "$IFACE")"
+        for G in "${MLX5_GAUGES[@]}"; do metric_int "${G}_pct" "${SNAP1["ets|$IFACE|$G"]:-}"; done
+    fi
     [[ "$CHECK" == "$MLX5_BER_RULE" ]] && mlx5_ber_eval "$IFACE"
 
     if (( INTERVAL > 0 )); then
@@ -1209,7 +1380,7 @@ check_mlx5_rule() {
         VALUE_PARTS="0"
         (( INTERVAL > 0 )) && VALUE_PARTS="+0"
     fi
-    add_record "port" "$IFACE" "$CHECK" "$VALUE_PARTS" "$UNIT" "$THRESH" "$SEV" "$EVIDENCE" "$HINT" "$REF"
+    add_record "port" "$IFACE" "$CHECK" "$VALUE_PARTS" "$UNIT" "$THRESH" "$SEV" "$EVIDENCE" "$HINT" "$REF" "$METRICS"
 }
 
 # Distinct escalating severities of a rule: CRIT, WARN, or CRIT/WARN
@@ -1279,9 +1450,9 @@ window_line_bits() {
 }
 
 # Pre-FEC BER and lane skew for the PHY rule. Sets BER_VALUE, LANE_HINT and may raise SEV to WARN
-# (uses the caller's SEV and EVIDENCE through dynamic scoping)
+# (uses the caller's SEV, EVIDENCE and METRICS through dynamic scoping)
 mlx5_ber_eval() {
-    local IFACE="$1" CORR BITS NAME TOTAL=0 MAX=0 MAX_LANE="" LANES=0 RC ACTIVE REL="=" JUDGE=true SPEED
+    local IFACE="$1" CORR BITS NAME TOTAL=0 MAX=0 MAX_LANE="" LANES=0 RC ACTIVE REL="=" JUDGE=true SPEED BER
     local BKEY="ets|$IFACE|$MLX5_BITS_COUNTER" CKEY="ets|$IFACE|$MLX5_CORRECTED_COUNTER"
     (( INTERVAL > 0 )) || return 0
 
@@ -1307,7 +1478,11 @@ mlx5_ber_eval() {
         RC=0; delta "$BKEY" || RC=$?; (( RC == 0 )) && BITS=$DELTA || BITS=""
     fi
     if [[ -n "$CORR" && -n "$BITS" ]] && (( BITS > 0 )); then
-        BER_VALUE="pre-FEC BER$REL$(fmt_sci "$CORR" "$BITS")"
+        BER=$(fmt_sci "$CORR" "$BITS")
+        BER_VALUE="pre-FEC BER$REL$BER"
+        metric_sci pre_fec_ber "$BER"
+        metric_bool pre_fec_ber_estimated test "$REL" = "~"
+        metric_bool pre_fec_ber_judged "$JUDGE"
         # CORR/BITS > 10^-EXP without multiplying large counters
         if $JUDGE && (( CORR > 0 && CORR > BITS / 10 ** MLX5_PRE_FEC_BER_WARN_EXP )) && [[ "$SEV" == "$SEV_OK" ]]; then
             SEV="$SEV_WARN"
@@ -1486,7 +1661,7 @@ ber_display() {
 
 check_deep_port() {
     local IDX="$1" IFACE="${PORT_IFACE[$1]}" REF="$DESIGN_REF §7"
-    local SEV HINT VALUE EVIDENCE K KEY RAW LO HI V M_V M_LO M_HI FLAG
+    local SEV HINT VALUE EVIDENCE K KEY RAW LO HI V M_V M_LO M_HI FLAG METRICS M
     local TOOL="${DEEP_TOOL_USED[$IFACE]:-}"
 
     if [[ -n "${DEEP_ERR[$IFACE]:-}" ]]; then
@@ -1512,13 +1687,19 @@ check_deep_port() {
         :
     elif [[ -z "$K" ]]; then
         add_record "port" "$IFACE" "mlx5.deep.troubleshooting" "-" "" "-" "$SEV_NA" "$TOOL printed no Status Opcode" "" "$REF"
-    elif [[ "$K" == "0" ]]; then
-        add_record "port" "$IFACE" "mlx5.deep.troubleshooting" "opcode 0" "" "0" "$SEV_OK" \
-            "$TOOL: ${DEEP_KV["$IFACE|Recommendation"]:-}" "" "$REF"
     else
-        add_record "port" "$IFACE" "mlx5.deep.troubleshooting" "opcode $K" "" "0" "$SEV_WARN" \
-            "$TOOL Status Opcode=$K Group Opcode=${DEEP_KV["$IFACE|Group Opcode"]:-?}" \
-            "${DEEP_KV["$IFACE|Recommendation"]:-Tool reported a link issue}" "$REF"
+        METRICS=""
+        metric_int status_opcode "$K"
+        metric_int group_opcode "${DEEP_KV["$IFACE|Group Opcode"]:-}"
+        metric_str recommendation "${DEEP_KV["$IFACE|Recommendation"]:-}"
+        if [[ "$K" == "0" ]]; then
+            add_record "port" "$IFACE" "mlx5.deep.troubleshooting" "opcode 0" "" "0" "$SEV_OK" \
+                "$TOOL: ${DEEP_KV["$IFACE|Recommendation"]:-}" "" "$REF" "$METRICS"
+        else
+            add_record "port" "$IFACE" "mlx5.deep.troubleshooting" "opcode $K" "" "0" "$SEV_WARN" \
+                "$TOOL Status Opcode=$K Group Opcode=${DEEP_KV["$IFACE|Group Opcode"]:-?}" \
+                "${DEEP_KV["$IFACE|Recommendation"]:-Tool reported a link issue}" "$REF" "$METRICS"
+        fi
     fi
 
     # FEC: module requires it but the link runs without
@@ -1528,12 +1709,20 @@ check_deep_port() {
     elif [[ -z "$FEC" ]]; then
         add_record "port" "$IFACE" "mlx5.deep.fec" "-" "" "-" "$SEV_NA" "$TOOL printed no FEC line" "" "$REF"
     elif [[ "$FEC" == "$DEEP_NO_FEC" && "$COMP" =~ $DEEP_MODULE_FEC_RE ]]; then
+        METRICS=""
+        metric_str fec "$FEC"
+        metric_str compliance "$COMP"
+        metric_raw fec_mismatch true
         add_record "port" "$IFACE" "mlx5.deep.fec" "link: $FEC" "" "module FEC = link FEC" "$SEV_WARN" \
             "FEC=$FEC; module Compliance=$COMP" \
-            "Module is specified for operation with FEC but the link runs without it: enable RS-FEC on both ends (NIC and switch port)" "$REF"
+            "Module is specified for operation with FEC but the link runs without it: enable RS-FEC on both ends (NIC and switch port)" "$REF" "$METRICS"
     else
+        METRICS=""
+        metric_str fec "$FEC"
+        metric_str compliance "$COMP"
+        metric_raw fec_mismatch false
         add_record "port" "$IFACE" "mlx5.deep.fec" "link: $FEC" "" "module FEC = link FEC" "$SEV_OK" \
-            "FEC=$FEC; module Compliance=${COMP:-n/a}" "" "$REF"
+            "FEC=$FEC; module Compliance=${COMP:-n/a}" "" "$REF" "$METRICS"
     fi
 
     # Effective (post-FEC) BER, averaged since the last counter clear
@@ -1555,13 +1744,20 @@ check_deep_port() {
         add_record "port" "$IFACE" "mlx5.deep.ber" "$RAW" "" "-" "$SEV_UNKNOWN" "$EVIDENCE" "Unparseable BER value" "$REF"
     else
         VALUE="effective $(ber_display "$RAW") raw $(ber_display "${DEEP_KV["$IFACE|Raw Physical BER"]:-?}")"
+        METRICS=""
+        metric_sci effective_ber "$RAW"
+        metric_sci raw_ber "${DEEP_KV["$IFACE|Raw Physical BER"]:-}"
+        metric_int effective_errors "${DEEP_KV["$IFACE|Effective Physical Errors"]:-}"
+        metric_list raw_errors_per_lane "${DEEP_KV["$IFACE|Raw Physical Errors Per Lane"]:-}" json_uint
+        metric_int link_down_counter "${DEEP_KV["$IFACE|Link Down Counter"]:-}"
+        metric_num since_clear_min "$SINCE"
         if (( K >= -DEEP_EFFECTIVE_BER_WARN_EXP )); then
             SEV="$SEV_WARN"
             HINT="Average since the last counter clear ($SINCE min) exceeds 1E-$DEEP_EFFECTIVE_BER_WARN_EXP: clean/replace the optic or cable, check FEC; mlx5.phy.errors shows whether errors are still growing"
         else
             SEV="$SEV_OK"; HINT=""
         fi
-        add_record "port" "$IFACE" "mlx5.deep.ber" "$VALUE" "" "effective<1E-$DEEP_EFFECTIVE_BER_WARN_EXP" "$SEV" "$EVIDENCE" "$HINT" "$REF"
+        add_record "port" "$IFACE" "mlx5.deep.ber" "$VALUE" "" "effective<1E-$DEEP_EFFECTIVE_BER_WARN_EXP" "$SEV" "$EVIDENCE" "$HINT" "$REF" "$METRICS"
     fi
 
     # Module: DOM values against the module's own ranges, and per-lane fault flags
@@ -1569,7 +1765,7 @@ check_deep_port() {
         add_record "port" "$IFACE" "mlx5.deep.module" "-" "" "-" "$SEV_NA" "no module identified" "Empty cage or module without EEPROM" "$REF"
         return 0
     fi
-    SEV="$SEV_OK"; HINT=""; VALUE=""; EVIDENCE=""
+    SEV="$SEV_OK"; HINT=""; VALUE=""; EVIDENCE=""; METRICS=""
     local -a LANES
     local LN M_MIN M_MAX RAW_MIN RAW_MAX OUT_LANES SET_LANES
     for KEY in "${DEEP_RANGE_KEYS[@]}"; do
@@ -1587,11 +1783,18 @@ check_deep_port() {
             (( M_V < M_LO || M_V > M_HI )) && OUT_LANES+="lane $(( LN + 1 )) ${LANES[LN]}, "
         done
         EVIDENCE+="$KEY=$V; "
+        M="${DEEP_RANGE_METRIC[$KEY]}"
         if (( ${#LANES[@]} > 1 )); then
             VALUE+="${KEY%% *}=$RAW_MIN..$RAW_MAX "
+            metric_num "$M" "$RAW_MIN"
+            metric_list "${M}_lanes" "$RAW" json_decimal
         else
             VALUE+="${KEY%% *}=$RAW "
+            metric_num "$M" "$RAW"
         fi
+        metric_num "${M}_low" "$LO"
+        metric_num "${M}_high" "$HI"
+        [[ " ${DEEP_NOLINK_EXEMPT_KEYS[*]} " == *" $KEY "* ]] && metric_bool "${M}_judged" "$LINK_UP"
         # No light is expected without a link: DEEP_NOLINK_EXEMPT_KEYS are shown, not judged
         if ! $LINK_UP && [[ " ${DEEP_NOLINK_EXEMPT_KEYS[*]} " == *" $KEY "* ]]; then
             EVIDENCE="${EVIDENCE%; } (not judged: no link); "
@@ -1609,6 +1812,7 @@ check_deep_port() {
         # A single lane mask, or one flag per lane on multi-lane modules ("0,0,1,0")
         [[ "$FLAG" =~ ^[0-9]+(,[0-9]+)*$ ]] || continue
         EVIDENCE+="$KEY=$FLAG; "
+        metric_list "${DEEP_FLAG_METRIC[$KEY]}" "$FLAG" json_uint
         IFS=',' read -ra LANES <<< "$FLAG"
         SET_LANES=""
         for (( LN = 0; LN < ${#LANES[@]}; LN++ )); do
@@ -1628,7 +1832,10 @@ check_deep_port() {
     done
     [[ -n "$HINT" ]] && HINT="${HINT%; }: reseat or replace the module, check the peer optic and fiber"
     EVIDENCE="${EVIDENCE%; }; module ${DEEP_KV["$IFACE|Vendor Name"]:-?} ${DEEP_KV["$IFACE|Vendor Part Number"]:-?}"
-    add_record "port" "$IFACE" "mlx5.deep.module" "${VALUE% }" "" "within module ranges, no lane faults" "$SEV" "$EVIDENCE" "$HINT" "$REF"
+    metric_str vendor "${DEEP_KV["$IFACE|Vendor Name"]:-}"
+    metric_str part_number "${DEEP_KV["$IFACE|Vendor Part Number"]:-}"
+    metric_str compliance "${DEEP_KV["$IFACE|Compliance"]:-}"
+    add_record "port" "$IFACE" "mlx5.deep.module" "${VALUE% }" "" "within module ranges, no lane faults" "$SEV" "$EVIDENCE" "$HINT" "$REF" "$METRICS"
 }
 
 check_deep() {
@@ -1712,15 +1919,29 @@ check_pcie_link() {
     THRESH="${CAP_S%% PCIe*} x${CAP_W}"
     [[ -n "$LIMIT" ]] && THRESH+=" (slot)"
 
+    local METRICS=""
+    metric_tenths speed_gts "$CUR_T"
+    metric_int width "$CUR_W"
+    metric_tenths max_speed_gts "$MAX_T"
+    metric_int max_width "$MAX_W"
+    if [[ -n "${UP:-}" ]]; then
+        metric_tenths upstream_max_speed_gts "$UP_T"
+        [[ "$UP_W" =~ ^[0-9]+$ ]] && (( 10#$UP_W > 0 )) && metric_int upstream_max_width "$UP_W"
+    fi
+    metric_tenths expected_speed_gts "$CAP_T"
+    metric_int expected_width "$CAP_W"
+    metric_bool slot_limited test -n "$LIMIT"
+    if (( CUR_T < CAP_T || CUR_W < CAP_W )); then metric_raw below_capability true; else metric_raw below_capability false; fi
+
     if (( CUR_T < CAP_T || CUR_W < CAP_W )); then
         add_record "asic" "$ASIC" "$CHECK" "$VALUE" "$UNIT" "$THRESH" "$SEV_WARN" \
-            "$EVIDENCE" "Link trained below what the card and its slot support: check BIOS PCIe settings, riser and seating; reseat$([[ -z "${UP:-}" ]] && printf '. Slot limits unknown: a slot narrower than the card is permanent')" "$REF"
+            "$EVIDENCE" "Link trained below what the card and its slot support: check BIOS PCIe settings, riser and seating; reseat$([[ -z "${UP:-}" ]] && printf '. Slot limits unknown: a slot narrower than the card is permanent')" "$REF" "$METRICS"
     elif [[ -n "$LIMIT" ]]; then
         add_record "asic" "$ASIC" "$CHECK" "$VALUE" "$UNIT" "$THRESH" "$SEV_OK" \
             "$EVIDENCE; slot-limited ${LIMIT% }: card max ${MAX_S%% PCIe*} x${MAX_W}" \
-            "Slot narrower or slower than the card (board wiring, or BIOS bifurcation/link-speed setting): move the card or check the BIOS for full bandwidth" "$REF"
+            "Slot narrower or slower than the card (board wiring, or BIOS bifurcation/link-speed setting): move the card or check the BIOS for full bandwidth" "$REF" "$METRICS"
     else
-        add_record "asic" "$ASIC" "$CHECK" "$VALUE" "$UNIT" "$THRESH" "$SEV_OK" "$EVIDENCE" "" "$REF"
+        add_record "asic" "$ASIC" "$CHECK" "$VALUE" "$UNIT" "$THRESH" "$SEV_OK" "$EVIDENCE" "" "$REF" "$METRICS"
     fi
 }
 
@@ -1795,14 +2016,18 @@ check_pcie_aer() {
             SEV="$SEV_OK"
         fi
     fi
-    add_record "asic" "$ASIC" "$CHECK" "$VALUE" "$UNIT" "$THRESH" "$SEV" "totals since boot: $TOTALS" "$HINT" "$REF"
+    local METRICS=""
+    for KIND in "${AER_KINDS[@]}"; do
+        [[ -n "${TOT[$KIND]+x}" ]] && metric_counter "$KIND" "${TOT[$KIND]}" "${D[$KIND]:-}"
+    done
+    add_record "asic" "$ASIC" "$CHECK" "$VALUE" "$UNIT" "$THRESH" "$SEV" "totals since boot: $TOTALS" "$HINT" "$REF" "$METRICS"
 }
 
 # generic.temperature: hwmon sensors of the ASIC (deduplicated by label across functions)
 check_temperature() {
     local ASIC="$1"
     local CHECK="generic.temperature" REF="$DESIGN_REF §6.1"
-    local BDF HW INPUT_F BASE LABEL IN CRIT MAX HIGH ALARM WARN_AT SEV HINT THRESH EVIDENCE TARGET ERRMSG FOUND=false
+    local BDF HW INPUT_F BASE LABEL IN CRIT MAX HIGH ALARM WARN_AT SEV HINT THRESH EVIDENCE TARGET ERRMSG FOUND=false METRICS
     local -A SEEN=()
     local -a FUNCS
 
@@ -1875,7 +2100,15 @@ check_temperature() {
                     fi
                 fi
                 [[ "$HIGH" =~ ^[0-9]+$ && -z "$HINT" ]] && HINT="Peak since driver load: $(milli_to_c "$HIGH")C"
-                add_record "asic" "$TARGET" "$CHECK" "$(milli_to_c "$IN")" "C" "$THRESH" "$SEV" "$EVIDENCE" "$HINT" "$REF"
+                METRICS=""
+                metric_str label "$LABEL"
+                metric_milli temp_c "$IN"
+                metric_milli warn_c "$WARN_AT"
+                metric_milli crit_c "$CRIT"
+                metric_milli max_c "$MAX"
+                [[ "$HIGH" =~ ^[0-9]+$ ]] && metric_milli highest_c "$HIGH"
+                [[ "$ALARM" =~ ^[01]$ ]] && metric_bool alarm test "$ALARM" = 1
+                add_record "asic" "$TARGET" "$CHECK" "$(milli_to_c "$IN")" "C" "$THRESH" "$SEV" "$EVIDENCE" "$HINT" "$REF" "$METRICS"
             done
         done
     done
@@ -1901,10 +2134,12 @@ check_link_flaps() {
         add_record "port" "$IFACE" "$CHECK" "-" "" "-" "$SEV_NA" "no carrier_changes attribute" "" "$REF"
         return
     fi
+    local METRICS=""
     if (( INTERVAL == 0 )); then
         if [[ "${SNAP1[$KEY]}" =~ ^[0-9]+$ ]]; then
+            metric_counter carrier_changes "${SNAP1[$KEY]}"
             add_record "port" "$IFACE" "$CHECK" "${SNAP1[$KEY]}" "transitions/driver-load" "informational" "$SEV_OK" \
-                "carrier_changes=${SNAP1[$KEY]}" "Historical total, informational only; re-run with -I to detect active flapping" "$REF"
+                "carrier_changes=${SNAP1[$KEY]}" "Historical total, informational only; re-run with -I to detect active flapping" "$REF" "$METRICS"
         else
             add_record "port" "$IFACE" "$CHECK" "-" "" "-" "$SEV_UNKNOWN" "carrier_changes unreadable" "" "$REF"
         fi
@@ -1918,11 +2153,13 @@ check_link_flaps() {
     elif (( RC != 0 )); then
         add_record "port" "$IFACE" "$CHECK" "-" "" "-" "$SEV_UNKNOWN" "carrier_changes unreadable" "" "$REF"
     elif (( DELTA > 0 )); then
+        metric_counter carrier_changes "${SNAP1[$KEY]}" "$DELTA"
         add_record "port" "$IFACE" "$CHECK" "+$DELTA" "transitions/window" ">0 WARN" "$SEV_WARN" \
-            "carrier_changes T0=${SNAP0[$KEY]} T1=${SNAP1[$KEY]}" "Link is flapping: check cable/transceiver, peer port, and autonegotiation/FEC settings" "$REF"
+            "carrier_changes T0=${SNAP0[$KEY]} T1=${SNAP1[$KEY]}" "Link is flapping: check cable/transceiver, peer port, and autonegotiation/FEC settings" "$REF" "$METRICS"
     else
+        metric_counter carrier_changes "${SNAP1[$KEY]}" "$DELTA"
         add_record "port" "$IFACE" "$CHECK" "+0" "transitions/window" ">0 WARN" "$SEV_OK" \
-            "carrier_changes=${SNAP1[$KEY]} (since driver load)" "" "$REF"
+            "carrier_changes=${SNAP1[$KEY]} (since driver load)" "" "$REF" "$METRICS"
     fi
 }
 
@@ -1942,41 +2179,120 @@ port_link_up() {
     fi
 }
 
-# Why a port is in use, first reason found: "master=bond0", "upper=eth1.100", "vfs=8" (SR-IOV
-# VFs, e.g. passed to VMs) or "address=192.0.2.10/24"
-# Returns 0 in use, 1 not in use (spare), 2 undetermined (ip missing or failed: the reason is
-# printed), so a port with only an address is never mistaken for a spare
-# Args: iface
-port_in_use() {
-    local IFACE="$1" U OUT RC=0
-    local -a UPPERS
-    if [[ -e "$SYSFS_NET/$IFACE/master" ]]; then
-        U=$(readlink "$SYSFS_NET/$IFACE/master") && printf 'master=%s' "${U##*/}" && return 0
-    fi
-    UPPERS=("$SYSFS_NET/$IFACE"/upper_*)
-    if [[ -e "${UPPERS[0]}" ]]; then
-        printf 'upper=%s' "${UPPERS[0]##*/upper_}"
-        return 0
-    fi
-    if U=$(read_attr "$SYSFS_NET/$IFACE/device/sriov_numvfs") && [[ "$U" =~ ^[0-9]+$ ]] && (( 10#$U > 0 )); then
-        printf 'vfs=%d' "$(( 10#$U ))"
-        return 0
-    fi
+# Read every interface's first global address once (ip -o addr show scope global) into ADDR_OF;
+# ADDR_STATE becomes ADDR_OK or the note port_use_scan reports when ip is missing or fails
+collect_addresses() {
+    local OUT LINE NAME ADDR RC=0
+    ADDR_OF=()
     if [[ -z "${TOOL_PATH[ip]:-}" ]]; then
-        printf 'addresses not checked: ip missing'
-        return 2
-    fi
-    OUT=$(LC_ALL=C "${TOOL_PATH[ip]}" -o addr show dev "$IFACE" scope global 2>&1) || RC=$?
-    if (( RC != 0 )); then
-        printf 'addresses not checked: ip exit %d: %s' "$RC" "${OUT%%$'\n'*}"
-        return 2
-    fi
-    if [[ -n "$OUT" ]]; then
-        read -r _ _ _ U _ <<< "$OUT"
-        printf 'address=%s' "$U"
+        ADDR_STATE="addresses not checked: ip missing"
         return 0
     fi
+    OUT=$(LC_ALL=C "${TOOL_PATH[ip]}" -o addr show scope global 2>&1) || RC=$?
+    if (( RC != 0 )); then
+        ADDR_STATE="addresses not checked: ip exit $RC: ${OUT%%$'\n'*}"
+        return 0
+    fi
+    while IFS= read -r LINE; do
+        read -r _ NAME _ ADDR _ <<< "$LINE"
+        [[ -n "$NAME" && -n "$ADDR" && -z "${ADDR_OF[$NAME]+x}" ]] && ADDR_OF["$NAME"]="$ADDR"
+    done <<< "$OUT"
+    ADDR_STATE="$ADDR_OK"
+}
+
+# Every reason a port is in use, in the order checked: its master ("master=bond0"; kind bond,
+# bridge, or upper for OVS, team and the like), upper devices ("upper=eth1.100", not the master's
+# own link), SR-IOV VFs ("vfs=8", e.g. passed to VMs) and a global address ("address=192.0.2.10/24",
+# from collect_addresses, run on first use).
+# Sets USE_DETAILS (evidence text), USE_KINDS (USE_BOND ... USE_ADDRESS), USE_MASTER_BOND (bond name
+# or empty) and USE_NOTE (why addresses were not checked)
+# Returns 0 in use, 1 not in use (spare), 2 undetermined (ip missing or failed, nothing else found),
+# so a port with only an address is never mistaken for a spare
+# Args: iface
+port_use_scan() {
+    local IFACE="$1" U MASTER="" UPPER
+    USE_DETAILS=(); USE_KINDS=(); USE_MASTER_BOND=""; USE_NOTE=""
+    [[ -n "$ADDR_STATE" ]] || collect_addresses
+    if [[ -e "$SYSFS_NET/$IFACE/master" ]] && U=$(readlink "$SYSFS_NET/$IFACE/master"); then
+        MASTER="${U##*/}"
+        USE_DETAILS+=("master=$MASTER")
+        if [[ -e "$SYSFS_NET/$MASTER/bonding" ]]; then
+            USE_KINDS+=("$USE_BOND"); USE_MASTER_BOND="$MASTER"
+        elif [[ -e "$SYSFS_NET/$MASTER/bridge" ]]; then
+            USE_KINDS+=("$USE_BRIDGE")
+        else
+            USE_KINDS+=("$USE_UPPER")
+        fi
+    fi
+    for UPPER in "$SYSFS_NET/$IFACE"/upper_*; do
+        [[ -e "$UPPER" && "${UPPER##*/upper_}" != "$MASTER" ]] || continue
+        USE_DETAILS+=("upper=${UPPER##*/upper_}"); USE_KINDS+=("$USE_UPPER")
+    done
+    if U=$(read_attr "$SYSFS_NET/$IFACE/device/sriov_numvfs") && [[ "$U" =~ ^[0-9]+$ ]] && (( 10#$U > 0 )); then
+        USE_DETAILS+=("vfs=$(( 10#$U ))"); USE_KINDS+=("$USE_VFS")
+    fi
+    if [[ "$ADDR_STATE" != "$ADDR_OK" ]]; then
+        USE_NOTE="$ADDR_STATE"
+    elif [[ -n "${ADDR_OF[$IFACE]:-}" ]]; then
+        USE_DETAILS+=("address=${ADDR_OF[$IFACE]}"); USE_KINDS+=("$USE_ADDRESS")
+    fi
+    (( ${#USE_DETAILS[@]} > 0 )) && return 0
+    [[ -n "$USE_NOTE" ]] && return 2
     return 1
+}
+
+# "Link Failure Count" of a bond slave from the bonding driver's state file; fails when absent
+# Args: bond iface
+bond_link_failures() {
+    local LINE CUR="" FILE="$PROC_BONDING/$1"
+    [[ -r "$FILE" ]] || return 1
+    while IFS= read -r LINE; do
+        if [[ "$LINE" =~ $BOND_SLAVE_RE ]]; then
+            CUR="${BASH_REMATCH[1]}"
+        elif [[ "$CUR" == "$2" && "$LINE" =~ $BOND_FAILURES_RE ]]; then
+            printf '%s' "${BASH_REMATCH[1]}"
+            return 0
+        fi
+    done < "$FILE"
+    return 1
+}
+
+# Metrics of generic.link.state (appended to the caller's METRICS): carrier and its counters, and
+# the service-impact facts (P3) from port_use_scan, which must have just run for this port: in_use
+# and in_use_reasons (left out when undetermined; in_use_reasons_complete false when addresses could
+# not be checked), bond and its link failures, and traffic (statistics/ byte counters, sampled with
+# the other counters, so the window shows whether the port carries traffic now)
+# Args: port-index port_use_scan-return-code operstate carrier_up_count carrier_down_count
+link_state_metrics() {
+    local IDX="$1" RC="$2" IFACE="${PORT_IFACE[$1]}" KIND LIST="" N KEY
+    local -A LISTED=()
+    metric_bool carrier port_link_up "$IDX"
+    [[ "$3" != "?" ]] && metric_str operstate "$3"
+    metric_int carrier_up_count "$4"
+    metric_int carrier_down_count "$5"
+    if (( RC != 2 )); then
+        metric_bool in_use test "$RC" -eq 0
+        for KIND in "${USE_KINDS[@]}"; do
+            [[ -n "${LISTED[$KIND]:-}" ]] && continue
+            LISTED["$KIND"]=1
+            LIST+="${LIST:+, }\"$KIND\""
+        done
+        metric_raw in_use_reasons "[$LIST]"
+        [[ -n "$USE_NOTE" ]] && metric_raw in_use_reasons_complete false
+    fi
+    if [[ -n "$USE_MASTER_BOND" ]]; then
+        metric_str bond "$USE_MASTER_BOND"
+        N=$(bond_link_failures "$USE_MASTER_BOND" "$IFACE") && metric_int bond_link_failures "$N"
+    fi
+    for N in "${TRAFFIC_COUNTERS[@]}"; do
+        KEY="stat|$IFACE|$N"
+        if (( INTERVAL > 0 )) && delta "$KEY"; then
+            metric_counter "$N" "${SNAP1[$KEY]}" "$DELTA"
+        else
+            metric_counter "$N" "${SNAP1[$KEY]:-}"
+        fi
+    done
+    return 0
 }
 
 # True when sysfs flags show the interface administratively down (IFF_UP clear)
@@ -1994,59 +2310,65 @@ admin_down() {
 check_link_state() {
     local IDX="$1"
     local IFACE="${PORT_IFACE[IDX]}" CHECK="generic.link.state" REF="$DESIGN_REF §6.1"
-    local FLAGS OPER USE RC UP_COUNT MASTER MASTER_OPER EVIDENCE COUNTS
+    local FLAGS OPER USE RC UP_COUNT DOWN_COUNT MASTER MASTER_OPER EVIDENCE COUNTS METRICS=""
     local THRESH="carrier on ports in use"
 
     UP_COUNT=$(read_attr "$SYSFS_NET/$IFACE/carrier_up_count") || UP_COUNT="n/a"
-    COUNTS="carrier_up_count=$UP_COUNT carrier_down_count=$(read_attr "$SYSFS_NET/$IFACE/carrier_down_count" || printf 'n/a')"
+    DOWN_COUNT=$(read_attr "$SYSFS_NET/$IFACE/carrier_down_count") || DOWN_COUNT="n/a"
+    COUNTS="carrier_up_count=$UP_COUNT carrier_down_count=$DOWN_COUNT"
     OPER=$(port_oper "$IDX")
+    # Why the port is in use: judges a port without link below, and is a service-impact fact of
+    # every port in JSON (P3)
+    RC=0; port_use_scan "$IFACE" || RC=$?
+    USE="${USE_DETAILS[0]:-}"
+    (( RC == 2 )) && USE="$USE_NOTE"
+    link_state_metrics "$IDX" "$RC" "$OPER" "$UP_COUNT" "$DOWN_COUNT"
     if FLAGS=$(admin_down "$IFACE"); then
         add_record "port" "$IFACE" "$CHECK" "admin down" "" "$THRESH" "$SEV_NA" "flags=$FLAGS (IFF_UP clear)" \
-            "Administratively down: not judged" "$REF"
+            "Administratively down: not judged" "$REF" "$METRICS"
         return
     fi
     if port_link_up "$IDX"; then
         if [[ " ${OPER_BLOCKED[*]} " == *" $OPER "* ]]; then
             add_record "port" "$IFACE" "$CHECK" "carrier, $OPER" "" "$THRESH" "$SEV_WARN" "carrier=1 operstate=$OPER; $COUNTS" \
-                "Carrier is up but the port does not pass traffic (operstate $OPER: 802.1X authentication, lower device, or test mode)" "$REF"
+                "Carrier is up but the port does not pass traffic (operstate $OPER: 802.1X authentication, lower device, or test mode)" "$REF" "$METRICS"
         else
-            add_record "port" "$IFACE" "$CHECK" "up" "" "$THRESH" "$SEV_OK" "operstate=$OPER; $COUNTS" "" "$REF"
+            add_record "port" "$IFACE" "$CHECK" "up" "" "$THRESH" "$SEV_OK" "operstate=$OPER; $COUNTS" "" "$REF" "$METRICS"
         fi
         return
     fi
 
     EVIDENCE="operstate=$OPER; $COUNTS"
-    RC=0; USE=$(port_in_use "$IFACE") || RC=$?
     if (( RC != 0 )); then
         if [[ "$UP_COUNT" =~ ^[0-9]+$ ]] && (( UP_COUNT > SPARE_MAX_CARRIER_UP )); then
             add_record "port" "$IFACE" "$CHECK" "no link (had link)" "" "$THRESH" "$SEV_WARN" "$EVIDENCE; ${USE:-no master, no upper device, no VFs, no global address}" \
-                "Link came up $UP_COUNT times this boot and is down now: if the port is used outside the host's view (DPDK, passthrough, L2-only), check cable/optic and peer port; if it is spare, ignore (clears at reboot)" "$REF"
+                "Link came up $UP_COUNT times this boot and is down now: if the port is used outside the host's view (DPDK, passthrough, L2-only), check cable/optic and peer port; if it is spare, ignore (clears at reboot)" "$REF" "$METRICS"
         elif (( RC == 2 )); then
             add_record "port" "$IFACE" "$CHECK" "no link (use unknown)" "" "$THRESH" "$SEV_UNKNOWN" "$EVIDENCE; no master, no upper device, no VFs; $USE" \
-                "Cannot tell whether this port is a spare: install iproute2 (ip) so addresses can be checked" "$REF"
+                "Cannot tell whether this port is a spare: install iproute2 (ip) so addresses can be checked" "$REF" "$METRICS"
         else
             add_record "port" "$IFACE" "$CHECK" "no link (unused)" "" "$THRESH" "$SEV_NA" "$EVIDENCE; no master, no upper device, no VFs, no global address" \
-                "Spare port without link: not judged; cable it or ignore" "$REF"
+                "Spare port without link: not judged; cable it or ignore" "$REF" "$METRICS"
         fi
         return
     fi
 
     EVIDENCE+="; in use: $USE"
-    MASTER="${USE#master=}"
-    if [[ "$USE" == master=* && -e "$SYSFS_NET/$MASTER/bonding" ]]; then
+    MASTER="$USE_MASTER_BOND"
+    if [[ -n "$MASTER" ]]; then
         if FLAGS=$(admin_down "$MASTER"); then
             add_record "port" "$IFACE" "$CHECK" "no link" "" "$THRESH" "$SEV_NA" "$EVIDENCE; $MASTER flags=$FLAGS (IFF_UP clear)" \
-                "Bond $MASTER is administratively down: not judged" "$REF"
+                "Bond $MASTER is administratively down: not judged" "$REF" "$METRICS"
             return
         fi
         if MASTER_OPER=$(read_attr "$SYSFS_NET/$MASTER/operstate") && [[ "$MASTER_OPER" != "$OPER_UP" ]]; then
             add_record "port" "$IFACE" "$CHECK" "no link" "" "$THRESH" "$SEV_CRIT" "$EVIDENCE; $MASTER operstate=$MASTER_OPER" \
-                "Bond $MASTER is down with this member: traffic on it is lost. Check cables/optics and the peer switch ports" "$REF"
+                "Bond $MASTER is down with this member: traffic on it is lost. Check cables/optics and the peer switch ports" "$REF" "$METRICS"
             return
         fi
     fi
     add_record "port" "$IFACE" "$CHECK" "no link" "" "$THRESH" "$SEV_WARN" "$EVIDENCE" \
-        "Port in use has no link$([[ "$USE" == master=* ]] && printf ' (redundancy lost)'): check cable/optic, the peer port, and generic.link.lookback for when it dropped" "$REF"
+        "Port in use has no link$([[ "$USE" == master=* ]] && printf ' (redundancy lost)'): check cable/optic, the peer port, and generic.link.lookback for when it dropped" "$REF" "$METRICS"
 }
 
 # Count driver link-down messages per evaluated port in kernel log text on stdin (journalctl -o cat)
@@ -2134,8 +2456,12 @@ check_link_lookback() {
         EVIDENCE+="; boot was $(( UP_CS / CS_PER_MIN )) min ago"
     fi
 
+    local METRICS=""
+    metric_int link_downs "$N"
+    metric_int window_min "$LOOKBACK"
+    metric_int carrier_down_count "$TOTAL"
     if (( N == 0 )); then
-        add_record "port" "$IFACE" "$CHECK" "0" "link-down/${LOOKBACK}m" "$THRESH" "$SEV_OK" "$EVIDENCE" "" "$REF"
+        add_record "port" "$IFACE" "$CHECK" "0" "link-down/${LOOKBACK}m" "$THRESH" "$SEV_OK" "$EVIDENCE" "" "$REF" "$METRICS"
         return
     fi
     SEV="$SEV_WARN"
@@ -2146,7 +2472,7 @@ check_link_lookback() {
         EVIDENCE+="; carrier_changes +$DELTA in window"
         HINT="Repeated link-downs and still flapping: check cable/transceiver, peer port, and autonegotiation/FEC settings"
     fi
-    add_record "port" "$IFACE" "$CHECK" "$N" "link-down/${LOOKBACK}m" "$THRESH" "$SEV" "$EVIDENCE" "$HINT" "$REF"
+    add_record "port" "$IFACE" "$CHECK" "$N" "link-down/${LOOKBACK}m" "$THRESH" "$SEV" "$EVIDENCE" "$HINT" "$REF" "$METRICS"
 }
 
 # Look-back for every port, or one host record when the journal could not be read
@@ -2498,7 +2824,9 @@ render_json() {
         printf '"threshold": "%s", ' "$(json_escape "${REC_THRESHOLD[i]}")"
         printf '"evidence": "%s", ' "$(json_escape "${REC_EVIDENCE[i]}")"
         printf '"hint": "%s", ' "$(json_escape "${REC_HINT[i]}")"
-        printf '"ref": "%s"}' "$(json_escape "${REC_REF[i]}")"
+        printf '"ref": "%s"' "$(json_escape "${REC_REF[i]}")"
+        [[ -n "${REC_METRICS[i]:-}" ]] && printf ', "metrics": {%s}' "${REC_METRICS[i]}"
+        printf '}'
         SEP=","
     done
     [[ -n "$SEP" ]] && printf '\n  '

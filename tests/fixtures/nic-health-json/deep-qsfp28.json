@@ -1,0 +1,47 @@
+{
+  "schema_version": 2,
+  "tool": "nic-health.sh",
+  "version": "2.13.0",
+  "host": "server-01.example.net",
+  "collected_at": "2026-10-26T12:00:00Z",
+  "uptime_s": 1987654,
+  "boot_id": "3f2a6c1e-8b4d-4e7f-9a10-5c6d7e8f9a0b",
+  "level": "basic",
+  "lookback_min": 60,
+  "mode": "delta",
+  "interval_s": 5,
+  "elapsed_s": 5.01,
+  "capabilities": {"ethtool": true, "getopt": true, "readlink": true, "lspci": false, "devlink": true, "ip": false, "timeout": true, "journalctl": false, "mlxlink": false, "mstlink": true},
+  "summary": {"OK": 4, "WARN": 0, "CRIT": 0, "UNKNOWN": 0, "N/A": 0},
+  "verdict": "OK",
+  "exit_code": 0,
+  "asics": [
+    {
+      "id": "0000:01:00",
+      "model": "PCI 15b3:101f",
+      "driver": "mlx5_core",
+      "firmware": "1.2.3 (STUB)",
+      "ports": [{"iface": "eth0", "pci": "0000:01:00.0", "operstate": "up", "virtual_function": false}, {"iface": "eth1", "pci": "0000:01:00.1", "operstate": "up", "virtual_function": false}]
+    },
+    {
+      "id": "0000:02:00",
+      "model": "PCI 15b3:101f",
+      "driver": "sfc",
+      "firmware": "1.2.3 (STUB)",
+      "ports": [{"iface": "eth2", "pci": "0000:02:00.0", "operstate": "up", "virtual_function": false}]
+    },
+    {
+      "id": "0000:03:00",
+      "model": "PCI 15b3:101f",
+      "driver": "ixgbe",
+      "firmware": "1.2.3 (STUB)",
+      "ports": [{"iface": "eth3", "pci": "0000:03:00.0", "operstate": "up", "virtual_function": false}]
+    }
+  ],
+  "results": [
+    {"severity": "OK", "scope": "port", "target": "eth0", "check_id": "mlx5.deep.troubleshooting", "value": "opcode 0", "unit": "", "threshold": "0", "evidence": "mstlink: No issue was observed", "hint": "", "ref": "docs/design/nic-health.md §7", "metrics": {"status_opcode": 0, "recommendation": "No issue was observed"}},
+    {"severity": "OK", "scope": "port", "target": "eth0", "check_id": "mlx5.deep.fec", "value": "link: Standard RS-FEC - RS(528,514)", "unit": "", "threshold": "module FEC = link FEC", "evidence": "FEC=Standard RS-FEC - RS(528,514); module Compliance=100GBASE-SR4 or 25GBASE-SR", "hint": "", "ref": "docs/design/nic-health.md §7", "metrics": {"fec": "Standard RS-FEC - RS(528,514)", "compliance": "100GBASE-SR4 or 25GBASE-SR", "fec_mismatch": false}},
+    {"severity": "OK", "scope": "port", "target": "eth0", "check_id": "mlx5.deep.ber", "value": "effective ~0 raw 4E-18", "unit": "", "threshold": "effective<1E-12", "evidence": "Effective Physical BER=15E-255 Raw Physical BER=4E-18 Effective Physical Errors=0 Raw Physical Errors Per Lane=2,0,0,0 since 75862.1 min", "hint": "", "ref": "docs/design/nic-health.md §7", "metrics": {"effective_ber": 15e-255, "raw_ber": 4e-18, "effective_errors": 0, "raw_errors_per_lane": [2, 0, 0, 0], "since_clear_min": 75862.1}},
+    {"severity": "OK", "scope": "port", "target": "eth0", "check_id": "mlx5.deep.module", "value": "Temperature=52 Voltage=3295.3 Bias=7.408..7.592 Rx=-1.445..-0.372 Tx=1.189..1.386", "unit": "", "threshold": "within module ranges, no lane faults", "evidence": "Temperature [C]=52 [-8..93]; Voltage [mV]=3295.3 [2850..3700]; Bias Current [mA]=7.592,7.468,7.468,7.408 [3..13]; Rx Power Current [dBm]=-1.445,-0.405,-0.372,-1.284 [-14.089..3.398]; Tx Power Current [dBm]=1.386,1.189,1.339,1.278 [-10..5]; Tx Fault [per lane]=0,0,0,0; Rx LOS [per lane]=0,0,0,0; Tx CDR LOL [per lane]=0,0,0,0; Rx CDR LOL [per lane]=0,0,0,0; module DELLEMC FTLC9555REPM3-E5", "hint": "", "ref": "docs/design/nic-health.md §7", "metrics": {"temperature_c": 52, "temperature_c_low": -8, "temperature_c_high": 93, "voltage_mv": 3295.3, "voltage_mv_low": 2850, "voltage_mv_high": 3700, "bias_ma": 7.408, "bias_ma_lanes": [7.592, 7.468, 7.468, 7.408], "bias_ma_low": 3, "bias_ma_high": 13, "rx_dbm": -1.445, "rx_dbm_lanes": [-1.445, -0.405, -0.372, -1.284], "rx_dbm_low": -14.089, "rx_dbm_high": 3.398, "rx_dbm_judged": true, "tx_dbm": 1.189, "tx_dbm_lanes": [1.386, 1.189, 1.339, 1.278], "tx_dbm_low": -10, "tx_dbm_high": 5, "tx_fault": [0, 0, 0, 0], "rx_los": [0, 0, 0, 0], "tx_cdr_lol": [0, 0, 0, 0], "rx_cdr_lol": [0, 0, 0, 0], "vendor": "DELLEMC", "part_number": "FTLC9555REPM3-E5", "compliance": "100GBASE-SR4 or 25GBASE-SR"}}
+  ]
+}

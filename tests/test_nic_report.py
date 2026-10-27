@@ -4,6 +4,7 @@
 Fixtures are generated in a temporary directory: fictional site/host names, evidence strings in the
 exact formats nic-health writes. Run: python3 -m unittest discover -s tests -p 'test_nic_report.py'
 """
+import collections
 import contextlib
 import importlib.util
 import io
@@ -169,6 +170,7 @@ class TestExtractors(unittest.TestCase):
 
     def test_carrier_and_aer(self):
         self.assertEqual(nr.extract_carrier_changes("carrier_changes=215125 (since driver load)"), 215125)
+        self.assertEqual(nr.extract_carrier_changes("carrier_changes=7"), 7)
         self.assertEqual(nr.extract_aer_totals("totals since boot: cor=1 nonfatal=0 fatal=2"), {"cor": 1, "nonfatal": 0, "fatal": 2})
 
     def test_ber(self):
@@ -487,6 +489,31 @@ class TestMalformedInput(unittest.TestCase):
         self.assertEqual(len(res["coverage"]["not_collected"]), 4)
         self.assertTrue(any("missing or malformed result file" in c for c in res["coverage"]["caveats"]))
 
+    def test_invalid_utf8_is_replaced_not_fatal(self):
+        doc = host_doc("acme-s1-ctrl2d-01", "CRIT", extra=[rec("CRIT", "port", "eth0", "mlx5.phy.errors", "x", EV_PHY)])
+        d = self.sweep(docs={"acme-s1-ctrl2d-01": doc})
+        node = os.path.join(d, "nodes", "acme-s1-ctrl2d-01.json")
+        with open(node, "rb") as fh:
+            raw = fh.read()
+        with open(node, "wb") as fh:                          # a module EEPROM string with one bad byte
+            fh.write(raw.replace(b"VENDOR PART25", b"VEND\xffR PART25"))
+        res = nr.analyse([nr.finalize(nr.load_sweep_dir(d), None)], [])
+        self.assertEqual(res["coverage"]["not_collected"], [])
+        self.assertEqual([r["severity"] for r in res["findings"]], ["CRIT"])     # the CRIT stays visible
+        self.assertIn("1 host file(s) contained invalid UTF-8, replaced with U+FFFD: SITE1/acme-s1-ctrl2d-01.",
+                      res["coverage"]["caveats"])
+        with self.assertRaises(nr.InputError):                # other inputs stay strict
+            nr.read_json(node)
+
+    def test_node_file_size_limit(self):
+        d = self.sweep()
+        node = os.path.join(d, "nodes", "acme-s1-ctrl2d-01.json")
+        with open(node, "ab") as fh:
+            fh.write(b" " * (nr.NODE_MAX_BYTES + 1))           # whitespace: valid JSON, but too large
+        host = nr.load_sweep_dir(d).hosts["acme-s1-ctrl2d-01"]
+        self.assertEqual(host.status, nr.ST_UNREADABLE)
+        self.assertIn("larger than 32768 KiB", host.problem)
+
     def test_odd_field_types_do_not_crash(self):
         doc = host_doc("acme-s1-ctrl2d-01", "OK")
         doc["collected_at"], doc["interval_s"], doc["version"] = 20261026, "30", ["x"]
@@ -645,10 +672,12 @@ class TestRealSamples(unittest.TestCase):
         res = nr.analyse([nr.finalize(nr.load_sweep_dir(d), None)], [])
         g = res["coverage"]["groups"][0]
         self.assertEqual((g["asics"], g["ports"], g["fec"]), (4, 8, {"No FEC": 8}))
-        # captured before generic.link.state existed: ports from link flaps, link counts unknown
-        self.assertIsNone(g["ports_with_link"])
-        self.assertEqual(g["hosts_without_link_state"], ["server-01"])
-        self.assertTrue(any("no link state" in c for c in res["coverage"]["caveats"]))
+        self.assertEqual((g["ports_with_link"], g["hosts_without_link_state"]), (8, []))
+        self.assertEqual((g["hosts_with_typed_metrics"], g["hosts_with_impact_facts"]), (1, 1))
+        facts = {p["port"]: p.get("service") for p in nr.port_facts([nr.finalize(nr.load_sweep_dir(d), None)])}
+        self.assertEqual(facts["ens13f0np0"], {"in_use": True, "in_use_reasons": ["bond"], "bond": "bond0",
+                                               "bond_link_failures": 2, "has_traffic": True})
+        self.assertEqual(facts["ens4f1np1"], {"in_use": False, "in_use_reasons": [], "has_traffic": False})
         self.assertEqual(res["verdicts"][0]["by_verdict"]["CRIT"], 1)
         self.assertEqual(len(res["findings"]), 20)                       # 16 WARN + 4 CRIT
         recs = [r for r in nr.load_sweep_dir(d).hosts["server-01"].raw_results]
@@ -1244,6 +1273,19 @@ class TestUntrustedText(Phase5Base):
         self.assertIsNone(nr.CONTROL_RE.search(md))
         self.assertIn("`eth0`", md)
 
+    def test_no_links_from_host_text(self):
+        self.assertEqual(nr.md_inline("see [here](http://evil.example) and ![i](x) or [a][b]"),
+                         "see [here］(http://evil.example) and ![i］(x) or [a］[b]")
+        self.assertEqual(nr.md_cell("[x](y)"), "[x］(y)")
+        self.assertEqual(nr.md_inline("Rx Power Current [dBm]=-0.1 [-11.3..3.4]"), "Rx Power Current [dBm]=-0.1 [-11.3..3.4]")
+        self.assertEqual(nr.md_inline("a\u200eb\u200fc\u061cd\u2028e\u2029f\ufeffg\u2060h"), "abcde fgh".replace(" ", ""))
+        evil = [rec("WARN", "port", "eth0", "x.check", "[x](http://evil.example)", "go [here](javascript:alert(1))", "")]
+        self.site("SITE1", [("acme-s1-stop1d-01", [{"port": "eth0", "rx": -0.5}], {"extra": evil})])
+        md, _ = self.report(["-R", self.root])
+        page, _ = self.report(["-R", self.root], "html")
+        self.assertNotRegex(md, r"\]\(")
+        self.assertNotIn("<a ", page)
+
     def test_rate_display(self):
         self.assertEqual([nr._rate(v) for v in (None, 0.00412, 3.14159, 99.94, 100.0, 412000.0)],
                          [None, "0.00412", "3.14", "99.9", "100", "412,000"])
@@ -1641,6 +1683,363 @@ class TestPDF(Phase5Base):
         png = os.path.join(EXAMPLE_THEME, "logo-light.png")
         d = self.theme_dir({"logos": {"cover": "file.svg", "header": "file.svg"}}, {"file.svg": FILE_SVG.format(png)})
         self.assertEqual(images("-T", d), base)                              # file:// inside the SVG not loaded
+
+
+# --------------------------------------------------------------------------------- Phase 6: typed metrics (P2/P3)
+
+def typed_port_rows(port, impact=None, **p):
+    """port_rows with the typed metrics nic-health (JSON schema 2) writes next to that evidence."""
+    rows = port_rows(port, **p)
+    rx, tx, part = p.get("rx"), p.get("tx", -1.0), p.get("part", "VENDOR PART25")
+    for r in rows:
+        cid = r["check_id"]
+        if cid == "generic.link.state":
+            r["metrics"] = {"carrier": p.get("link", True), "operstate": "up", **(impact or {})}
+        elif cid == "generic.link.flaps":
+            r["metrics"] = {"carrier_changes": {"total": p.get("carrier", 1), "delta": 0}}
+        elif cid == "mlx5.deep.module":
+            lanes = list(rx) if isinstance(rx, (list, tuple)) else None
+            m = {"temperature_c": p.get("temp", 40), "temperature_c_low": -5, "temperature_c_high": p.get("temp_high", 90),
+                 "rx_dbm": min(lanes) if lanes else rx, "rx_dbm_low": p.get("low", -11.3), "rx_dbm_high": 3.398,
+                 "rx_dbm_judged": p.get("judged", True), "tx_dbm": tx, "tx_dbm_low": -9.4, "tx_dbm_high": 3.398, "tx_fault": [0],
+                 "vendor": part.split(" ", 1)[0], "part_number": part.split(" ", 1)[-1]}
+            if lanes:
+                m["rx_dbm_lanes"] = lanes
+            r["metrics"] = m
+        elif cid == "mlx5.deep.fec":
+            r["metrics"] = {"fec": "Firecode FEC", "compliance": p.get("comp", "100GBASE-SR4 or 25GBASE-SR"), "fec_mismatch": False}
+        elif cid == "mlx5.phy.errors":
+            r["metrics"] = {n: {"total": p.get("sym") or 0 if n == "rx_symbol_err_phy" else 0, "delta": 0}
+                            for n in ("rx_symbol_err_phy", "rx_pcs_symbol_err_phy", "rx_corrected_bits_phy", "rx_err_lane_0_phy")}
+        elif cid == "mlx5.nic.discards":
+            r["metrics"] = {"rx_discards_phy": {"total": p["discards"], "delta": 1}, "tx_discards_phy": {"total": 0, "delta": 0}}
+    return rows
+
+
+def strip_metrics(doc, keep=()):
+    """A copy of a nic-health document without 'metrics', except on the check_ids in keep."""
+    doc = json.loads(json.dumps(doc))
+    for r in doc["results"]:
+        if r["check_id"] not in keep:
+            r.pop("metrics", None)
+    return doc
+
+
+BOND_MEMBER = {"in_use": True, "in_use_reasons": ["bond"], "bond": "bond0", "bond_link_failures": 3,
+               "rx_bytes": {"total": 9000, "delta": 500}, "tx_bytes": {"total": 10, "delta": 0}}
+
+
+class TestTypedMetrics(unittest.TestCase):
+    """metrics_for prefers nic-health's typed metrics, value by value, and falls back to the evidence."""
+
+    def test_typed_values_are_preferred(self):
+        typed = {"rx_dbm": -9.5, "rx_dbm_low": -12.0, "rx_dbm_high": 3.0, "rx_dbm_judged": True,
+                 "vendor": "ACME", "part_number": "X1"}
+        m = nr.metrics_for("mlx5.deep.module", "", EV_MODULE_25G, typed)
+        self.assertEqual(m["rx"], {"dbm": -9.5, "lanes": None, "low": -12.0, "high": 3.0, "judged": True})
+        self.assertEqual(m["part"], "ACME X1")
+        self.assertEqual(m["tx"], nr.extract_tx_dbm(EV_MODULE_25G))                  # not typed: from the evidence
+        lanes = nr.metrics_for("mlx5.deep.module", "", "", {"rx_dbm": -2, "rx_dbm_lanes": [-1, -2.5, 0], "rx_dbm_low": -14,
+                                                             "rx_dbm_high": 3, "rx_dbm_judged": False})["rx"]
+        self.assertEqual(lanes, {"dbm": -2.5, "lanes": [-1.0, -2.5, 0.0], "low": -14.0, "high": 3.0, "judged": False})
+        self.assertEqual(nr.metrics_for("mlx5.deep.ber", "", EV_BER, {"effective_ber": 15e-255, "raw_ber": 2e-8})["ber"],
+                         {"effective": 0.0, "raw": 2e-8, "since_min": None})
+        self.assertEqual(nr.metrics_for("generic.pcie.aer", "", "", {"cor": {"total": 5, "delta": 1}})["aer"],
+                         {"cor": 5, "nonfatal": 0, "fatal": 0})
+        self.assertEqual(nr.metrics_for("mlx5.deep.fec", "link: X", "FEC=X; module Compliance=Y", {"fec": "RS-FEC"}),
+                         {"fec": "RS-FEC", "compliance": "Y"})
+
+    def test_counters_follow_the_evidence_rules(self):
+        zeros = {"rx_discards_phy": {"total": 0, "delta": 0}, "tx_discards_phy": {"total": 0, "delta": 0}}
+        self.assertEqual(nr.metrics_for("mlx5.nic.discards", "", "", zeros)["discards"], {"total": 0, "delta": 0})
+        # a zero next to a counter that is not: not listed in the evidence, so not a value either
+        tx_only = dict(zeros, tx_discards_phy={"total": 5570, "delta": 1})
+        self.assertNotIn("discards", nr.metrics_for("mlx5.nic.discards", "", "tx_discards_phy=5570 (+1)", tx_only))
+        # rx_bits_phy (the BER denominator) never counts against "all counters are 0"
+        phy = {"rx_symbol_err_phy": {"total": 0}, "rx_bits_phy": {"total": 10 ** 15}}
+        self.assertEqual(nr.metrics_for("mlx5.phy.errors", "", "", phy)["symbol_errors"], {"total": 0, "delta": 0})
+        absolute = {"rx_symbol_err_phy": {"total": 58}}
+        self.assertEqual(nr.metrics_for("mlx5.phy.errors", "", "", absolute)["symbol_errors"], {"total": 58, "delta": None})
+        self.assertEqual(nr.metrics_for("generic.link.flaps", "", "", {"carrier_changes": {"total": 215788, "delta": 6}}),
+                         {"carrier_changes": 215788})
+
+    def test_bad_types_fall_back_to_the_evidence(self):
+        ev_rx = nr.extract_rx_dbm(EV_MODULE_25G)
+        for typed in ({"rx_dbm": "-9.5", "rx_dbm_low": -12, "rx_dbm_high": 3},          # string, not a number
+                      {"rx_dbm": True, "rx_dbm_low": -12, "rx_dbm_high": 3},            # bool is not a number
+                      {"rx_dbm": -9.5, "rx_dbm_high": 3},                               # range incomplete
+                      {"rx_dbm": -9.5, "rx_dbm_low": -12, "rx_dbm_high": 3, "rx_dbm_judged": "yes"},
+                      {"rx_dbm": -9.5, "rx_dbm_low": -12, "rx_dbm_high": 3, "rx_dbm_lanes": [-1, "x"]},
+                      {"rx_dbm": -9.5, "rx_dbm_low": -12, "rx_dbm_high": 3, "rx_dbm_lanes": []},
+                      {"rx_dbm": 10 ** 400, "rx_dbm_low": -12, "rx_dbm_high": 3},       # float() would overflow
+                      {"rx_dbm": float("inf"), "rx_dbm_low": -12, "rx_dbm_high": 3}):
+            self.assertEqual(nr.metrics_for("mlx5.deep.module", "", EV_MODULE_25G, typed)["rx"], ev_rx, typed)
+        ev_sym = nr.extract_symbol_errors(EV_PHY)
+        for typed in ({"rx_symbol_err_phy": {"total": -1}}, {"rx_symbol_err_phy": {"total": True}},
+                      {"rx_symbol_err_phy": {"total": 10 ** 20}}, {"rx_symbol_err_phy": {"total": 5, "delta": "1"}},
+                      {"rx_symbol_err_phy": 943}, {"rx_symbol_err_phy": {"total": 0}, "rx_pcs_symbol_err_phy": {"total": "x"}}):
+            self.assertEqual(nr.metrics_for("mlx5.phy.errors", "", EV_PHY, typed)["symbol_errors"], ev_sym, typed)
+        for typed in (None, [], "metrics", 7, {"effective_ber": "3E-9"}, {"effective_ber": None}):
+            self.assertEqual(nr.metrics_for("mlx5.deep.ber", "", EV_BER, typed)["ber"], nr.extract_ber(EV_BER), typed)
+        self.assertEqual(nr.metrics_for("generic.pcie.aer", "", "totals since boot: cor=1 nonfatal=0 fatal=0",
+                                        {"cor": {"total": "1"}})["aer"], {"cor": 1, "nonfatal": 0, "fatal": 0})
+        self.assertEqual(nr.metrics_for("mlx5.deep.fec", "link: X", "", {"fec": 5})["fec"], "X")
+
+    def test_service_impact_facts_are_validated(self):
+        m = nr.metrics_for("generic.link.state", "up", "operstate=up", dict(BOND_MEMBER, carrier=True))
+        self.assertEqual(m, BOND_MEMBER)
+        odd = {"in_use": "yes", "in_use_reasons": ["bond", 1], "bond": "", "bond_link_failures": -3, "rx_bytes": 1.5,
+               "tx_bytes": {"total": True}, "in_use_reasons_complete": "no"}
+        self.assertEqual(nr.metrics_for("generic.link.state", "up", "", odd), {})
+        self.assertEqual(nr.metrics_for("generic.link.state", "up", "operstate=up; in use: master=bond0"), {})
+        # Hostile host text: reasons only from the known tokens, bond only an interface name
+        for reasons in (["bond", "[click](http://x)"], ["bond", "Bond"], [""], "bond"):
+            self.assertNotIn("in_use_reasons", nr.metrics_for("generic.link.state", "", "", {"in_use_reasons": reasons}), reasons)
+        self.assertEqual(nr.metrics_for("generic.link.state", "", "", {"in_use_reasons": ["bond", "upper", "bond"]}),
+                         {"in_use_reasons": ["bond", "upper"]})
+        for bond in ("bond 0", "a" * 16, "../x", "b:1", "b\u202ex", "b\x07", "b\nx", "", 7):
+            self.assertNotIn("bond", nr.metrics_for("generic.link.state", "", "", {"bond": bond}), repr(bond))
+        self.assertEqual(nr.metrics_for("generic.link.state", "", "", {"bond": "bond0.100-a_b"}), {"bond": "bond0.100-a_b"})
+        self.assertEqual(nr.metrics_for("generic.link.state", "", "", {"in_use_reasons_complete": False}),
+                         {"in_use_reasons_complete": False})
+        # Traffic only from the window: totals since boot grow with LLDP and ARP alone
+        self.assertEqual(nr.impact_facts({"rx_bytes": {"total": 9, "delta": 0}, "tx_bytes": {"total": 9, "delta": 0}}),
+                         {"has_traffic": False})
+        self.assertEqual(nr.impact_facts({"rx_bytes": {"total": 9, "delta": 0}, "tx_bytes": {"total": 9, "delta": 4}}),
+                         {"has_traffic": True})
+        self.assertEqual(nr.impact_facts({"rx_bytes": {"total": 10 ** 12}, "tx_bytes": {"total": 10 ** 12}}), {})
+        # A reset counter (no delta) leaves its direction unknown: idle only when both directions were seen idle
+        self.assertEqual(nr.impact_facts({"rx_bytes": {"total": 9}, "tx_bytes": {"total": 9, "delta": 0}}), {})
+        self.assertEqual(nr.impact_facts({"rx_bytes": {"total": 9}, "tx_bytes": {"total": 9, "delta": 5}}),
+                         {"has_traffic": True})
+        self.assertEqual(nr.impact_facts({}), {})
+        self.assertEqual(nr.service_label({"bond": "bond0", "in_use": True, "bond_link_failures": 1200}),
+                         "bond0 member, in use, 1,200 bond link failures")
+        self.assertEqual(nr.service_label({"in_use": False, "has_traffic": False}), "not in use")
+
+    def test_judged_without_typed_flag_comes_from_the_evidence(self):
+        typed = {"rx_dbm": -40, "rx_dbm_low": -11.308, "rx_dbm_high": 3.398}           # no rx_dbm_judged
+        self.assertFalse(nr.metrics_for("mlx5.deep.module", "", EV_MODULE_DARK, typed)["rx"]["judged"])
+        self.assertTrue(nr.metrics_for("mlx5.deep.module", "", EV_MODULE_25G, typed)["rx"]["judged"])
+        self.assertTrue(nr.metrics_for("mlx5.deep.module", "", "", typed)["rx"]["judged"])   # nothing says otherwise
+
+    def test_flap_extractor_reads_a_window_with_flaps(self):
+        self.assertEqual(nr.extract_carrier_changes("carrier_changes T0=215782 T1=215788"), 215788)
+        self.assertIsNone(nr.extract_carrier_changes("carrier_changes decreased (T0=5 T1=3)"))
+
+
+NH_FIXTURES = os.path.join(REPO, "tests", "fixtures", "nic-health-json")
+
+
+def drop_impact(v):
+    """Remove the service-impact facts (P3) and the coverage counts of typed hosts from a report result, in place."""
+    if isinstance(v, dict):
+        v.pop("service", None)
+        v.pop("hosts_with_typed_metrics", None)
+        v.pop("hosts_with_impact_facts", None)
+        if v.get("check_id") == nr.LINK_STATE and isinstance(v.get("metrics"), dict):
+            for k in nr.IMPACT_KEYS:
+                v["metrics"].pop(k, None)
+        for x in v.values():
+            drop_impact(x)
+    elif isinstance(v, list):
+        for x in v:
+            drop_impact(x)
+    return v
+
+
+class TestRealNicHealthOutput(unittest.TestCase):
+    """nic-health's own JSON (fixtures written by its test suite from mocks; make fixtures regenerates them):
+    nic-report reads the same values from typed metrics as from the evidence, for every record."""
+
+    def docs(self):
+        names = sorted(f for f in os.listdir(NH_FIXTURES) if f.endswith(".json"))
+        self.assertGreaterEqual(len(names), 10)
+        for name in names:
+            with open(os.path.join(NH_FIXTURES, name), encoding="utf-8") as fh:
+                yield name, json.load(fh)
+
+    def test_typed_equals_evidence_for_every_record(self):
+        checked = collections.Counter()
+        for name, doc in self.docs():
+            self.assertEqual(doc["schema_version"], 2, name)
+            for r in doc["results"]:
+                if "metrics" not in r:
+                    continue
+                typed = nr.metrics_for(r["check_id"], r["value"], r["evidence"], r["metrics"])
+                evidence = nr.metrics_for(r["check_id"], r["value"], r["evidence"])
+                for k in nr.IMPACT_KEYS:
+                    typed.pop(k, None)
+                self.assertEqual(json.dumps(typed, sort_keys=True), json.dumps(evidence, sort_keys=True),
+                                 f"{name}: {r['check_id']} {r['target']}")
+                checked[r["check_id"]] += 1
+        # every check whose evidence nic-report parses is covered
+        for cid in ("mlx5.deep.module", "mlx5.phy.errors", "mlx5.frame.errors", "mlx5.nic.discards", "generic.link.flaps",
+                    "generic.pcie.aer", "mlx5.deep.ber", "mlx5.deep.fec"):
+            self.assertGreater(checked[cid], 0, cid)
+
+    def test_service_impact_from_real_output(self):
+        doc = dict(self.docs())["p3-link-state.json"]
+        facts = {r["target"]: nr.impact_facts(nr.metrics_for(r["check_id"], r["value"], r["evidence"], r["metrics"]))
+                 for r in doc["results"]}
+        self.assertEqual(facts["eth0"]["bond"], "bond7")
+        self.assertEqual(facts["eth1"]["bond_link_failures"], 3)
+        self.assertEqual(facts["eth2"]["in_use"], False)
+        self.assertEqual(facts["eth3"]["in_use_reasons"], ["bridge", "upper", "sriov_vfs", "global_address"])
+
+    def test_reports_identical_without_metrics(self):
+        for name, doc in self.docs():
+            with tempfile.TemporaryDirectory() as tmp:
+                res = []
+                for i, d in enumerate((doc, strip_metrics(doc))):
+                    path = write_sweep(os.path.join(tmp, str(i)), "SITE1", "20261026T120000Z", [("server-01", "ok", d["verdict"], d)])
+                    res.append(drop_impact(nr.analyse([nr.finalize(nr.load_sweep_dir(path), None)], [])))
+                self.assertEqual(json.dumps(res[0], sort_keys=True), json.dumps(res[1], sort_keys=True), name)
+
+
+class TestServiceImpactAndFidelity(Phase5Base):
+    """P3 facts in the report, and the Phase 6 exit criterion: the report is identical with and without
+    typed metrics (P2) on the same sweep; only the coverage line saying so differs."""
+
+    NOW = nr.datetime.datetime(2026, 10, 26, 12, 0, tzinfo=nr.datetime.timezone.utc)
+
+    def typed_doc(self, host, ports, extra=()):
+        doc = ports_doc(host, [])
+        doc["schema_version"] = 2
+        for r in doc["results"]:
+            if r["check_id"] == "generic.pcie.link":
+                r["metrics"] = {"speed_gts": 16.0, "width": 8, "slot_limited": False, "below_capability": False}
+        for p in ports:
+            doc["results"] += typed_port_rows(**p)
+        doc["results"] += list(extra)              # after the port rows: a record here replaces the port's own
+        return doc
+
+    def fixture(self, transform=lambda doc: doc):
+        """Two sites, roles, a weak bond-member port with growing errors, flaps, discards and PCIe. Always at the
+        same path (the JSON report names it), so outputs of two fixtures compare as they are."""
+        root = os.path.join(self.tmp.name, "sweeps")
+        shutil.rmtree(root, ignore_errors=True)
+        pcie = dict(rec("WARN", "asic", "0000:04:00", "generic.pcie.link", "8.0 GT/s x8", "current_link_speed=8.0 GT/s PCIe",
+                        threshold="16.0 GT/s x8"), metrics={"speed_gts": 8.0, "width": 8, "expected_speed_gts": 16.0,
+                                                            "slot_limited": False, "below_capability": True})
+        aer = dict(rec("WARN", "asic", "0000:01:00", "generic.pcie.aer", "cor=+2 nonfatal=+0 fatal=+0",
+                       "totals since boot: cor=7 nonfatal=0 fatal=0"),
+                   metrics={"cor": {"total": 7, "delta": 2}, "nonfatal": {"total": 0, "delta": 0}, "fatal": {"total": 0, "delta": 0}})
+        crit = [dict(rec("CRIT", "port", "eth0", "mlx5.phy.errors", "rx_symbol_err_phy=+943", EV_PHY, "Clean the optic"),
+                     metrics={"rx_symbol_err_phy": {"total": 414877072, "delta": 943},
+                              "rx_pcs_symbol_err_phy": {"total": 414877072, "delta": 943},
+                              "rx_corrected_bits_phy": {"total": 2379976318, "delta": 9297}}),
+                dict(rec("WARN", "port", "eth0", "mlx5.deep.ber", "effective 3E-9", EV_BER, "BER"),
+                     metrics={"effective_ber": 3e-9, "raw_ber": 7e-7, "effective_errors": 44030843, "since_clear_min": 9387.7}),
+                dict(rec("WARN", "port", "eth1", "generic.link.flaps", "+6", "carrier_changes T0=215782 T1=215788"),
+                     metrics={"carrier_changes": {"total": 215788, "delta": 6}}),
+                dict(rec("WARN", "port", "eth2", "mlx5.nic.discards", "tx_discards_phy=+1", "tx_discards_phy=5570 (+1)"),
+                     metrics={"rx_discards_phy": {"total": 0, "delta": 0}, "tx_discards_phy": {"total": 5570, "delta": 1}})]
+        for site, weak in (("SITE1", -8.5), ("SITE2", -8.0)):
+            hosts = []
+            for i in range(1, 5):
+                ports = [{"port": f"eth{j}", "rx": round(-0.4 + 0.05 * ((i + j) % 5), 3),
+                          "impact": dict(BOND_MEMBER, bond="bond0" if j < 2 else "bond1")} for j in range(4)]
+                extra = [pcie, aer] if i < 3 else []
+                if i == 1:
+                    ports[0].update(rx=weak, sym=414877072)
+                    ports[3].update(impact={"in_use": False, "in_use_reasons": [], "rx_bytes": {"total": 2048, "delta": 0},
+                                            "tx_bytes": {"total": 900, "delta": 0}},
+                                    discards=12818188)
+                    extra = extra + crit
+                hosts.append((f"acme-{site.lower()}-stop1d-0{i}", self.typed_doc(f"acme-{site.lower()}-stop1d-0{i}", ports, extra)))
+            write_sweep(root, site, "20261026T100000Z", [(h, "ok", "CRIT", transform(doc)) for h, doc in hosts])
+        return root
+
+    def outputs(self, root, *argv):
+        args = nr.parse_args(["-R", root, "-r", ROLE_RE, *argv])
+        sites, missing = nr.load_selection(args)
+        res = nr.analyse(sites, missing, args, nr.load_baseline_sites(args, sites))
+        return (nr.render_md(res, sites, missing, args, self.NOW), nr.render_json(res, sites, missing, args, self.NOW), res)
+
+    def test_findings_and_lists_carry_service_impact(self):
+        md, js, res = self.outputs(self.fixture())
+        self.assertIn("- **CRIT** `eth0` `mlx5.phy.errors`: rx_symbol_err_phy=+943 (bond0 member, in use, 3 bond link failures)", md)
+        self.assertIn("- **WARN** `eth2` `mlx5.nic.discards`: tx_discards_phy=+1 (bond1 member, in use, 3 bond link failures)", md)
+        self.assertIn("`0000:04:00` `generic.pcie.link`: 8.0 GT/s x8\n", md)               # not a port: no facts
+        f = next(r for r in res["findings"] if r["check_id"] == "mlx5.phy.errors")
+        self.assertEqual(f["service"], {"in_use": True, "in_use_reasons": ["bond"], "bond": "bond0",
+                                        "bond_link_failures": 3, "has_traffic": True})
+        out = res["baselines"]["rx_outliers"][0]
+        self.assertEqual((out["port"], out["service"]["bond"]), ("eth0", "bond0"))
+        unused = next(d for d in res["baselines"]["discards"] if d["port"] == "eth3")
+        self.assertEqual(unused["service"], {"in_use": False, "in_use_reasons": [], "has_traffic": False})
+        self.assertEqual([g["hosts_with_typed_metrics"] for g in res["coverage"]["groups"]], [4, 4])
+        self.assertEqual([g["hosts_with_impact_facts"] for g in res["coverage"]["groups"]], [4, 4])
+        self.assertIn("| Typed metrics / impact facts | 4 of 4 / 4 | 4 of 4 / 4 |", md)
+        self.assertIn('"service": {', js)
+        self.assertEqual([f["carrier_changes"] for f in res["baselines"]["flaps"]], [215788, 215788])
+
+    def test_report_identical_without_p2(self):
+        """Exit criterion (design §11 Phase 6): typed metrics change nothing but the coverage line."""
+        full = self.outputs(self.fixture())
+        p2_stripped = self.outputs(self.fixture(lambda d: strip_metrics(d, keep=(nr.LINK_STATE,))))
+        for fmt, a, b in (("md", full[0], p2_stripped[0]), ("json", full[1], p2_stripped[1])):
+            self.assertEqual(a, b, fmt)                                                 # P3 kept: byte-identical
+        for argv in ((), ("-s", "SITE1")):
+            md, js, _ = self.outputs(self.fixture(), *argv)
+            md0, js0, _ = self.outputs(self.fixture(strip_metrics), *argv)
+            # Markdown: the coverage line, and the service-impact note on port findings (P3), nothing else
+            a, b = md.splitlines(), md0.splitlines()
+            self.assertEqual(len(a), len(b))
+            changed = [(x, y) for x, y in zip(a, b) if x != y]
+            cov = [(x, y) for x, y in changed if x.startswith("| Typed metrics / impact facts |")]
+            self.assertEqual(len(cov), 1, argv)
+            self.assertNotIn(" 4 of 4 ", cov[0][1])
+            self.assertRegex(cov[0][1], r"^\| Typed metrics / impact facts (\| 0 of 4 / 0 )+\|$")
+            notes = [(x, y) for x, y in changed if (x, y) not in cov]
+            self.assertTrue(notes)
+            labels = {f" ({b} member, in use, 3 bond link failures)" for b in ("bond0", "bond1")} | {" (not in use)"}
+            for x, y in notes:
+                self.assertIn(x[len(y):], labels, (x, y))
+                self.assertTrue(x.startswith(y), (x, y))
+            # JSON: the same, plus the facts themselves where ports appear
+            a, b = json.loads(js), json.loads(js0)
+            for doc, typed in ((a, 4), (b, 0)):
+                self.assertEqual({(g["hosts_with_typed_metrics"], g["hosts_with_impact_facts"]) for g in doc["coverage"]["groups"]},
+                                 {(typed, typed)})
+            self.assertIn('"service"', js)
+            self.assertNotIn('"service"', js0)
+            self.assertEqual(drop_impact(a), drop_impact(b), argv)
+
+    def test_mixed_hosts_caveat(self):
+        def half(doc):
+            return strip_metrics(doc) if doc["host"].endswith(("-03", "-04")) else doc
+        _, _, res = self.outputs(self.fixture(half))
+        self.assertIn("Typed metrics from 4 of 8 collected host(s); the others' values were read from evidence text "
+                      "(nic-health without typed metrics, or CSV import).", res["coverage"]["caveats"])
+        _, _, res = self.outputs(self.fixture())
+        self.assertFalse([c for c in res["coverage"]["caveats"] if c.startswith("Typed metrics")])
+
+    def test_bad_metrics_never_crash_the_report(self):
+        def vandalize(doc):
+            for n, r in enumerate(doc["results"]):
+                r["metrics"] = [None, "x", 7, [], {"in_use": "x", "rx_dbm": "y", "carrier_changes": {"total": -1}}][n % 5]
+            return doc
+        md, js, _ = self.outputs(self.fixture(vandalize))
+        md0, js0, _ = self.outputs(self.fixture(strip_metrics))
+        # Every value falls back to the evidence: only the count of hosts with a metrics object differs
+        self.assertEqual([x for x in md.splitlines() if "Typed metrics" not in x],
+                         [x for x in md0.splitlines() if "Typed metrics" not in x])
+
+    def test_sample_with_and_without_metrics(self):
+        with open(os.path.join(REPO, "samples", "nic-health-json-deep.json"), encoding="utf-8") as fh:
+            doc = json.load(fh)
+        self.assertEqual(doc["schema_version"], 2)
+        self.assertTrue(any("metrics" in r for r in doc["results"]))
+        res = []
+        for d in (doc, strip_metrics(doc)):
+            root = os.path.join(self.tmp.name, f"s{len(res)}")
+            path = write_sweep(root, "SITE1", "20261020T174609Z", [("server-01", "ok", d["verdict"], d)])
+            res.append(nr.analyse([nr.finalize(nr.load_sweep_dir(path), None)], []))
+        for r, typed in zip(res, (1, 0)):
+            self.assertEqual(r["coverage"]["groups"][0]["hosts_with_typed_metrics"], typed)
+        self.assertEqual(json.dumps(drop_impact(res[0]), sort_keys=True), json.dumps(drop_impact(res[1]), sort_keys=True))
 
 
 if __name__ == "__main__":

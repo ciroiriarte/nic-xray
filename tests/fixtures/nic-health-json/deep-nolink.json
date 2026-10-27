@@ -1,0 +1,47 @@
+{
+  "schema_version": 2,
+  "tool": "nic-health.sh",
+  "version": "2.13.0",
+  "host": "server-01.example.net",
+  "collected_at": "2026-10-26T12:00:00Z",
+  "uptime_s": 1987654,
+  "boot_id": "3f2a6c1e-8b4d-4e7f-9a10-5c6d7e8f9a0b",
+  "level": "basic",
+  "lookback_min": 60,
+  "mode": "delta",
+  "interval_s": 5,
+  "elapsed_s": 5.01,
+  "capabilities": {"ethtool": true, "getopt": true, "readlink": true, "lspci": false, "devlink": true, "ip": false, "timeout": true, "journalctl": false, "mlxlink": true, "mstlink": true},
+  "summary": {"OK": 1, "WARN": 0, "CRIT": 0, "UNKNOWN": 0, "N/A": 3},
+  "verdict": "OK",
+  "exit_code": 0,
+  "asics": [
+    {
+      "id": "0000:01:00",
+      "model": "PCI 15b3:101f",
+      "driver": "mlx5_core",
+      "firmware": "1.2.3 (STUB)",
+      "ports": [{"iface": "eth0", "pci": "0000:01:00.0", "operstate": "up", "virtual_function": false}, {"iface": "eth1", "pci": "0000:01:00.1", "operstate": "up", "virtual_function": false}]
+    },
+    {
+      "id": "0000:02:00",
+      "model": "PCI 15b3:101f",
+      "driver": "sfc",
+      "firmware": "1.2.3 (STUB)",
+      "ports": [{"iface": "eth2", "pci": "0000:02:00.0", "operstate": "up", "virtual_function": false}]
+    },
+    {
+      "id": "0000:03:00",
+      "model": "PCI 15b3:101f",
+      "driver": "ixgbe",
+      "firmware": "1.2.3 (STUB)",
+      "ports": [{"iface": "eth3", "pci": "0000:03:00.0", "operstate": "up", "virtual_function": false}]
+    }
+  ],
+  "results": [
+    {"severity": "N/A", "scope": "port", "target": "eth1", "check_id": "mlx5.deep.troubleshooting", "value": "-", "unit": "", "threshold": "-", "evidence": "no link (operstate=down): see generic.link.state", "hint": "", "ref": "docs/design/nic-health.md §7"},
+    {"severity": "N/A", "scope": "port", "target": "eth1", "check_id": "mlx5.deep.fec", "value": "-", "unit": "", "threshold": "-", "evidence": "no link (operstate=down): see generic.link.state", "hint": "", "ref": "docs/design/nic-health.md §7"},
+    {"severity": "N/A", "scope": "port", "target": "eth1", "check_id": "mlx5.deep.ber", "value": "-", "unit": "", "threshold": "-", "evidence": "no link (operstate=down): see generic.link.state", "hint": "", "ref": "docs/design/nic-health.md §7"},
+    {"severity": "OK", "scope": "port", "target": "eth1", "check_id": "mlx5.deep.module", "value": "Temperature=34 Voltage=3318.9 Bias=5.500 Rx=-40 Tx=-0.650", "unit": "", "threshold": "within module ranges, no lane faults", "evidence": "Temperature [C]=34 [-5..90]; Voltage [mV]=3318.9 [3080..3500]; Bias Current [mA]=5.500 [0.5..13]; Rx Power Current [dBm]=-40 [-11.308..3.398] (not judged: no link); Tx Power Current [dBm]=-0.650 [-9.431..3.398]; Tx Fault [per lane]=0; Rx LOS [per lane]=0; Tx CDR LOL [per lane]=0; Rx CDR LOL [per lane]=0; module DELLEMC M14MK", "hint": "", "ref": "docs/design/nic-health.md §7", "metrics": {"temperature_c": 34, "temperature_c_low": -5, "temperature_c_high": 90, "voltage_mv": 3318.9, "voltage_mv_low": 3080, "voltage_mv_high": 3500, "bias_ma": 5.500, "bias_ma_low": 0.5, "bias_ma_high": 13, "rx_dbm": -40, "rx_dbm_low": -11.308, "rx_dbm_high": 3.398, "rx_dbm_judged": false, "tx_dbm": -0.650, "tx_dbm_low": -9.431, "tx_dbm_high": 3.398, "tx_fault": [0], "rx_los": [0], "tx_cdr_lol": [0], "rx_cdr_lol": [0], "vendor": "DELLEMC", "part_number": "M14MK", "compliance": "100GBASE-SR4 or 25GBASE-SR"}}
+  ]
+}

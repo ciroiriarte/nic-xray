@@ -50,16 +50,20 @@ sections, plus a sixth with
 .TP
 .B Coverage and comparability
 Hosts, roles, NIC ASICs and ports, ports with link, deep checks evaluated, FEC
-modes, nic-health versions, sampling windows and collection dates; every host
-that was not collected; and caveats such as mixed tool versions, imported data
-without collection metadata, or sites with no sweep at the requested date.
+modes, nic-health versions, how many hosts had typed metrics and how many
+recorded service-impact facts, sampling windows and collection dates; every host
+that was not collected; and caveats such as mixed tool versions, a mix of hosts
+with and without typed metrics, imported data without collection metadata, or
+sites with no sweep at the requested date.
 .TP
 .B Verdicts
 Hosts by verdict and the share of clean hosts, per site and per role.
 .TP
 .B Findings
 Every WARN, CRIT and UNKNOWN result, worst first, grouped by site and host, with
-its evidence and hint.
+its evidence and hint. When nic-health recorded the port's service impact, a port
+finding names it, for example
+.IR "(bond0 member, in use, 3 bond link failures)" .
 .TP
 .B Baselines and outliers
 Over ports with link: receive and transmit power per module type (minimum, p5
@@ -92,6 +96,23 @@ silently.
 With one site the coverage table has a column per role and the verdicts list
 each host; with several sites the columns are sites. The tool is read-only and
 offline: it never contacts a host or the network.
+.PP
+Values (optical power, error counters, carrier changes, discards, AER totals,
+BER, FEC mode, module type) come from the typed
+.B metrics
+nic-health writes in its JSON (schema_version 2), one value at a time. A value
+missing or of the wrong type there, older JSON and CSV imports fall back to
+reading the evidence text; both paths give the same report. Service-impact facts
+(whether a port is in use and why, its bond and bond link failures, whether it
+carried traffic in the sampling window) exist only in typed metrics; the JSON
+report carries them as
+.B service
+on port findings and port lists.
+.PP
+A nic-health JSON file with invalid UTF-8 is read with U+FFFD in place of the bad
+bytes, and the coverage caveats name it; one larger than 32 MiB is listed as
+unreadable. Host-written text never becomes Markdown markup: control and bidi
+characters are removed and link syntax is broken.
 .PP
 It is the one Python script of the nic-xray tools (Python 3.9 or newer,
 standard library only; WeasyPrint, optional, for PDF). Every report names the

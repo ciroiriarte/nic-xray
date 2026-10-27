@@ -153,6 +153,18 @@ health() {  # health <verdict> <exit>
     printf '"unit": "", "threshold": "", "evidence": "", "hint": "", "ref": "y"}]}\n'
     exit "$2"
 }
+health2() {  # health2 <metric value>: nic-health JSON schema 2, with typed metrics (design §7 P2/P3)
+    printf '{"schema_version": 2, "tool": "nic-health.sh", "version": "9.9.9", "host": "%s", ' "$DEST"
+    printf '"collected_at": "2026-10-26T12:00:00Z", "uptime_s": 1000, "boot_id": null, '
+    printf '"level": "deep", "mode": "delta", "interval_s": 30, "verdict": "OK", "exit_code": 0, "results": ['
+    printf '{"severity": "OK", "scope": "port", "target": "eth0", "check_id": "generic.link.state", "value": "up", '
+    printf '"unit": "", "threshold": "", "evidence": "operstate=up", "hint": "", "ref": "x", '
+    printf '"metrics": {"carrier": true, "in_use": true, "in_use_reasons": ["bond"], "bond": "bond0", "bond_link_failures": 2}},'
+    printf '{"severity": "OK", "scope": "port", "target": "eth0", "check_id": "mlx5.deep.module", "value": "Rx=%s", ' "$1"
+    printf '"unit": "", "threshold": "", "evidence": "", "hint": "", "ref": "y", '
+    printf '"metrics": {"rx_dbm": %s, "rx_dbm_lanes": [%s, -0.4], "rx_symbol_err_phy": {"total": 18446744073709551615, "delta": 0}}}]}\n' "$1" "$1"
+    exit 0
+}
 if [[ "$CMD" == *nic-xray* ]]; then
     case "$DEST" in
         h-noxray) exit 127 ;;
@@ -163,6 +175,8 @@ if [[ "$CMD" == *nic-xray* ]]; then
 fi
 case "$DEST" in
     h-ok|h-noxray|h-xraybad|h-xrayinf) health OK 0 ;;
+    h-v2) health2 -8.83 ;;
+    h-v2nan) health2 NaN ;;
     h-warn) health WARN 1 ;;
     h-crit) health CRIT 2 ;;
     h-unknown) health UNKNOWN 3 ;;
@@ -285,6 +299,19 @@ assert_eq "xray with -inf: failed" "failed" "$(manifest_xray S1 inf)"
 assert_eq "xray with -inf: file kept" "yes" "$([[ -s "$(latest S1)/nodes/inf.xray.json" ]] && echo yes)"
 assert_eq "xray with -inf: note in .err" "1" "$(grep -c 'non-finite numbers' "$(latest S1)/nodes/inf.err")"
 assert_eq "xray with -inf: host still collected" "0" "$RC"
+
+# nic-health JSON schema 2 (typed metrics, design §7 P2/P3): collected like schema 1; merged.csv keeps
+# its columns (metrics are JSON only); a non-finite number in metrics is still bad output
+printf 'S1,v2,h-v2\nS1,v1,h-ok\nS1,v2nan,h-v2nan\n' > "$FIX/inv-v2.csv"
+sweep "$FIX/inv-v2.csv" --no-xray
+assert_eq "schema 2: collected" "ok" "$(manifest_status S1 v2)"
+assert_eq "schema 2 next to schema 1: both collected" "ok" "$(manifest_status S1 v1)"
+assert_eq "schema 2: node JSON kept verbatim (metrics)" "2 bond0 -8.83" \
+    "$(jq -r '[.schema_version, .results[0].metrics.bond, .results[1].metrics.rx_dbm] | map(tostring) | join(" ")' "$(latest S1)/nodes/v2.json")"
+assert_eq "schema 2: merged.csv header unchanged" "site,hostname,collected_at,version,level,interval_s,uptime_s,boot_id,severity,scope,target,check_id,value,unit,threshold,evidence,hint,ref" \
+    "$(head -1 "$(latest S1)/merged.csv")"
+assert_eq "schema 2: merged.csv has header + 2 rows per collected host" "5" "$(wc -l < "$(latest S1)/merged.csv" | tr -d ' ')"
+assert_eq "schema 2: NaN in metrics is bad output" "bad-output" "$(manifest_status S1 v2nan)"
 
 # --- Exit codes (design §5.5) ---
 printf 'S1,ok,h-ok\nS1,ok2,h-noxray\n' > "$FIX/inv-ok.csv"
