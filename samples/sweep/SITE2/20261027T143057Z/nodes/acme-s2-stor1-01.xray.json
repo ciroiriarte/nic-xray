@@ -1,0 +1,102 @@
+[
+  {
+    "numa_node": "0",
+    "pci_slot": "Slot 2",
+    "device": "0000:01:00.0",
+    "interface": "eth0",
+    "mtu": 9000,
+    "link": "up",
+    "speed_duplex": "25000Mb/s (Full)",
+    "speed_mbps": 25000,
+    "parent_bond": "bond0",
+    "vlan": "100;110;120",
+    "switch_name": "acme-s2-leaf-01.example.net",
+    "port_name": "ifname et-0/0/1:0",
+    "port_descr": "acme port 1",
+    "lacp_status": "AggID:1 Peer:02:00:5e:10:00:01",
+    "optics": {
+      "sfp_type": "25GBASE-SR",
+      "vendor": "ACME",
+      "rx_power_dbm": -0.67,
+      "tx_power_dbm": -1.0,
+      "rx_status": "OK",
+      "tx_status": "OK",
+      "lanes": 1
+    }
+  },
+  {
+    "numa_node": "0",
+    "pci_slot": "Slot 2",
+    "device": "0000:01:00.1",
+    "interface": "eth1",
+    "mtu": 9000,
+    "link": "up",
+    "speed_duplex": "25000Mb/s (Full)",
+    "speed_mbps": 25000,
+    "parent_bond": "bond0",
+    "vlan": "100;110;120",
+    "switch_name": "acme-s2-leaf-02.example.net",
+    "port_name": "ifname et-0/0/1:0",
+    "port_descr": "acme port 1",
+    "lacp_status": "AggID:1 Peer:02:00:5e:10:00:01",
+    "optics": {
+      "sfp_type": "25GBASE-SR",
+      "vendor": "ACME",
+      "rx_power_dbm": -0.74,
+      "tx_power_dbm": -1.0,
+      "rx_status": "OK",
+      "tx_status": "OK",
+      "lanes": 1
+    }
+  },
+  {
+    "numa_node": "0",
+    "pci_slot": "Slot 2",
+    "device": "0000:01:00.2",
+    "interface": "eth2",
+    "mtu": 9000,
+    "link": "up",
+    "speed_duplex": "25000Mb/s (Full)",
+    "speed_mbps": 25000,
+    "parent_bond": "None",
+    "vlan": "N/A",
+    "switch_name": "acme-s2-leaf-01.example.net",
+    "port_name": "ifname et-0/0/1:1",
+    "port_descr": "acme port 1",
+    "lacp_status": "N/A",
+    "optics": {
+      "sfp_type": "25GBASE-SR",
+      "vendor": "ACME",
+      "rx_power_dbm": -0.81,
+      "tx_power_dbm": -1.0,
+      "rx_status": "OK",
+      "tx_status": "OK",
+      "lanes": 1
+    }
+  },
+  {
+    "numa_node": "0",
+    "pci_slot": "Slot 2",
+    "device": "0000:01:00.3",
+    "interface": "eth3",
+    "mtu": 9000,
+    "link": "up",
+    "speed_duplex": "25000Mb/s (Full)",
+    "speed_mbps": 25000,
+    "parent_bond": "None",
+    "vlan": "N/A",
+    "switch_name": "acme-s2-leaf-02.example.net",
+    "port_name": "ifname et-0/0/1:1",
+    "port_descr": "acme port 1",
+    "lacp_status": "N/A",
+    "optics": {
+      "sfp_type": "25GBASE-SR",
+      "vendor": "ACME",
+      "rx_power_dbm": -0.6,
+      "tx_power_dbm": -1.0,
+      "rx_status": "OK",
+      "tx_status": "OK",
+      "lanes": 1
+    }
+  }
+]

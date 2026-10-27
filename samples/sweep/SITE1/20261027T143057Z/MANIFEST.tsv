@@ -1,0 +1,4 @@
+host	address	status	exit_code	duration_s	xray	verdict
+acme-s1-cmp1-01	192.0.2.21	ok	2	0	ok	CRIT
+acme-s1-cmp1-02	192.0.2.22	ok	0	0	ok	OK
+acme-s1-ctrl1-01	192.0.2.11	ok	0	0	ok	OK

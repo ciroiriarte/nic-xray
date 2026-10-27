@@ -1,0 +1,4 @@
+host	address	status	exit_code	duration_s	xray	verdict
+acme-s2-stor1-01	198.51.100.31	ok	1	0	ok	WARN
+acme-s2-stor1-02	198.51.100.32	ok	1	0	ok	WARN
+acme-s2-stor1-03	198.51.100.33	ssh-fail	255	0	skipped	-

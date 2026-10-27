@@ -1,6 +1,6 @@
 .\" Man page for nic-sweep.sh
 .\" Written in classic troff/groff format
-.TH NIC-SWEEP 8 "2026-10-26" "nic-sweep 2.13.0" "System Administration Commands"
+.TH NIC-SWEEP 8 "2026-10-27" "nic-sweep 2.14.0" "System Administration Commands"
 .SH NAME
 nic-sweep \- collect nic-health (and nic-xray) from every host of an inventory over SSH
 .SH SYNOPSIS
@@ -237,6 +237,34 @@ passwordless
 .B sudo
 for the SSH user to run it, and optionally
 .BR nic-xray .
+.SH FILES
+.TP
+.B /usr/bin/nic-sweep
+.TQ
+.B /usr/bin/nic-report
+The fleet commands, as packaged.
+.TP
+.B /usr/share/nic-xray/nic-report-rules.json
+The packaged diagnosis rule catalog read by
+.BR nic-report.py (8).
+.PP
+The
+.B nic-xray-fleet
+package, meant for the operator or jump host, ships
+.B nic-sweep
+and
+.B nic-report
+with their man pages and bash completions, and the rule catalog. It requires
+.B nic-xray
+of the same version,
+.BR jq (1),
+an SSH client and Python 3.9 or newer
+(python311 on openSUSE Leap 15.6), and suggests WeasyPrint
+(python3-weasyprint) for PDF reports.
+Fleet nodes need only the
+.B nic-xray
+package, which carries
+.BR nic-health .
 .SH EXIT STATUS
 Like nic-health, plus collection failures. A CRIT is never hidden behind an
 unreachable host.
@@ -297,8 +325,9 @@ juju machines \-m openstack \-\-format json |
 .SH AUTHORS
 Ciro Iriarte <ciro.iriarte+software@gmail.com>
 .SH SEE ALSO
-.BR nic-health.sh (8),
 .BR nic-xray.sh (8),
+.BR nic-health.sh (8),
+.BR nic-report.py (8),
 .BR ssh (1),
 .BR sudo (8),
 .BR jq (1)

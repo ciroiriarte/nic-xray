@@ -1,6 +1,6 @@
 .\" Man page for nic-report.py
 .\" Written in classic troff/groff format
-.TH NIC-REPORT 8 "2026-10-26" "nic-report 2.13.0" "System Administration Commands"
+.TH NIC-REPORT 8 "2026-10-27" "nic-report 2.14.0" "System Administration Commands"
 .SH NAME
 nic-report \- single- and multi-site NIC health reports from nic-sweep sweeps
 .SH SYNOPSIS
@@ -749,6 +749,34 @@ Rule catalog to use instead of the packaged one.
 Theme folder for HTML and PDF output when
 .B \-\-theme
 is not given.
+.SH FILES
+.TP
+.B /usr/bin/nic-sweep
+.TQ
+.B /usr/bin/nic-report
+The fleet commands, as packaged.
+.TP
+.B /usr/share/nic-xray/nic-report-rules.json
+The packaged diagnosis rule catalog (see
+.BR "RULE CATALOG" ).
+.PP
+The
+.B nic-xray-fleet
+package, meant for the operator or jump host, ships
+.B nic-sweep
+and
+.B nic-report
+with their man pages and bash completions, and the rule catalog. It requires
+.B nic-xray
+of the same version,
+.BR jq (1),
+an SSH client and Python 3.9 or newer
+(python311 on openSUSE Leap 15.6), and suggests WeasyPrint
+(python3-weasyprint) for PDF reports.
+Fleet nodes need only the
+.B nic-xray
+package, which carries
+.BR nic-health .
 .SH EXIT STATUS
 .TP
 .B 0
@@ -836,6 +864,6 @@ nic-report.py \-R sweeps \-s SITE1 \-n narrative.md \-N \-O html \-o site1.html
 .SH AUTHORS
 Ciro Iriarte <ciro.iriarte+software@gmail.com>
 .SH SEE ALSO
-.BR nic-sweep.sh (8),
+.BR nic-xray.sh (8),
 .BR nic-health.sh (8),
-.BR nic-xray.sh (8)
+.BR nic-sweep.sh (8)

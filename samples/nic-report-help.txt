@@ -1,0 +1,97 @@
+usage: nic-report.py [-h] [-R DIR] [-s SITE] [-a DATE] [-i SITE [PATH ...]] [-C OLD NEW] [-r RE]
+                     [-b {scope,all}] [-d DB] [-f N] [-S FILE] [-L DAYS] [-u FILE] [-A FILE]
+                     [-U AUDIENCE] [-n FILE] [-N] [-O {md,json,html,pdf}] [-o FILE] [-P] [-T DIR]
+                     [-X] [-t TEXT] [-c TEXT] [-v]
+                     [SWEEP_DIR ...]
+
+Version: 2.14.0
+
+Reports on nic-sweep sweeps (and legacy nic-health CSV) for one site, several or all:
+coverage, verdicts, every finding with its evidence, baselines and outliers over
+ports with link, patterns within and across sites, suppressed known issues, and ranked
+recommendations from a declarative rule catalog with an executive summary; with
+--compare, the changes since an earlier sweep of the site. It can write a brief for a
+language model and merge the summary written from it, checked against the facts.
+Read-only and offline: it never calls a model or the network.
+
+positional arguments:
+  SWEEP_DIR             nic-sweep directories (DIR/<site>/<UTC time>)
+
+options:
+  -h, --help            show this help message and exit
+  -R DIR, --sweep-root DIR
+                        nic-sweep tree; selects the latest sweep of each site
+  -s SITE, --site SITE  only this site of --sweep-root (repeatable)
+  -a DATE, --at DATE    latest sweep on or before DATE (YYYY-MM-DD or YYYY-MM-DDTHH:MM[:SS]Z, UTC)
+  -i SITE [PATH ...], --import SITE [PATH ...]
+                        legacy nic-health CSV for SITE: files or directories of *.csv (repeatable)
+  -C OLD NEW, --compare OLD NEW
+                        report on sweep NEW plus the changes since sweep OLD of the same site (OLD
+                        earlier): new, resolved and persisting findings, reboots, counter growth;
+                        not with SWEEP_DIR, -R, -s, -a, -i, -b all or -P
+  -r RE, --role-regex RE
+                        role from the host name: a group named 'role' (or the first group)
+  -b {scope,all}, --baseline {scope,all}
+                        medians for outliers from the selected sites (scope, default) or from
+                        every site of --sweep-root (all)
+  -d DB, --rx-delta-db DB
+                        Rx at least DB below its module type's median is an outlier (default 5)
+  -f N, --flap-min N    list ports with at least N carrier changes since driver load (default 100)
+  -S FILE, --suppress FILE
+                        JSON rules for known tool issues: matching results leave findings,
+                        verdicts and patterns and are listed in their own section
+  -L DAYS, --lldp-lookback DAYS
+                        a port without an LLDP neighbour names the newest one seen in the site's
+                        earlier sweeps of the last DAYS days (default 30; 0: off)
+  -u FILE, --rules FILE
+                        diagnosis rules layered on the packaged catalog (nic-report-rules.json): a
+                        rule replaces the one with the same id, new ids are added (repeatable,
+                        later files win)
+  -A FILE, --ai-brief FILE
+                        also write a brief for a language model to FILE: the report's facts (its
+                        JSON document) with fixed guard rails; this tool never sends it anywhere
+  -U AUDIENCE, --audience AUDIENCE
+                        tone of the brief: engineer (full detail, default), management (impact,
+                        risk, next steps) or field (work orders per port); needs --ai-brief
+  -n FILE, --narrative FILE
+                        merge a model-written summary (Markdown) as section 1.1, labelled as AI-
+                        written, after checking every number, date and recommendation ID against
+                        the facts
+  -N, --strict-narrative
+                        refuse the merge (exit 1, no report written) when the check finds a
+                        problem
+  -O {md,json,html,pdf}, --output-format {md,json,html,pdf}
+                        md (default), json, html (one self-contained file) or pdf (WeasyPrint;
+                        needs -o)
+  -o FILE, --output FILE
+                        write to FILE instead of standard output
+  -P, --per-site        with -o FILE.ext, also write FILE-SITE.ext per selected site (same
+                        baseline)
+  -T DIR, --theme DIR   theme folder for html and pdf (default: $NIC_REPORT_THEME; -T '' for no
+                        theme)
+  -X, --strict-theme    a theme colour pair with contrast below 4.5:1 is an error, not a warning
+  -t TEXT, --title TEXT
+                        report title
+  -c TEXT, --classification TEXT
+                        classification label, e.g. 'confidential site data' (overrides the
+                        theme's)
+  -v, --version         show program's version number and exit
+
+--import takes SITE and every following path: put SWEEP_DIRs before it, or end its list with --.
+-O pdf needs WeasyPrint (python3-weasyprint, or pip install weasyprint) and -o FILE.
+Environment: NIC_REPORT_THEME=DIR selects a theme for html and pdf when --theme is not given;
+NIC_REPORT_RULES=FILE replaces the packaged rule catalog (default: nic-report-rules.json next to the script,
+in ../share/nic-xray from it, or in /usr/share/nic-xray).
+Report files are written atomically with mode 0640 (less the umask).
+
+Exit status:
+ 0  report written
+ 1  input error (unreadable input, unknown schema or site, a site
+    selected twice, no data for the selection, --compare sweeps that are not two different sweeps of one
+    site with OLD earlier, an invalid suppress file, rule catalog or theme, theme contrast
+    below 4.5:1 with --strict-theme, WeasyPrint missing or failing for -O pdf, a
+    narrative that cannot be read or, with --strict-narrative, fails its check) or an
+    output file cannot be written
+ 3  usage error
+
+See also: nic-sweep.sh(8), nic-health.sh(8), nic-xray.sh(8). Design: docs/design/nic-sweep.md

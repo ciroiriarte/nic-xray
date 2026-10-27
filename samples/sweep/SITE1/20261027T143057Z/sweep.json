@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "tool": "nic-sweep.sh",
+  "version": "2.14.0",
+  "site": "SITE1",
+  "started_at": "2026-10-27T14:30:57Z",
+  "finished_at": "2026-10-27T14:30:57Z",
+  "inventory": {
+    "file": "inventory.csv",
+    "sha256": "5b2ffe3a9c3b494f9325953c8da8da37c078bc095418107b98d7470fb3085d33",
+    "skipped_lines": 0
+  },
+  "options": {
+    "level": "deep",
+    "interval_s": 30,
+    "parallel": 8,
+    "timeout_s": 330,
+    "jump": null,
+    "ship": false,
+    "xray": true,
+    "accept_new_hostkeys": false
+  },
+  "hosts": {
+    "total": 3,
+    "by_status": {
+      "ok": 3,
+      "ssh-fail": 0,
+      "sudo-fail": 0,
+      "tool-missing": 0,
+      "timeout": 0,
+      "bad-output": 0
+    },
+    "by_verdict": {
+      "OK": 2,
+      "WARN": 0,
+      "CRIT": 1,
+      "UNKNOWN": 0
+    },
+    "xray": {
+      "ok": 3,
+      "absent": 0,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "exit_code": 2
+}

@@ -1,0 +1,516 @@
+{
+  "schema_version": 2,
+  "tool": "nic-health.sh",
+  "version": "2.14.0",
+  "host": "acme-s1-cmp1-02",
+  "collected_at": "2026-10-27T14:30:56Z",
+  "uptime_s": 1994854,
+  "boot_id": "3f2a6c1e-8b4d-4e7f-9a10-5c6d7e8f9a02",
+  "level": "deep",
+  "mode": "delta",
+  "interval_s": 30,
+  "verdict": "OK",
+  "exit_code": 0,
+  "results": [
+    {
+      "severity": "OK",
+      "scope": "asic",
+      "target": "0000:01:00",
+      "check_id": "generic.pcie.link",
+      "value": "16.0 GT/s x8",
+      "unit": "",
+      "threshold": "",
+      "evidence": "",
+      "hint": "",
+      "ref": "docs/design/nic-health.md"
+    },
+    {
+      "severity": "OK",
+      "scope": "port",
+      "target": "eth0",
+      "check_id": "generic.link.state",
+      "value": "up",
+      "unit": "",
+      "threshold": "",
+      "evidence": "",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "metrics": {
+        "carrier": true,
+        "operstate": "up",
+        "in_use": true,
+        "in_use_reasons": [
+          "bond"
+        ],
+        "bond": "bond0",
+        "bond_link_failures": 0,
+        "rx_bytes": {
+          "total": 91234567890,
+          "delta": 18500000
+        },
+        "tx_bytes": {
+          "total": 80234567890,
+          "delta": 16200000
+        }
+      }
+    },
+    {
+      "severity": "OK",
+      "scope": "port",
+      "target": "eth0",
+      "check_id": "generic.link.flaps",
+      "value": "+0",
+      "unit": "",
+      "threshold": "",
+      "evidence": "carrier_changes=1 (since driver load)",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "metrics": {
+        "carrier_changes": {
+          "total": 1,
+          "delta": 0
+        }
+      }
+    },
+    {
+      "severity": "OK",
+      "scope": "port",
+      "target": "eth0",
+      "check_id": "mlx5.deep.module",
+      "value": "",
+      "unit": "",
+      "threshold": "",
+      "evidence": "Temperature [C]=40 [-5..90]; Rx Power Current [dBm]=-0.74 [-11.3..3.398]; Tx Power Current [dBm]=-1.0 [-9.4..3.398]; Tx Fault [per lane]=0; module VENDOR PART25",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "metrics": {
+        "temperature_c": 40,
+        "temperature_c_low": -5,
+        "temperature_c_high": 90,
+        "rx_dbm": -0.74,
+        "rx_dbm_low": -11.3,
+        "rx_dbm_high": 3.398,
+        "rx_dbm_judged": true,
+        "tx_dbm": -1.0,
+        "tx_dbm_low": -9.4,
+        "tx_dbm_high": 3.398,
+        "tx_fault": [
+          0
+        ],
+        "vendor": "VENDOR",
+        "part_number": "PART25"
+      }
+    },
+    {
+      "severity": "OK",
+      "scope": "port",
+      "target": "eth0",
+      "check_id": "mlx5.deep.fec",
+      "value": "link: Firecode FEC",
+      "unit": "",
+      "threshold": "",
+      "evidence": "FEC=Firecode FEC; module Compliance=100GBASE-SR4 or 25GBASE-SR",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "metrics": {
+        "fec": "Firecode FEC",
+        "compliance": "100GBASE-SR4 or 25GBASE-SR",
+        "fec_mismatch": false
+      }
+    },
+    {
+      "severity": "OK",
+      "scope": "port",
+      "target": "eth0",
+      "check_id": "mlx5.phy.errors",
+      "value": "+0",
+      "unit": "",
+      "threshold": "",
+      "evidence": "all 4 counters are 0",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "metrics": {
+        "rx_symbol_err_phy": {
+          "total": 0,
+          "delta": 0
+        },
+        "rx_pcs_symbol_err_phy": {
+          "total": 0,
+          "delta": 0
+        },
+        "rx_corrected_bits_phy": {
+          "total": 0,
+          "delta": 0
+        },
+        "rx_err_lane_0_phy": {
+          "total": 0,
+          "delta": 0
+        }
+      }
+    },
+    {
+      "severity": "OK",
+      "scope": "port",
+      "target": "eth1",
+      "check_id": "generic.link.state",
+      "value": "up",
+      "unit": "",
+      "threshold": "",
+      "evidence": "",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "metrics": {
+        "carrier": true,
+        "operstate": "up",
+        "in_use": true,
+        "in_use_reasons": [
+          "bond"
+        ],
+        "bond": "bond0",
+        "bond_link_failures": 0,
+        "rx_bytes": {
+          "total": 91234567890,
+          "delta": 18500000
+        },
+        "tx_bytes": {
+          "total": 80234567890,
+          "delta": 16200000
+        }
+      }
+    },
+    {
+      "severity": "OK",
+      "scope": "port",
+      "target": "eth1",
+      "check_id": "generic.link.flaps",
+      "value": "+0",
+      "unit": "",
+      "threshold": "",
+      "evidence": "carrier_changes=1 (since driver load)",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "metrics": {
+        "carrier_changes": {
+          "total": 1,
+          "delta": 0
+        }
+      }
+    },
+    {
+      "severity": "OK",
+      "scope": "port",
+      "target": "eth1",
+      "check_id": "mlx5.deep.module",
+      "value": "",
+      "unit": "",
+      "threshold": "",
+      "evidence": "Temperature [C]=40 [-5..90]; Rx Power Current [dBm]=-0.81 [-11.3..3.398]; Tx Power Current [dBm]=-1.0 [-9.4..3.398]; Tx Fault [per lane]=0; module VENDOR PART25",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "metrics": {
+        "temperature_c": 40,
+        "temperature_c_low": -5,
+        "temperature_c_high": 90,
+        "rx_dbm": -0.81,
+        "rx_dbm_low": -11.3,
+        "rx_dbm_high": 3.398,
+        "rx_dbm_judged": true,
+        "tx_dbm": -1.0,
+        "tx_dbm_low": -9.4,
+        "tx_dbm_high": 3.398,
+        "tx_fault": [
+          0
+        ],
+        "vendor": "VENDOR",
+        "part_number": "PART25"
+      }
+    },
+    {
+      "severity": "OK",
+      "scope": "port",
+      "target": "eth1",
+      "check_id": "mlx5.deep.fec",
+      "value": "link: Firecode FEC",
+      "unit": "",
+      "threshold": "",
+      "evidence": "FEC=Firecode FEC; module Compliance=100GBASE-SR4 or 25GBASE-SR",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "metrics": {
+        "fec": "Firecode FEC",
+        "compliance": "100GBASE-SR4 or 25GBASE-SR",
+        "fec_mismatch": false
+      }
+    },
+    {
+      "severity": "OK",
+      "scope": "port",
+      "target": "eth1",
+      "check_id": "mlx5.phy.errors",
+      "value": "+0",
+      "unit": "",
+      "threshold": "",
+      "evidence": "all 4 counters are 0",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "metrics": {
+        "rx_symbol_err_phy": {
+          "total": 0,
+          "delta": 0
+        },
+        "rx_pcs_symbol_err_phy": {
+          "total": 0,
+          "delta": 0
+        },
+        "rx_corrected_bits_phy": {
+          "total": 0,
+          "delta": 0
+        },
+        "rx_err_lane_0_phy": {
+          "total": 0,
+          "delta": 0
+        }
+      }
+    },
+    {
+      "severity": "OK",
+      "scope": "port",
+      "target": "eth2",
+      "check_id": "generic.link.state",
+      "value": "up",
+      "unit": "",
+      "threshold": "",
+      "evidence": "",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "metrics": {
+        "carrier": true,
+        "operstate": "up",
+        "in_use": false,
+        "in_use_reasons": [],
+        "rx_bytes": {
+          "total": 2048,
+          "delta": 0
+        },
+        "tx_bytes": {
+          "total": 900,
+          "delta": 0
+        }
+      }
+    },
+    {
+      "severity": "OK",
+      "scope": "port",
+      "target": "eth2",
+      "check_id": "generic.link.flaps",
+      "value": "+0",
+      "unit": "",
+      "threshold": "",
+      "evidence": "carrier_changes=1 (since driver load)",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "metrics": {
+        "carrier_changes": {
+          "total": 1,
+          "delta": 0
+        }
+      }
+    },
+    {
+      "severity": "OK",
+      "scope": "port",
+      "target": "eth2",
+      "check_id": "mlx5.deep.module",
+      "value": "",
+      "unit": "",
+      "threshold": "",
+      "evidence": "Temperature [C]=40 [-5..90]; Rx Power Current [dBm]=-0.6 [-11.3..3.398]; Tx Power Current [dBm]=-1.0 [-9.4..3.398]; Tx Fault [per lane]=0; module VENDOR PART25",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "metrics": {
+        "temperature_c": 40,
+        "temperature_c_low": -5,
+        "temperature_c_high": 90,
+        "rx_dbm": -0.6,
+        "rx_dbm_low": -11.3,
+        "rx_dbm_high": 3.398,
+        "rx_dbm_judged": true,
+        "tx_dbm": -1.0,
+        "tx_dbm_low": -9.4,
+        "tx_dbm_high": 3.398,
+        "tx_fault": [
+          0
+        ],
+        "vendor": "VENDOR",
+        "part_number": "PART25"
+      }
+    },
+    {
+      "severity": "OK",
+      "scope": "port",
+      "target": "eth2",
+      "check_id": "mlx5.deep.fec",
+      "value": "link: Firecode FEC",
+      "unit": "",
+      "threshold": "",
+      "evidence": "FEC=Firecode FEC; module Compliance=100GBASE-SR4 or 25GBASE-SR",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "metrics": {
+        "fec": "Firecode FEC",
+        "compliance": "100GBASE-SR4 or 25GBASE-SR",
+        "fec_mismatch": false
+      }
+    },
+    {
+      "severity": "OK",
+      "scope": "port",
+      "target": "eth2",
+      "check_id": "mlx5.phy.errors",
+      "value": "+0",
+      "unit": "",
+      "threshold": "",
+      "evidence": "all 4 counters are 0",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "metrics": {
+        "rx_symbol_err_phy": {
+          "total": 0,
+          "delta": 0
+        },
+        "rx_pcs_symbol_err_phy": {
+          "total": 0,
+          "delta": 0
+        },
+        "rx_corrected_bits_phy": {
+          "total": 0,
+          "delta": 0
+        },
+        "rx_err_lane_0_phy": {
+          "total": 0,
+          "delta": 0
+        }
+      }
+    },
+    {
+      "severity": "OK",
+      "scope": "port",
+      "target": "eth3",
+      "check_id": "generic.link.state",
+      "value": "up",
+      "unit": "",
+      "threshold": "",
+      "evidence": "",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "metrics": {
+        "carrier": true,
+        "operstate": "up",
+        "in_use": false,
+        "in_use_reasons": [],
+        "rx_bytes": {
+          "total": 2048,
+          "delta": 0
+        },
+        "tx_bytes": {
+          "total": 900,
+          "delta": 0
+        }
+      }
+    },
+    {
+      "severity": "OK",
+      "scope": "port",
+      "target": "eth3",
+      "check_id": "generic.link.flaps",
+      "value": "+0",
+      "unit": "",
+      "threshold": "",
+      "evidence": "carrier_changes=1 (since driver load)",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "metrics": {
+        "carrier_changes": {
+          "total": 1,
+          "delta": 0
+        }
+      }
+    },
+    {
+      "severity": "OK",
+      "scope": "port",
+      "target": "eth3",
+      "check_id": "mlx5.deep.module",
+      "value": "",
+      "unit": "",
+      "threshold": "",
+      "evidence": "Temperature [C]=40 [-5..90]; Rx Power Current [dBm]=-0.67 [-11.3..3.398]; Tx Power Current [dBm]=-1.0 [-9.4..3.398]; Tx Fault [per lane]=0; module VENDOR PART25",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "metrics": {
+        "temperature_c": 40,
+        "temperature_c_low": -5,
+        "temperature_c_high": 90,
+        "rx_dbm": -0.67,
+        "rx_dbm_low": -11.3,
+        "rx_dbm_high": 3.398,
+        "rx_dbm_judged": true,
+        "tx_dbm": -1.0,
+        "tx_dbm_low": -9.4,
+        "tx_dbm_high": 3.398,
+        "tx_fault": [
+          0
+        ],
+        "vendor": "VENDOR",
+        "part_number": "PART25"
+      }
+    },
+    {
+      "severity": "OK",
+      "scope": "port",
+      "target": "eth3",
+      "check_id": "mlx5.deep.fec",
+      "value": "link: Firecode FEC",
+      "unit": "",
+      "threshold": "",
+      "evidence": "FEC=Firecode FEC; module Compliance=100GBASE-SR4 or 25GBASE-SR",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "metrics": {
+        "fec": "Firecode FEC",
+        "compliance": "100GBASE-SR4 or 25GBASE-SR",
+        "fec_mismatch": false
+      }
+    },
+    {
+      "severity": "OK",
+      "scope": "port",
+      "target": "eth3",
+      "check_id": "mlx5.phy.errors",
+      "value": "+0",
+      "unit": "",
+      "threshold": "",
+      "evidence": "all 4 counters are 0",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "metrics": {
+        "rx_symbol_err_phy": {
+          "total": 0,
+          "delta": 0
+        },
+        "rx_pcs_symbol_err_phy": {
+          "total": 0,
+          "delta": 0
+        },
+        "rx_corrected_bits_phy": {
+          "total": 0,
+          "delta": 0
+        },
+        "rx_err_lane_0_phy": {
+          "total": 0,
+          "delta": 0
+        }
+      }
+    }
+  ]
+}

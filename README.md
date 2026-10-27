@@ -96,7 +96,8 @@ Originally developed for OpenStack node deployments, it is suitable for any Linu
 
 ## ⚙️ Requirements
 
-- Must be run as **root**
+- Must be run as **root** (`nic-xray.sh` and `nic-health.sh`, on each node)
+- Fleet tools (`nic-sweep.sh`, `nic-report.py`, on the operator or jump host, as an unprivileged user): `jq`, an SSH client and Python 3.9+; WeasyPrint optional, for PDF reports. Details in [Fleet Sweeps](#%EF%B8%8F-fleet-sweeps-nic-sweepsh) and [Fleet Reports](#-fleet-reports-nic-reportpy)
 - Required tools:
   - `ethtool`
   - `lldpctl`
@@ -215,7 +216,14 @@ curl -sk -X PUT "https://<apstra-ip>/api/blueprints/${BLUEPRINT_ID}/deploy" \
 
 ### Package (recommended)
 
-Pre-built packages are available for several distributions via the [OBS repository](https://build.opensuse.org/package/show/home:ciriarte:network-tools/nic-xray). The package includes the script, man page, and bash completion.
+Pre-built packages are available for several distributions via the [OBS repository](https://build.opensuse.org/package/show/home:ciriarte:network-tools/nic-xray), built from one source package:
+
+| Package | Install on | Contents |
+|---|---|---|
+| `nic-xray` | 🖥️ every node | `nic-xray` and `nic-health`, their man pages and bash completions |
+| `nic-xray-fleet` | 🛰️ the operator or jump host | `nic-sweep` and `nic-report`, their man pages and bash completions, and the rule catalog `/usr/share/nic-xray/nic-report-rules.json` |
+
+`nic-xray-fleet` adds fleet collection over SSH and offline reports; it requires `nic-xray` of the same version, `jq`, an SSH client and Python 3.9+ (`python311` on openSUSE Leap 15.6, pulled in automatically), and suggests WeasyPrint (`python3-weasyprint`) for PDF reports. Fleet nodes need only `nic-xray`.
 
 <details>
 <summary><b>Debian 13</b></summary>
@@ -224,7 +232,8 @@ Pre-built packages are available for several distributions via the [OBS reposito
 echo 'deb http://download.opensuse.org/repositories/home:/ciriarte:/network-tools/Debian_13/ /' | sudo tee /etc/apt/sources.list.d/home:ciriarte:network-tools.list
 curl -fsSL https://download.opensuse.org/repositories/home:/ciriarte:/network-tools/Debian_13/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/home_ciriarte_network-tools.gpg > /dev/null
 sudo apt update
-sudo apt install nic-xray
+sudo apt install nic-xray          # every node
+sudo apt install nic-xray-fleet    # operator or jump host
 ```
 </details>
 
@@ -235,7 +244,8 @@ sudo apt install nic-xray
 echo 'deb http://download.opensuse.org/repositories/home:/ciriarte:/network-tools/Ubuntu_24.04/ /' | sudo tee /etc/apt/sources.list.d/home:ciriarte:network-tools.list
 curl -fsSL https://download.opensuse.org/repositories/home:/ciriarte:/network-tools/Ubuntu_24.04/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/home_ciriarte_network-tools.gpg > /dev/null
 sudo apt update
-sudo apt install nic-xray
+sudo apt install nic-xray          # every node
+sudo apt install nic-xray-fleet    # operator or jump host
 ```
 </details>
 
@@ -246,7 +256,8 @@ sudo apt install nic-xray
 echo 'deb http://download.opensuse.org/repositories/home:/ciriarte:/network-tools/Ubuntu_22.04/ /' | sudo tee /etc/apt/sources.list.d/home:ciriarte:network-tools.list
 curl -fsSL https://download.opensuse.org/repositories/home:/ciriarte:/network-tools/Ubuntu_22.04/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/home_ciriarte_network-tools.gpg > /dev/null
 sudo apt update
-sudo apt install nic-xray
+sudo apt install nic-xray          # every node
+sudo apt install nic-xray-fleet    # operator or jump host
 ```
 </details>
 
@@ -256,7 +267,8 @@ sudo apt install nic-xray
 ```bash
 zypper addrepo https://download.opensuse.org/repositories/home:/ciriarte:/network-tools/openSUSE_Tumbleweed/home:ciriarte:network-tools.repo
 zypper refresh
-zypper install nic-xray
+zypper install nic-xray          # every node
+zypper install nic-xray-fleet    # operator or jump host
 ```
 </details>
 
@@ -266,7 +278,8 @@ zypper install nic-xray
 ```bash
 zypper addrepo https://download.opensuse.org/repositories/home:/ciriarte:/network-tools/openSUSE_Slowroll/home:ciriarte:network-tools.repo
 zypper refresh
-zypper install nic-xray
+zypper install nic-xray          # every node
+zypper install nic-xray-fleet    # operator or jump host
 ```
 </details>
 
@@ -276,7 +289,8 @@ zypper install nic-xray
 ```bash
 zypper addrepo https://download.opensuse.org/repositories/home:/ciriarte:/network-tools/openSUSE_Leap_15.6/home:ciriarte:network-tools.repo
 zypper refresh
-zypper install nic-xray
+zypper install nic-xray          # every node
+zypper install nic-xray-fleet    # operator or jump host
 ```
 </details>
 
@@ -286,7 +300,8 @@ zypper install nic-xray
 ```bash
 cd /etc/yum.repos.d/
 wget https://download.opensuse.org/repositories/home:/ciriarte:/network-tools/Rocky_9/home:ciriarte:network-tools.repo
-yum install nic-xray
+dnf install nic-xray          # every node
+dnf install nic-xray-fleet    # operator or jump host
 ```
 </details>
 
@@ -296,7 +311,8 @@ yum install nic-xray
 ```bash
 cd /etc/yum.repos.d/
 wget https://download.opensuse.org/repositories/home:/ciriarte:/network-tools/Rocky_10/home:ciriarte:network-tools.repo
-yum install nic-xray
+dnf install nic-xray          # every node
+dnf install nic-xray-fleet    # operator or jump host
 ```
 </details>
 
@@ -340,7 +356,7 @@ man -l man/man8/nic-report.8
 sudo make install-man
 ```
 
-`make install-man` installs both pages. After installation, use `man nic-xray` or `man nic-health`.
+`make install-man` installs all four pages. After installation, use `man nic-xray`, `man nic-health`, `man nic-sweep` or `man nic-report`.
 
 **Uninstall:**
 
@@ -838,12 +854,12 @@ With `-l deep`, each ConnectX physical function gets exactly one query: `timeout
 
 ### 📸 Output examples
 
-All samples are real captures with hostnames obfuscated (see [`samples/`](samples/)), taken with nic-health 2.11.0. Later versions add rows and evidence fields (for example `generic.link.state`, `generic.link.lookback`, and `Raw Physical Errors Per Lane` in `mlx5.deep.ber`).
+All samples are real captures with hostnames obfuscated (see [`samples/`](samples/)), taken with nic-health 2.11.0; the version in their banners follows each release. Later versions add rows and evidence fields (for example `generic.link.state`, `generic.link.lookback`, and `Raw Physical Errors Per Lane` in `mlx5.deep.ber`).
 
 **Healthy host** (Intel 82599ES):
 
 ```
-🩺 nic-health.sh 2.13.0  host server-02.example.net  2026-10-20T17:46:28Z  window 5.02s
+🩺 nic-health.sh 2.14.0  host server-02.example.net  2026-10-20T17:46:28Z  window 5.02s
 
 Hardware
   0000:05:00  Intel Corporation 82599ES 10-Gigabit SFI/SFP+ Network Connection  (ixgbe, fw 0x800009e1, 1.3227.0)
@@ -858,7 +874,7 @@ Summary: ✅ 5 OK   ⚠️ 0 WARN   ❌ 0 CRIT   ❔ 0 UNKNOWN   ➖ 1 N/A   →
 **Host with a live fault** (4× ConnectX-6 Lx, 25G AOC links running without FEC; growing uncorrectable symbol errors on four ports):
 
 ```
-🩺 nic-health.sh 2.13.0  host server-01.example.net  2026-10-20T17:45:47Z  window 5.55s
+🩺 nic-health.sh 2.14.0  host server-01.example.net  2026-10-20T17:45:47Z  window 5.55s
 
 Hardware
   0000:01:00  Mellanox Technologies MT2894 Family [ConnectX-6 Lx]  (mlx5_core, fw 26.47.1026 (LNV0000000036))
@@ -978,11 +994,13 @@ sweeps/SITE1/20261026T170035Z/
 
 Host status: `ok`, `ssh-fail`, `sudo-fail`, `tool-missing`, `timeout`, `bad-output`; nic-xray: `ok`, `absent`, `failed`, `skipped`. Directories are created with mode 0750 and files with 0640, since sweeps hold host names, addresses and switch ports.
 
-**Requirements (operator host):** Bash 4.4+, `ssh`, `timeout`, `jq`, `sha256sum`, `getopt`. **On each host:** `nic-health` (or `--ship`) and passwordless `sudo` for it; `nic-xray` optional.
+📸 **Sample:** [`samples/sweep/`](samples/sweep/) is a fictional two-site sweep (SITE1 and SITE2, six hosts, one unreachable) written by `nic-sweep.sh` 2.14.0 through a stub `ssh` that serves made-up nic-health and nic-xray output; for example [`SITE1/20261027T143057Z/sweep.json`](samples/sweep/SITE1/20261027T143057Z/sweep.json), [`MANIFEST.tsv`](samples/sweep/SITE2/20261027T143057Z/MANIFEST.tsv) and [`nodes/acme-s1-cmp1-01.json`](samples/sweep/SITE1/20261027T143057Z/nodes/acme-s1-cmp1-01.json). Full option list: [`samples/nic-sweep-help.txt`](samples/nic-sweep-help.txt).
+
+**Requirements (operator host):** Bash 4.4+, `ssh`, `timeout`, `jq`, `sha256sum`, `getopt` (`nic-xray-fleet` pulls in `jq` and the SSH client; the rest is part of the base system). **On each host:** `nic-health` (the `nic-xray` package, or `--ship`) and passwordless `sudo` for it; `nic-xray` optional (same package).
 
 ## 📊 Fleet Reports (`nic-report.py`)
 
-`nic-report.py` reads `nic-sweep` sweeps (and older hand-made nic-health CSV) and writes a report for **one site, several, or every site** of a sweep tree. It is offline and read-only, and the one Python script of the tools (Python 3.9+, standard library only). **PDF** needs WeasyPrint (`python3-weasyprint`, or `pip install weasyprint`), imported only for `-O pdf`.
+`nic-report.py` reads `nic-sweep` sweeps (and older hand-made nic-health CSV) and writes a report for **one site, several, or every site** of a sweep tree. It is offline and read-only, and the one Python script of the tools (Python 3.9+, standard library only), packaged with `nic-sweep` in `nic-xray-fleet`. **PDF** needs WeasyPrint (`python3-weasyprint`, or `pip install weasyprint`), imported only for `-O pdf`.
 
 | Section | One site | Several sites |
 |---|---|---|
@@ -1041,6 +1059,8 @@ nic-report.py -R sweeps -s SITE1 -n narrative.md -N -O html -o s1.html  # merge 
 - 💾 **Output files** are written atomically (temp file in the same directory, then renamed) with mode `0640` less the umask; a symlink at the target is replaced, not followed.
 - 🎨 **Themes** (`-T`/`--theme DIR` or `NIC_REPORT_THEME`; `-T ''` for none): `theme.json` with brand colours, fonts, logos (PNG/JPEG/SVG, embedded as `data:` URIs) and labels (header title, classification; `-c` overrides it). HTML and PDF only: Markdown and JSON never read a theme. No free-form CSS: a theme cannot change content, severity colours, classification or attribution, which keep fixed colours (an `extra.css` file is ignored with a warning). Contrast below 4.5:1 is a warning, an error with `-X`/`--strict-theme`. Example: [`tests/fixtures/themes/example/`](tests/fixtures/themes/example/); keep real company themes outside the repo.
 - 🏷️ **Attribution:** `Generated by nic-report vX.Y.Z — © YEAR Ciro Iriarte · timestamp` in every format (Markdown last line, HTML title block and footer, PDF cover and closing footer, JSON `generator`, PDF Creator).
+
+📸 **Samples** (the fictional sweep in [`samples/sweep/`](samples/sweep/), `nic-report.py -R samples/sweep -r '^[^-]+-[^-]+-(?P<role>[a-z]+\d+[a-z]*)-\d+' -c 'Fictional sample data'`): [Markdown](samples/nic-report.md), [HTML](samples/nic-report.html), [JSON](samples/nic-report.json) and the [first PDF page](samples/nic-report-page1.png). R1 is an attenuated optic on a bond member that is dropping its link, named with its LLDP peer; R2 a PCIe link below capability on both storage hosts of a site, raised because receive discards grow. Full option list: [`samples/nic-report-help.txt`](samples/nic-report-help.txt).
 
 Options: `-R`/`--sweep-root`, `-s`/`--site`, `-a`/`--at`, `-i`/`--import` (takes every following path: put sweep directories first or end it with `--`), `-C`/`--compare OLD NEW`, `-r`/`--role-regex`, `-b`/`--baseline scope|all`, `-d`/`--rx-delta-db`, `-f`/`--flap-min`, `-S`/`--suppress`, `-u`/`--rules`, `-L`/`--lldp-lookback`, `-A`/`--ai-brief`, `-U`/`--audience`, `-n`/`--narrative`, `-N`/`--strict-narrative`, `-O`/`--output-format md|json|html|pdf`, `-o`/`--output`, `-P`/`--per-site`, `-T`/`--theme`, `-X`/`--strict-theme`, `-t`/`--title`, `-c`/`--classification`, `-v`/`--version`, `-h`/`--help`. Odd or damaged input ends in a `❌` message, never a traceback; a host whose result file is missing or malformed is listed as `unreadable-result` instead of failing the report. Data from nic-health older than 2.12.0 has no link state: ports are counted from link-flap records and ports with link shown as unknown.
 

@@ -1,0 +1,1245 @@
+{
+  "schema_version": 1,
+  "generator": {
+    "tool": "nic-report.py",
+    "version": "2.14.0",
+    "generated_at": "2026-10-27T14:31:27+00:00"
+  },
+  "title": "NIC Health: cross-site comparison (SITE1 · SITE2)",
+  "classification": "Fictional sample data",
+  "selection": {
+    "sites": [
+      {
+        "site": "SITE1",
+        "source": "sweep",
+        "sweep": "20261027T143057Z",
+        "path": "samples/sweep/SITE1/20261027T143057Z",
+        "hosts": 3
+      },
+      {
+        "site": "SITE2",
+        "source": "sweep",
+        "sweep": "20261027T143057Z",
+        "path": "samples/sweep/SITE2/20261027T143057Z",
+        "hosts": 3
+      }
+    ],
+    "missing_sites": [],
+    "at": null,
+    "role_regex": "^[^-]+-[^-]+-(?P<role>[a-z]+\\d+[a-z]*)-\\d+",
+    "baseline": "scope",
+    "rx_delta_db": 5.0,
+    "flap_min": 100,
+    "lldp_lookback_days": 30,
+    "suppress": null
+  },
+  "multi_site": true,
+  "coverage": {
+    "by": "site",
+    "groups": [
+      {
+        "group": "SITE1",
+        "hosts": 3,
+        "collected": 3,
+        "roles": {
+          "cmp1": 2,
+          "ctrl1": 1
+        },
+        "asics": 3,
+        "ports": 12,
+        "ports_with_link": 12,
+        "hosts_without_link_state": [],
+        "deep_checks_evaluated": 24,
+        "fec": {
+          "Firecode FEC": 12
+        },
+        "hosts_with_typed_metrics": 3,
+        "hosts_with_impact_facts": 3,
+        "hosts_with_xray": 3,
+        "lldp_from_earlier_sweep": 0,
+        "optics": {
+          "deep": 12,
+          "nic-xray": 0,
+          "none": 0
+        },
+        "tool_versions": [
+          "2.14.0"
+        ],
+        "levels": [
+          "deep"
+        ],
+        "intervals_s": [
+          30
+        ],
+        "dates": [
+          "2026-10-27"
+        ]
+      },
+      {
+        "group": "SITE2",
+        "hosts": 3,
+        "collected": 2,
+        "roles": {
+          "stor1": 3
+        },
+        "asics": 2,
+        "ports": 8,
+        "ports_with_link": 8,
+        "hosts_without_link_state": [],
+        "deep_checks_evaluated": 16,
+        "fec": {
+          "Firecode FEC": 8
+        },
+        "hosts_with_typed_metrics": 2,
+        "hosts_with_impact_facts": 2,
+        "hosts_with_xray": 2,
+        "lldp_from_earlier_sweep": 0,
+        "optics": {
+          "deep": 8,
+          "nic-xray": 0,
+          "none": 0
+        },
+        "tool_versions": [
+          "2.14.0"
+        ],
+        "levels": [
+          "deep"
+        ],
+        "intervals_s": [
+          30
+        ],
+        "dates": [
+          "2026-10-27"
+        ]
+      }
+    ],
+    "not_collected": [
+      {
+        "site": "SITE2",
+        "host": "acme-s2-stor1-03",
+        "status": "ssh-fail",
+        "exit_code": "255",
+        "problem": null
+      }
+    ],
+    "missing_sites": [],
+    "caveats": []
+  },
+  "verdicts": [
+    {
+      "site": "SITE1",
+      "hosts": 3,
+      "collected": 3,
+      "by_verdict": {
+        "OK": 2,
+        "WARN": 0,
+        "CRIT": 1,
+        "UNKNOWN": 0
+      },
+      "clean": 2,
+      "clean_pct": 66.7,
+      "findings": {
+        "CRIT": 1,
+        "WARN": 1,
+        "UNKNOWN": 0
+      },
+      "roles": [
+        {
+          "role": "cmp1",
+          "hosts": 2,
+          "collected": 2,
+          "by_verdict": {
+            "OK": 1,
+            "WARN": 0,
+            "CRIT": 1,
+            "UNKNOWN": 0
+          },
+          "clean": 1,
+          "clean_pct": 50.0,
+          "findings": {
+            "CRIT": 1,
+            "WARN": 1,
+            "UNKNOWN": 0
+          }
+        },
+        {
+          "role": "ctrl1",
+          "hosts": 1,
+          "collected": 1,
+          "by_verdict": {
+            "OK": 1,
+            "WARN": 0,
+            "CRIT": 0,
+            "UNKNOWN": 0
+          },
+          "clean": 1,
+          "clean_pct": 100.0,
+          "findings": {
+            "CRIT": 0,
+            "WARN": 0,
+            "UNKNOWN": 0
+          }
+        }
+      ],
+      "hosts_detail": [
+        {
+          "host": "acme-s1-cmp1-01",
+          "role": "cmp1",
+          "status": "ok",
+          "verdict": "CRIT"
+        },
+        {
+          "host": "acme-s1-cmp1-02",
+          "role": "cmp1",
+          "status": "ok",
+          "verdict": "OK"
+        },
+        {
+          "host": "acme-s1-ctrl1-01",
+          "role": "ctrl1",
+          "status": "ok",
+          "verdict": "OK"
+        }
+      ]
+    },
+    {
+      "site": "SITE2",
+      "hosts": 3,
+      "collected": 2,
+      "by_verdict": {
+        "OK": 0,
+        "WARN": 2,
+        "CRIT": 0,
+        "UNKNOWN": 0
+      },
+      "clean": 0,
+      "clean_pct": 0.0,
+      "findings": {
+        "CRIT": 0,
+        "WARN": 4,
+        "UNKNOWN": 0
+      },
+      "roles": [
+        {
+          "role": "stor1",
+          "hosts": 3,
+          "collected": 2,
+          "by_verdict": {
+            "OK": 0,
+            "WARN": 2,
+            "CRIT": 0,
+            "UNKNOWN": 0
+          },
+          "clean": 0,
+          "clean_pct": 0.0,
+          "findings": {
+            "CRIT": 0,
+            "WARN": 4,
+            "UNKNOWN": 0
+          }
+        }
+      ],
+      "hosts_detail": [
+        {
+          "host": "acme-s2-stor1-01",
+          "role": "stor1",
+          "status": "ok",
+          "verdict": "WARN"
+        },
+        {
+          "host": "acme-s2-stor1-02",
+          "role": "stor1",
+          "status": "ok",
+          "verdict": "WARN"
+        },
+        {
+          "host": "acme-s2-stor1-03",
+          "role": "stor1",
+          "status": "ssh-fail",
+          "verdict": null
+        }
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "severity": "CRIT",
+      "scope": "port",
+      "target": "eth0",
+      "check_id": "mlx5.phy.errors",
+      "value": "rx_symbol_err_phy=+943",
+      "unit": "",
+      "threshold": "",
+      "evidence": "rx_symbol_err_phy=414877072 (+943) rx_pcs_symbol_err_phy=414877072 (+943) rx_corrected_bits_phy=2379976318 (+9297); rx_bits_phy not exposed",
+      "hint": "Uncorrectable symbol errors",
+      "ref": "docs/design/nic-health.md",
+      "site": "SITE1",
+      "host": "acme-s1-cmp1-01",
+      "role": "cmp1",
+      "collected_at": "2026-10-27T14:30:56Z",
+      "tool_version": "2.14.0",
+      "level": "deep",
+      "mode": "delta",
+      "interval_s": 30,
+      "uptime_s": 1991254,
+      "boot_id": "3f2a6c1e-8b4d-4e7f-9a10-5c6d7e8f9a01",
+      "metrics": {
+        "symbol_errors": {
+          "total": 414877072,
+          "delta": 943
+        }
+      },
+      "service": {
+        "in_use": true,
+        "in_use_reasons": [
+          "bond"
+        ],
+        "bond": "bond0",
+        "bond_link_failures": 7,
+        "has_traffic": true
+      }
+    },
+    {
+      "severity": "WARN",
+      "scope": "port",
+      "target": "eth0",
+      "check_id": "generic.link.lookback",
+      "value": "3",
+      "unit": "",
+      "threshold": "",
+      "evidence": "3 link-downs",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "site": "SITE1",
+      "host": "acme-s1-cmp1-01",
+      "role": "cmp1",
+      "collected_at": "2026-10-27T14:30:56Z",
+      "tool_version": "2.14.0",
+      "level": "deep",
+      "mode": "delta",
+      "interval_s": 30,
+      "uptime_s": 1991254,
+      "boot_id": "3f2a6c1e-8b4d-4e7f-9a10-5c6d7e8f9a01",
+      "metrics": {},
+      "service": {
+        "in_use": true,
+        "in_use_reasons": [
+          "bond"
+        ],
+        "bond": "bond0",
+        "bond_link_failures": 7,
+        "has_traffic": true
+      }
+    },
+    {
+      "severity": "WARN",
+      "scope": "asic",
+      "target": "0000:01:00",
+      "check_id": "generic.pcie.link",
+      "value": "2.5 GT/s x4",
+      "unit": "",
+      "threshold": "16.0 GT/s x4 (slot)",
+      "evidence": "",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "site": "SITE2",
+      "host": "acme-s2-stor1-01",
+      "role": "stor1",
+      "collected_at": "2026-10-27T14:30:56Z",
+      "tool_version": "2.14.0",
+      "level": "deep",
+      "mode": "delta",
+      "interval_s": 30,
+      "uptime_s": 1998454,
+      "boot_id": "3f2a6c1e-8b4d-4e7f-9a10-5c6d7e8f9a03",
+      "metrics": {}
+    },
+    {
+      "severity": "WARN",
+      "scope": "port",
+      "target": "eth0",
+      "check_id": "mlx5.nic.discards",
+      "value": "rx_discards_phy=+1",
+      "unit": "",
+      "threshold": "",
+      "evidence": "rx_discards_phy=12818188 (+1)",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "site": "SITE2",
+      "host": "acme-s2-stor1-01",
+      "role": "stor1",
+      "collected_at": "2026-10-27T14:30:56Z",
+      "tool_version": "2.14.0",
+      "level": "deep",
+      "mode": "delta",
+      "interval_s": 30,
+      "uptime_s": 1998454,
+      "boot_id": "3f2a6c1e-8b4d-4e7f-9a10-5c6d7e8f9a03",
+      "metrics": {
+        "discards": {
+          "total": 12818188,
+          "delta": 1
+        }
+      },
+      "service": {
+        "in_use": true,
+        "in_use_reasons": [
+          "bond"
+        ],
+        "bond": "bond0",
+        "bond_link_failures": 0,
+        "has_traffic": true
+      }
+    },
+    {
+      "severity": "WARN",
+      "scope": "asic",
+      "target": "0000:01:00",
+      "check_id": "generic.pcie.link",
+      "value": "2.5 GT/s x4",
+      "unit": "",
+      "threshold": "16.0 GT/s x4 (slot)",
+      "evidence": "",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "site": "SITE2",
+      "host": "acme-s2-stor1-02",
+      "role": "stor1",
+      "collected_at": "2026-10-27T14:30:56Z",
+      "tool_version": "2.14.0",
+      "level": "deep",
+      "mode": "delta",
+      "interval_s": 30,
+      "uptime_s": 2002054,
+      "boot_id": "3f2a6c1e-8b4d-4e7f-9a10-5c6d7e8f9a04",
+      "metrics": {}
+    },
+    {
+      "severity": "WARN",
+      "scope": "port",
+      "target": "eth0",
+      "check_id": "mlx5.nic.discards",
+      "value": "rx_discards_phy=+1",
+      "unit": "",
+      "threshold": "",
+      "evidence": "rx_discards_phy=9132210 (+1)",
+      "hint": "",
+      "ref": "docs/design/nic-health.md",
+      "site": "SITE2",
+      "host": "acme-s2-stor1-02",
+      "role": "stor1",
+      "collected_at": "2026-10-27T14:30:56Z",
+      "tool_version": "2.14.0",
+      "level": "deep",
+      "mode": "delta",
+      "interval_s": 30,
+      "uptime_s": 2002054,
+      "boot_id": "3f2a6c1e-8b4d-4e7f-9a10-5c6d7e8f9a04",
+      "metrics": {
+        "discards": {
+          "total": 9132210,
+          "delta": 1
+        }
+      },
+      "service": {
+        "in_use": true,
+        "in_use_reasons": [
+          "bond"
+        ],
+        "bond": "bond0",
+        "bond_link_failures": 0,
+        "has_traffic": true
+      }
+    }
+  ],
+  "baselines": {
+    "rx_by_module_type": {
+      "100GBASE-SR4 or 25GBASE-SR": {
+        "ports": 20,
+        "min": -8.6,
+        "p5": -0.81,
+        "median": -0.74,
+        "max": -0.6,
+        "mad": 0.07000000000000006
+      }
+    },
+    "whole_dbm_sites": [],
+    "tx_by_module_type": {
+      "100GBASE-SR4 or 25GBASE-SR": {
+        "ports": 20,
+        "min": -1.0,
+        "p5": -1.0,
+        "median": -1.0,
+        "max": -1.0,
+        "mad": 0.0
+      }
+    },
+    "rx_outliers": [
+      {
+        "site": "SITE1",
+        "host": "acme-s1-cmp1-01",
+        "role": "cmp1",
+        "port": "eth0",
+        "service": {
+          "in_use": true,
+          "in_use_reasons": [
+            "bond"
+          ],
+          "bond": "bond0",
+          "bond_link_failures": 7,
+          "has_traffic": true
+        },
+        "module_type": "100GBASE-SR4 or 25GBASE-SR",
+        "rx_dbm": -8.6,
+        "lanes": null,
+        "median_dbm": -0.74,
+        "delta_db": -7.86,
+        "robust_z": -75.7
+      }
+    ],
+    "rx_near_low_limit": [
+      {
+        "site": "SITE1",
+        "host": "acme-s1-cmp1-01",
+        "role": "cmp1",
+        "port": "eth0",
+        "service": {
+          "in_use": true,
+          "in_use_reasons": [
+            "bond"
+          ],
+          "bond": "bond0",
+          "bond_link_failures": 7,
+          "has_traffic": true
+        },
+        "rx_dbm": -8.6,
+        "low_limit_dbm": -11.3
+      }
+    ],
+    "rx_not_evaluated": 0,
+    "ports_link_inferred": 0,
+    "errors_since_boot": [
+      {
+        "site": "SITE1",
+        "host": "acme-s1-cmp1-01",
+        "role": "cmp1",
+        "port": "eth0",
+        "service": {
+          "in_use": true,
+          "in_use_reasons": [
+            "bond"
+          ],
+          "bond": "bond0",
+          "bond_link_failures": 7,
+          "has_traffic": true
+        },
+        "total": 414877072,
+        "window": 943,
+        "per_hour": 750000.0
+      }
+    ],
+    "errors_ports": 1,
+    "flaps": [],
+    "discards": [
+      {
+        "site": "SITE2",
+        "host": "acme-s2-stor1-01",
+        "role": "stor1",
+        "port": "eth0",
+        "service": {
+          "in_use": true,
+          "in_use_reasons": [
+            "bond"
+          ],
+          "bond": "bond0",
+          "bond_link_failures": 0,
+          "has_traffic": true
+        },
+        "total": 12818188,
+        "window": 1
+      },
+      {
+        "site": "SITE2",
+        "host": "acme-s2-stor1-02",
+        "role": "stor1",
+        "port": "eth0",
+        "service": {
+          "in_use": true,
+          "in_use_reasons": [
+            "bond"
+          ],
+          "bond": "bond0",
+          "bond_link_failures": 0,
+          "has_traffic": true
+        },
+        "total": 9132210,
+        "window": 1
+      }
+    ],
+    "discard_ports": 2,
+    "hottest_modules": [
+      {
+        "site": "SITE1",
+        "host": "acme-s1-cmp1-01",
+        "role": "cmp1",
+        "port": "eth0",
+        "service": {
+          "in_use": true,
+          "in_use_reasons": [
+            "bond"
+          ],
+          "bond": "bond0",
+          "bond_link_failures": 7,
+          "has_traffic": true
+        },
+        "temp_c": 40.0,
+        "high_c": 90.0
+      },
+      {
+        "site": "SITE1",
+        "host": "acme-s1-cmp1-01",
+        "role": "cmp1",
+        "port": "eth1",
+        "service": {
+          "in_use": true,
+          "in_use_reasons": [
+            "bond"
+          ],
+          "bond": "bond0",
+          "bond_link_failures": 0,
+          "has_traffic": true
+        },
+        "temp_c": 40.0,
+        "high_c": 90.0
+      },
+      {
+        "site": "SITE1",
+        "host": "acme-s1-cmp1-01",
+        "role": "cmp1",
+        "port": "eth2",
+        "service": {
+          "in_use": false,
+          "in_use_reasons": [],
+          "has_traffic": false
+        },
+        "temp_c": 40.0,
+        "high_c": 90.0
+      },
+      {
+        "site": "SITE1",
+        "host": "acme-s1-cmp1-01",
+        "role": "cmp1",
+        "port": "eth3",
+        "service": {
+          "in_use": false,
+          "in_use_reasons": [],
+          "has_traffic": false
+        },
+        "temp_c": 40.0,
+        "high_c": 90.0
+      },
+      {
+        "site": "SITE1",
+        "host": "acme-s1-cmp1-02",
+        "role": "cmp1",
+        "port": "eth0",
+        "service": {
+          "in_use": true,
+          "in_use_reasons": [
+            "bond"
+          ],
+          "bond": "bond0",
+          "bond_link_failures": 0,
+          "has_traffic": true
+        },
+        "temp_c": 40.0,
+        "high_c": 90.0
+      }
+    ],
+    "modules_near_high_limit": [],
+    "baseline": {
+      "scope": "scope",
+      "sites": [
+        "SITE1",
+        "SITE2"
+      ],
+      "report_sites": [
+        "SITE1",
+        "SITE2"
+      ],
+      "ports_with_rx": 20,
+      "excluded": []
+    },
+    "pcie": {
+      "below_capability": [
+        {
+          "site": "SITE2",
+          "host": "acme-s2-stor1-01",
+          "role": "stor1",
+          "asic": "0000:01:00",
+          "value": "2.5 GT/s x4",
+          "threshold": "16.0 GT/s x4 (slot)"
+        },
+        {
+          "site": "SITE2",
+          "host": "acme-s2-stor1-02",
+          "role": "stor1",
+          "asic": "0000:01:00",
+          "value": "2.5 GT/s x4",
+          "threshold": "16.0 GT/s x4 (slot)"
+        }
+      ],
+      "slot_limited": {}
+    }
+  },
+  "patterns": {
+    "within_sites": [
+      {
+        "site": "SITE2",
+        "role": "stor1",
+        "issue": "generic.pcie.link",
+        "target": "0000:01:00",
+        "hosts": [
+          "acme-s2-stor1-01",
+          "acme-s2-stor1-02"
+        ],
+        "role_hosts": 2
+      },
+      {
+        "site": "SITE2",
+        "role": "stor1",
+        "issue": "mlx5.nic.discards",
+        "target": "eth0",
+        "hosts": [
+          "acme-s2-stor1-01",
+          "acme-s2-stor1-02"
+        ],
+        "role_hosts": 2
+      }
+    ],
+    "across_sites": [],
+    "roles_known": true
+  },
+  "suppressed": null,
+  "diagnosis": {
+    "catalogs": [
+      {
+        "file": "nic-report-rules.json",
+        "catalog_version": "2026.10.1",
+        "rules": 17,
+        "overrides": []
+      }
+    ],
+    "rules": 17,
+    "matches": [
+      {
+        "rule": "OPT-ATTEN-ACTIVE",
+        "scope": "port",
+        "target": [
+          "SITE1",
+          "acme-s1-cmp1-01",
+          "eth0"
+        ]
+      },
+      {
+        "rule": "PCIE-SHARED",
+        "scope": "asic",
+        "target": [
+          "SITE2",
+          "acme-s2-stor1-01",
+          "0000:01:00"
+        ]
+      },
+      {
+        "rule": "PCIE-SHARED",
+        "scope": "asic",
+        "target": [
+          "SITE2",
+          "acme-s2-stor1-02",
+          "0000:01:00"
+        ]
+      },
+      {
+        "rule": "PCIE-DISCARDS",
+        "scope": "asic",
+        "target": [
+          "SITE2",
+          "acme-s2-stor1-01",
+          "0000:01:00"
+        ]
+      },
+      {
+        "rule": "PCIE-DISCARDS",
+        "scope": "asic",
+        "target": [
+          "SITE2",
+          "acme-s2-stor1-02",
+          "0000:01:00"
+        ]
+      }
+    ],
+    "recommendations": [
+      {
+        "id": "R1",
+        "priority": 1,
+        "score": 0.5,
+        "base_priority": 1,
+        "adjustments": [
+          "raised half a level: bond0 member with 7 bond link failures"
+        ],
+        "activity": "window",
+        "service_impact": true,
+        "scope": "port",
+        "site": "SITE1",
+        "role": "cmp1",
+        "hosts": [
+          "acme-s1-cmp1-01"
+        ],
+        "target": "eth0",
+        "peers": [
+          "acme-s1-leaf-01.example.net et-0/0/2:0"
+        ],
+        "peer_sweeps": [
+          null
+        ],
+        "rules": [
+          {
+            "id": "OPT-ATTEN-ACTIVE",
+            "priority": 1,
+            "ref": "docs/design/nic-health.md §6.2",
+            "file": "nic-report-rules.json"
+          }
+        ],
+        "diagnosis": "Attenuated optical path: Rx -8.6 dBm is -7.86 dB from its peers' median, and the link is failing now (3 link-down messages in the look-back window, 1 carrier changes since driver load, 943 symbol errors in the window).",
+        "action": "Clean or inspect both fibre ends, then replace the optic and the cable leg to acme-s1-leaf-01.example.net et-0/0/2:0; check the switch side's Tx and DOM for that lane.",
+        "modifiers": [],
+        "targets": [
+          [
+            "SITE1",
+            "acme-s1-cmp1-01",
+            "eth0"
+          ]
+        ],
+        "covers": [
+          [
+            "SITE1",
+            "acme-s1-cmp1-01",
+            "eth0",
+            "generic.link.flaps"
+          ],
+          [
+            "SITE1",
+            "acme-s1-cmp1-01",
+            "eth0",
+            "generic.link.lookback"
+          ],
+          [
+            "SITE1",
+            "acme-s1-cmp1-01",
+            "eth0",
+            "generic.link.state"
+          ],
+          [
+            "SITE1",
+            "acme-s1-cmp1-01",
+            "eth0",
+            "mlx5.deep.ber"
+          ],
+          [
+            "SITE1",
+            "acme-s1-cmp1-01",
+            "eth0",
+            "mlx5.deep.module"
+          ],
+          [
+            "SITE1",
+            "acme-s1-cmp1-01",
+            "eth0",
+            "mlx5.frame.errors"
+          ],
+          [
+            "SITE1",
+            "acme-s1-cmp1-01",
+            "eth0",
+            "mlx5.link.phy_down"
+          ],
+          [
+            "SITE1",
+            "acme-s1-cmp1-01",
+            "eth0",
+            "mlx5.phy.errors"
+          ]
+        ],
+        "facts": {
+          "site": "SITE1",
+          "host": "acme-s1-cmp1-01",
+          "role": "cmp1",
+          "port": "eth0",
+          "link": true,
+          "rx_dbm": -8.6,
+          "optics_source": "deep",
+          "module_type": "100GBASE-SR4 or 25GBASE-SR",
+          "tx_dbm": -1.0,
+          "lanes": 1,
+          "optics_status": "OK",
+          "module_vendor": "VENDOR",
+          "rx_delta_host_db": -7.86,
+          "rx_low_host": true,
+          "rx_delta_fleet_db": -7.86,
+          "rx_low_fleet": true,
+          "rx_delta_db": -7.86,
+          "rx_low": true,
+          "phy_err_total": 414877072,
+          "phy_err_window": 943,
+          "phy_err_growing": true,
+          "phy_err_rate_s": 31.433,
+          "phy_err_rate_h_uptime": 750058.736,
+          "carrier_changes": 1,
+          "flaps_window": 0,
+          "link_down_recent": 3,
+          "fec": "Firecode FEC",
+          "fec_mismatch": false,
+          "flaps_high": false,
+          "in_use": true,
+          "in_use_reasons": [
+            "bond"
+          ],
+          "bond_link_failures": 7,
+          "has_traffic": true,
+          "bond": "bond0",
+          "lacp_aggregator": 1,
+          "lacp_partner": "02:00:5e:10:00:01",
+          "lacp_partial": false,
+          "peer_switch": "acme-s1-leaf-01.example.net",
+          "peer_port": "et-0/0/2:0",
+          "peer_descr": "acme port 2",
+          "speed_mbps": 25000,
+          "mtu": 9000,
+          "vlans": [
+            100,
+            110,
+            120
+          ],
+          "numa_node": 0,
+          "slot_label": "Slot 2",
+          "peer": "acme-s1-leaf-01.example.net et-0/0/2:0",
+          "asic": "0000:01:00",
+          "idle": false,
+          "active": 2,
+          "severity": "CRIT",
+          "checks": [
+            "generic.link.lookback",
+            "mlx5.phy.errors"
+          ]
+        },
+        "patterns": []
+      },
+      {
+        "id": "R2",
+        "priority": 2,
+        "score": 2.0,
+        "base_priority": 3,
+        "adjustments": [
+          "raised 1 level(s) by PCIE-DISCARDS"
+        ],
+        "activity": "none",
+        "service_impact": false,
+        "scope": "asic",
+        "site": "SITE2",
+        "role": "stor1",
+        "hosts": [
+          "acme-s2-stor1-01",
+          "acme-s2-stor1-02"
+        ],
+        "target": "0000:01:00",
+        "peers": [],
+        "peer_sweeps": [],
+        "rules": [
+          {
+            "id": "PCIE-SHARED",
+            "priority": 3,
+            "ref": "docs/design/nic-health.md §6.1",
+            "file": "nic-report-rules.json"
+          },
+          {
+            "id": "PCIE-DISCARDS",
+            "priority": "modifier",
+            "ref": "docs/design/nic-health.md §6.2",
+            "file": "nic-report-rules.json"
+          }
+        ],
+        "diagnosis": "PCIe link trained at 2.5 GT/s x4 where card and slot support 16.0 GT/s x4 (slot), on 2 of 2 hosts of the role: a shared cause.",
+        "action": "Check the BIOS PCIe slot speed and bifurcation profile of Slot 2 before replacing hardware; then reseat the card or riser.",
+        "modifiers": [
+          {
+            "id": "PCIE-DISCARDS",
+            "diagnosis": "The bus is a bottleneck: receive buffer discards keep growing on eth0.",
+            "action": "Fixing the PCIe link speed should stop the discards; re-check them afterwards."
+          }
+        ],
+        "targets": [
+          [
+            "SITE2",
+            "acme-s2-stor1-01",
+            "0000:01:00"
+          ],
+          [
+            "SITE2",
+            "acme-s2-stor1-02",
+            "0000:01:00"
+          ]
+        ],
+        "covers": [
+          [
+            "SITE2",
+            "acme-s2-stor1-01",
+            "0000:01:00",
+            "generic.pcie.link"
+          ],
+          [
+            "SITE2",
+            "acme-s2-stor1-01",
+            "0000:01:00",
+            "mlx5.nic.discards"
+          ],
+          [
+            "SITE2",
+            "acme-s2-stor1-02",
+            "0000:01:00",
+            "generic.pcie.link"
+          ],
+          [
+            "SITE2",
+            "acme-s2-stor1-02",
+            "0000:01:00",
+            "mlx5.nic.discards"
+          ],
+          [
+            "SITE2",
+            "acme-s2-stor1-01",
+            "eth0",
+            "mlx5.nic.discards"
+          ],
+          [
+            "SITE2",
+            "acme-s2-stor1-02",
+            "eth0",
+            "mlx5.nic.discards"
+          ]
+        ],
+        "facts": {
+          "site": "SITE2",
+          "host": "acme-s2-stor1-01",
+          "role": "stor1",
+          "asic": "0000:01:00",
+          "role_hosts": 2,
+          "role_hosts_pcie": 2,
+          "pcie_trained": "2.5 GT/s x4",
+          "pcie_supported": "16.0 GT/s x4 (slot)",
+          "slot_limited": false,
+          "role_share_pcie": 1.0,
+          "pcie_below_cap": true,
+          "severity": "WARN",
+          "checks": [
+            "generic.pcie.link"
+          ],
+          "numa_node": 0,
+          "slot_label": "Slot 2",
+          "rx_discards_growing": true,
+          "rx_discards_total": 12818188,
+          "rx_discards_ports": [
+            "eth0"
+          ],
+          "discards_mapping": "nic-xray"
+        },
+        "patterns": []
+      }
+    ],
+    "facts": {
+      "port": {
+        "targets": 20,
+        "facts": {
+          "active": 20,
+          "asic": 20,
+          "ber_effective": 0,
+          "bond": 10,
+          "bond_link_failures": 10,
+          "carrier_changes": 20,
+          "checks": 3,
+          "cross_site_sites": 0,
+          "deep_opcode": 0,
+          "deep_recommendation": 0,
+          "deep_signal_integrity": 0,
+          "discards_growing": 2,
+          "discards_total": 2,
+          "discards_window": 2,
+          "fec": 20,
+          "fec_mismatch": 20,
+          "flaps_high": 20,
+          "flaps_window": 20,
+          "has_traffic": 20,
+          "host": 20,
+          "idle": 20,
+          "in_use": 20,
+          "in_use_reasons": 20,
+          "lacp_aggregator": 10,
+          "lacp_partial": 10,
+          "lacp_partner": 10,
+          "lanes": 20,
+          "link": 20,
+          "link_down_recent": 1,
+          "module_type": 20,
+          "module_vendor": 20,
+          "mtu": 20,
+          "numa_node": 20,
+          "optics_source": 20,
+          "optics_status": 20,
+          "peer": 20,
+          "peer_descr": 20,
+          "peer_from_sweep": 0,
+          "peer_port": 20,
+          "peer_switch": 20,
+          "phy_err_growing": 20,
+          "phy_err_rate_h_uptime": 20,
+          "phy_err_rate_s": 20,
+          "phy_err_total": 20,
+          "phy_err_window": 20,
+          "port": 20,
+          "role": 20,
+          "role_vlan_drift": 0,
+          "role_vlans": 0,
+          "rx_dbm": 20,
+          "rx_delta_db": 20,
+          "rx_delta_fleet_db": 20,
+          "rx_delta_host_db": 20,
+          "rx_lanes": 0,
+          "rx_low": 20,
+          "rx_low_fleet": 20,
+          "rx_low_host": 20,
+          "severity": 3,
+          "site": 20,
+          "slot_label": 20,
+          "speed_mbps": 20,
+          "tx_dbm": 20,
+          "vlans": 10
+        }
+      },
+      "asic": {
+        "targets": 5,
+        "facts": {
+          "asic": 5,
+          "checks": 2,
+          "discards_mapping": 2,
+          "host": 5,
+          "numa_node": 5,
+          "pcie_below_cap": 5,
+          "pcie_supported": 2,
+          "pcie_trained": 5,
+          "role": 5,
+          "role_hosts": 5,
+          "role_hosts_pcie": 5,
+          "role_share_pcie": 5,
+          "rx_discards_growing": 5,
+          "rx_discards_ports": 2,
+          "rx_discards_total": 2,
+          "severity": 2,
+          "site": 5,
+          "slot_label": 5,
+          "slot_limited": 5
+        }
+      },
+      "bond": {
+        "targets": 5,
+        "facts": {
+          "bond": 5,
+          "bond_lacp_split": 5,
+          "bond_link_failures": 5,
+          "bond_lldp_complete": 5,
+          "bond_mtu_mismatch": 5,
+          "bond_mtus": 5,
+          "bond_peer_switch_count": 5,
+          "bond_peer_switches": 5,
+          "bond_speed_mismatch": 5,
+          "bond_speeds": 5,
+          "host": 5,
+          "member_ports": 5,
+          "members": 5,
+          "members_up": 5,
+          "peers": 5,
+          "role": 5,
+          "site": 5
+        }
+      },
+      "host": {
+        "targets": 5,
+        "facts": {
+          "findings_crit": 5,
+          "findings_unknown": 5,
+          "findings_warn": 5,
+          "host": 5,
+          "nic_xray": 5,
+          "role": 5,
+          "site": 5,
+          "tool_version": 5,
+          "uptime_s": 5,
+          "verdict": 5
+        }
+      },
+      "group": {
+        "targets": 3,
+        "facts": {
+          "clean_share": 3,
+          "hosts_clean": 3,
+          "hosts_crit": 3,
+          "hosts_warn": 3,
+          "role": 3,
+          "role_hosts": 3,
+          "role_hosts_pcie": 3,
+          "role_share_pcie": 3,
+          "site": 3
+        }
+      },
+      "fleet": {
+        "targets": 0,
+        "facts": {
+          "issues": 0,
+          "places": 0,
+          "role": 0,
+          "sites": 0,
+          "sites_with": 0
+        }
+      }
+    },
+    "unexplained": [],
+    "summary": [
+      {
+        "site": "SITE1",
+        "hosts": 3,
+        "collected": 3,
+        "clean": 2,
+        "clean_pct": 66.7,
+        "by_verdict": {
+          "OK": 2,
+          "WARN": 0,
+          "CRIT": 1,
+          "UNKNOWN": 0
+        },
+        "status": "CRIT"
+      },
+      {
+        "site": "SITE2",
+        "hosts": 3,
+        "collected": 2,
+        "clean": 0,
+        "clean_pct": 0.0,
+        "by_verdict": {
+          "OK": 0,
+          "WARN": 2,
+          "CRIT": 0,
+          "UNKNOWN": 0
+        },
+        "status": "WARN"
+      }
+    ]
+  }
+}

@@ -1,0 +1,45 @@
+Usage: nic-sweep.sh -f|--inventory FILE [-s|--site SITE]... [-J|--jump HOST] [-u|--user USER]
+       [-p|--parallel N] [-T|--timeout SEC] [-o|--output-dir DIR] [-l|--level basic|deep]
+       [-I|--interval SEC] [--no-xray] [--ship PATH] [--accept-new-hostkeys]
+       [-n|--no-color] [-v|--version] [-h|--help]
+
+Version: 2.14.0
+
+Description:
+ Runs nic-health on every host of an inventory over SSH, in parallel, and writes one
+ sweep per site under DIR/<site>/<UTC time>/: nodes/<host>.json (nic-health -O json,
+ verbatim), nodes/<host>.xray.json (nic-xray --all, where installed), nodes/<host>.err,
+ MANIFEST.tsv (status per host), merged.csv (all results plus collection metadata)
+ and sweep.json (how the sweep ran). Never prompts: ssh BatchMode and sudo -n only.
+
+Options:
+ -f, --inventory FILE    Hosts to sweep, one per line: site,host,address[,user]
+                         (# comments and a 'site,host,address,user' header allowed)
+ -s, --site SITE         Only sweep this site (repeatable; default: every site)
+ -J, --jump HOST         SSH jump host ([user@]host[:port], passed to ssh -J)
+ -u, --user USER         SSH user when the inventory line has none (default: ssh config)
+ -p, --parallel N        Hosts swept at once (default: 8, max: 256)
+ -T, --timeout SEC       Per-host limit for nic-health (default: interval + 300 s
+                         in deep mode, + 120 s in basic; max: 7200)
+ -o, --output-dir DIR    Root of the sweep tree (default: ./sweeps)
+ -l, --level LEVEL       nic-health level: basic or deep (default: deep)
+ -I, --interval SEC      nic-health sampling window (default: 30, max: 3600).
+                         30 s or longer catches bursty link errors that 5 s misses
+     --no-xray           Do not collect nic-xray --all --output json
+     --ship PATH         Send this local nic-health.sh to each host over ssh, run it from a
+                         temporary file and delete it (for hosts without the package).
+                         Needs sudo for 'bash /tmp/nic-health.*', which amounts to full root
+     --accept-new-hostkeys  Trust unknown host keys on first contact
+                         (ssh StrictHostKeyChecking=accept-new; default: your ssh policy)
+ -n, --no-color          Disable color and the progress bar
+ -v, --version           Display version information
+ -h, --help              Display this help message
+
+Exit status:
+ 0  Every host collected, all verdicts OK
+ 1  Every host collected, at least one WARN, no CRIT
+ 2  At least one CRIT (even if some hosts could not be collected)
+ 3  No CRIT, but a host was not collected; or no WARN and a host reported UNKNOWN;
+    or a usage error
+
+See also: nic-health.sh(8), nic-xray.sh(8). Design: docs/design/nic-sweep.md

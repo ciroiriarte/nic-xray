@@ -1,6 +1,11 @@
 .\" Man page for nic-xray.sh
 .\" Written in classic troff/groff format
-.TH NIC-XRAY 8 "2026-10-20" "nic-xray 2.13.0" "System Administration Commands"
+.\" ASCII fallbacks, used only by output devices that lack these glyphs (e.g. groff -Tps)
+.fchar \[u2500] -
+.fchar \[u2502] |
+.fchar \[u2514] +
+.fchar \[u2717] x
+.TH NIC-XRAY 8 "2026-10-27" "nic-xray 2.14.0" "System Administration Commands"
 .SH NAME
 nic-xray \- detailed physical network interface diagnostics
 .SH SYNOPSIS
@@ -1119,6 +1124,9 @@ Display help:
 .SH AUTHORS
 Ciro Iriarte <ciro.iriarte+software@gmail.com>
 .SH SEE ALSO
+.BR nic-health.sh (8),
+.BR nic-sweep.sh (8),
+.BR nic-report.py (8),
 .BR ethtool (8),
 .BR lldpctl (8),
 .BR lspci (8),
