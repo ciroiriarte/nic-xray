@@ -4,7 +4,7 @@ usage: nic-report.py [-h] [-R DIR] [-s SITE] [-a DATE] [-i SITE [PATH ...]] [-C 
                      [-X] [-t TEXT] [-c TEXT] [-v]
                      [SWEEP_DIR ...]
 
-Version: 2.14.0
+Version: 2.15.0
 
 Reports on nic-sweep sweeps (and legacy nic-health CSV) for one site, several or all:
 coverage, verdicts, every finding with its evidence, baselines and outliers over

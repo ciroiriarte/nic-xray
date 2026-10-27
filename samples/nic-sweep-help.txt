@@ -3,7 +3,7 @@ Usage: nic-sweep.sh -f|--inventory FILE [-s|--site SITE]... [-J|--jump HOST] [-u
        [-I|--interval SEC] [-L|--lookback MIN] [--no-xray] [--ship PATH]
        [--accept-new-hostkeys] [-n|--no-color] [-v|--version] [-h|--help]
 
-Version: 2.14.0
+Version: 2.15.0
 
 Description:
  Runs nic-health on every host of an inventory over SSH, in parallel, and writes one

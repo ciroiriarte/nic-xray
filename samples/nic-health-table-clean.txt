@@ -1,4 +1,4 @@
-🩺 nic-health.sh 2.14.0  host server-02.example.net  2026-10-20T17:46:28Z  window 5.02s
+🩺 nic-health.sh 2.15.0  host server-02.example.net  2026-10-20T17:46:28Z  window 5.02s
 
 Hardware
   0000:05:00  Intel Corporation 82599ES 10-Gigabit SFI/SFP+ Network Connection  (ixgbe, fw 0x800009e1, 1.3227.0)
