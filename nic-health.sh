@@ -46,9 +46,9 @@
 #                 failures, traffic in the window (docs/design/nic-sweep.md §7 P2/P3). Evidence,
 #                 table and CSV unchanged. Global addresses are read with one ip call per run
 #
-# Version: 2.13.0
+# Version: 2.14.0
 
-SCRIPT_VERSION="2.13.0"
+SCRIPT_VERSION="2.14.0"
 SCRIPT_NAME="nic-health.sh"
 JSON_SCHEMA_VERSION=2
 DESIGN_REF="docs/design/nic-health.md"

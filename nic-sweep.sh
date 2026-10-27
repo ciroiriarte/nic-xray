@@ -20,9 +20,9 @@
 #   - 2026-10-26: Phase 2 of docs/design/nic-sweep.md: inventory, parallel SSH, sweep layout,
 #                 manifest, merged CSV with collection metadata, exit codes, progress bar
 #
-# Version: 2.13.0
+# Version: 2.14.0
 
-SCRIPT_VERSION="2.13.0"
+SCRIPT_VERSION="2.14.0"
 SCRIPT_NAME="nic-sweep.sh"
 SWEEP_SCHEMA_VERSION=1
 DESIGN_REF="docs/design/nic-sweep.md"
