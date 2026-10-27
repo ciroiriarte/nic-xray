@@ -2245,10 +2245,10 @@ class TestRuleCatalog(Phase7Base):
     def test_packaged_catalog_loads(self):
         cat = nr.load_catalog(DEFAULT_RULES, [])
         self.assertEqual([r["id"] for r in cat["rules"]],
-                         ["OPT-ATTEN-ACTIVE", "OPT-ATTEN-LATENT", "OPT-ATTEN-EARLY", "OPT-LANE", "LINK-FLAP-HIST", "PCIE-SHARED", "PCIE-SEAT",
-                          "PCIE-SEAT-FEW", "PCIE-DISCARDS", "FEC-MISMATCH", "SIG-INTEGRITY", "PATTERN-CROSS-SITE", "LAG-SPLIT",
+                         ["OPT-ATTEN-ACTIVE", "OPT-ATTEN-LATENT", "OPT-ATTEN-EARLY", "OPT-LANE", "LINK-FLAP-HIST", "BOND-MEMBER-DOWN",
+                          "PCIE-SHARED", "PCIE-SEAT", "PCIE-SEAT-FEW", "PCIE-DISCARDS", "FEC-MISMATCH", "SIG-INTEGRITY", "PATTERN-CROSS-SITE", "LAG-SPLIT",
                           "BOND-SPEED-MISMATCH", "BOND-MTU-MISMATCH", "BOND-SINGLE-SWITCH", "VLAN-DRIFT", "OPT-WEAK-ANY-VENDOR"])
-        self.assertEqual(cat["files"], [{"file": DEFAULT_RULES, "catalog_version": "2026.10.3", "rules": 18, "overrides": []}])
+        self.assertEqual(cat["files"], [{"file": DEFAULT_RULES, "catalog_version": "2026.10.4", "rules": 19, "overrides": []}])
 
     def test_file_level_errors(self):
         self.bad({**catalog(), "schema_version": 2}, "unsupported schema_version 2")
@@ -2327,14 +2327,14 @@ class TestRuleCatalog(Phase7Base):
         md, args = self.report(["-R", self.root, "-u", first, "-u", second])
         dg = nr.analyse(*nr.load_selection(args), args)["diagnosis"]
         self.assertEqual([(c["file"], c["catalog_version"], c["rules"], c["overrides"]) for c in dg["catalogs"]],
-                         [(DEFAULT_RULES, "2026.10.3", 18, []), (first, "site.1", 2, ["OPT-ATTEN-ACTIVE"]),
+                         [(DEFAULT_RULES, "2026.10.4", 19, []), (first, "site.1", 2, ["OPT-ATTEN-ACTIVE"]),
                           (second, "site.2", 1, ["OPT-ATTEN-ACTIVE"])])
-        self.assertEqual(dg["rules"], 19)
+        self.assertEqual(dg["rules"], 20)
         port = next(r for r in dg["recommendations"] if r["scope"] == "port")
         self.assertEqual((port["diagnosis"], port["base_priority"], port["rules"][0]["file"]), ("Second eth0.", 2, second))
         self.assertEqual([r["rules"][0]["id"] for r in dg["recommendations"]], ["OPT-ATTEN-ACTIVE", "SITE-NEW"])
         # The report names each catalog file, not where it lives; the JSON keeps the path
-        self.assertIn("Rule catalogs: nic-report-rules.json (catalog 2026.10.3, 18 rules); first.json (catalog site.1, 2 "
+        self.assertIn("Rule catalogs: nic-report-rules.json (catalog 2026.10.4, 19 rules); first.json (catalog site.1, 2 "
                       "rules; overrides OPT-ATTEN-ACTIVE); second.json (catalog site.2, 1 rules; overrides OPT-ATTEN-ACTIVE).", md)
         self.assertNotIn(os.path.dirname(DEFAULT_RULES), md)
 
@@ -2404,6 +2404,29 @@ class TestStarterRules(Phase7Base):
         self.assert_rule("LINK-FLAP-HIST", False, carrier=99)
         window = rec("WARN", "port", "eth0", "generic.link.flaps", "+6", "carrier_changes T0=494 T1=500")
         self.assert_rule("LINK-FLAP-HIST", False, extra=[window])                                  # flapping now: not history
+
+    def test_bond_member_down(self):
+        down = dict(link=False, rx=-8.5, judged=False)
+        got = self.assert_rule("BOND-MEMBER-DOWN", True, impact=BOND_MEMBER, **down)
+        self.assertNotIn("LINK-FLAP-HIST", got)
+        f = self.facts()[self.TARGET]
+        # In use without link but still lit: Rx judged against the linked ports, which alone form the baseline
+        self.assertEqual((f["link"], f["rx_dbm"], f["rx_low"]), (False, -8.5, True))
+        self.assertEqual(self.analyse(["-R", self.root])[0]["baselines"]["rx_outliers"], [])
+        lookback = rec("CRIT", "port", "eth0", "generic.link.lookback", "3074", "3074 link-downs")
+        got = self.assert_rule("BOND-MEMBER-DOWN", True, impact=BOND_MEMBER, extra=[lookback], **down)
+        self.assertIn(self.TARGET, got["OPT-ATTEN-ACTIVE"])
+        r = next(r for r in self.diagnosis()["recommendations"] if r["targets"] == [list(self.TARGET)])
+        self.assertEqual(([x["id"] for x in r["rules"]], r["priority"]), (["BOND-MEMBER-DOWN", "OPT-ATTEN-ACTIVE"], 1))
+        self.assertTrue(r["diagnosis"].startswith("Bond member without link: bond0 runs without this port's redundancy (3 bond "
+                                                  "link failures since boot, 3,074 link-down messages in the look-back window)."))
+        self.assertIn("Attenuated optical path: Rx -8.5 dBm", r["diagnosis"])
+        # Bond named by nic-xray only (no service-impact facts): still a bond member
+        self.assert_rule("BOND-MEMBER-DOWN", True, xray=[xray_if("eth0", parent_bond="bond0", link="down")], **down)
+        self.assert_rule("BOND-MEMBER-DOWN", False, impact=BOND_MEMBER)                          # link up
+        got = self.assert_rule("BOND-MEMBER-DOWN", False, impact=IDLE, **down)                    # spare port
+        self.assertNotIn("rx_dbm", self.facts()[self.TARGET])                                    # spares stay unjudged
+        self.assertEqual(dict(got), {})
 
     def pcie_hosts(self, below, hosts=3, discards=()):
         shutil.rmtree(self.root, ignore_errors=True)

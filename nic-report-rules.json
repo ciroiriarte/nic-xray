@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": "2026.10.3",
+  "catalog_version": "2026.10.4",
   "description": "Starter diagnosis catalog of nic-report.py (docs/design/nic-sweep.md §6.3.1). Generic and public: site rules go in a separate file layered on with --rules.",
   "rules": [
     {
@@ -67,6 +67,19 @@
       "action": "Watch with a longer window (nic-health -I 60 or more) and inspect the cable to {peer|the switch port}.",
       "priority": 4,
       "explains": ["generic.link.flaps", "mlx5.link.phy_down"],
+      "ref": "docs/design/nic-health.md §6.1"
+    },
+    {
+      "id": "BOND-MEMBER-DOWN",
+      "scope": "port",
+      "when": { "all": [
+        { "fact": "link", "op": "eq", "value": false },
+        { "fact": "bond", "op": "exists", "value": true } ] },
+      "diagnosis": "Bond member without link: {bond} runs without this port's redundancy ({bond_link_failures|an unknown number of} bond link failures since boot, {link_down_recent|no count of} link-down messages in the look-back window).",
+      "action": "Restore the link to {peer|the switch port (no LLDP while it is down: see the cabling records)}: check the optic and fibre, then the switch port's state and log.",
+      "priority": 1,
+      "explains": ["generic.link.state", "generic.link.lookback", "generic.link.flaps", "mlx5.link.phy_down", "mlx5.frame.errors",
+                   "mlx5.phy.errors"],
       "ref": "docs/design/nic-health.md §6.1"
     },
     {

@@ -3,7 +3,7 @@
   "generator": {
     "tool": "nic-report.py",
     "version": "2.15.0",
-    "generated_at": "2026-10-27T18:54:23+00:00"
+    "generated_at": "2026-10-27T20:26:04+00:00"
   },
   "title": "NIC Health: cross-site comparison (SITE1 · SITE2)",
   "classification": "Fictional sample data",
@@ -725,12 +725,12 @@
     "catalogs": [
       {
         "file": "nic-report-rules.json",
-        "catalog_version": "2026.10.3",
-        "rules": 18,
+        "catalog_version": "2026.10.4",
+        "rules": 19,
         "overrides": []
       }
     ],
-    "rules": 18,
+    "rules": 19,
     "matches": [
       {
         "rule": "OPT-ATTEN-ACTIVE",

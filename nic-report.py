@@ -1999,6 +1999,22 @@ def _rx_reading(p):
     return None
 
 
+def _rx_reading_unlinked(p):
+    """(module key, Rx dBm, source) of a port in use (bond member, address, ...) that has no link but still
+    receives light: judged against the baselines, never part of them (A4 keeps ports with link only); None
+    otherwise, so a spare port is not judged."""
+    x = p.get("xray") or {}
+    if p["linked"] or not ((p.get("service") or {}).get("in_use") or x.get("bond")):
+        return None
+    rx = p.get("rx")
+    if rx is not None and rx["dbm"] > NO_LIGHT_DBM and module_type(p):
+        return module_type(p), rx["dbm"], "deep"
+    if x.get("rx_dbm") is not None and x["rx_dbm"] > NO_LIGHT_DBM and x.get("module_type"):
+        lanes = x.get("rx_lanes")
+        return f"{x['module_type']} · {len(lanes)}-lane" if lanes else x["module_type"], x["rx_dbm"], "nic-xray"
+    return None
+
+
 def _robust_outlier(delta, st, margin):
     z = (delta / (MAD_SCALE * st["mad"])) if st["mad"] else None
     return delta <= -margin and (z is None or z <= -ROBUST_Z_MIN)
@@ -2056,7 +2072,7 @@ def rule_targets(sites, report_ports, baseline_ports, a4, pcie, pt, multi, args)
         x = p.get("xray") or {}
         f = {"site": p["site"], "host": p["host"], "role": p["role"], "port": p["port"]}
         _put(f, link=p["linked"] if p["link"] is not None or not x else x.get("link"))
-        got = readings.get(key)
+        got = readings.get(key) or _rx_reading_unlinked(p)
         if got:
             mtype, rx, src = got
             f.update(rx_dbm=rx, optics_source=src, module_type=mtype)
