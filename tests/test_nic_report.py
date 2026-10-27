@@ -1730,7 +1730,7 @@ def strip_metrics(doc, keep=()):
 
 
 BOND_MEMBER = {"in_use": True, "in_use_reasons": ["bond"], "bond": "bond0", "bond_link_failures": 3,
-               "rx_bytes": {"total": 9000, "delta": 500}, "tx_bytes": {"total": 10, "delta": 0}}
+               "rx_bytes": {"total": 9000000, "delta": 500000}, "tx_bytes": {"total": 10, "delta": 0}}
 
 
 class TestTypedMetrics(unittest.TestCase):
@@ -1817,6 +1817,10 @@ class TestTypedMetrics(unittest.TestCase):
         self.assertEqual(nr.impact_facts({"rx_bytes": {"total": 9}, "tx_bytes": {"total": 9, "delta": 5}}),
                          {"has_traffic": True})
         self.assertEqual(nr.impact_facts({}), {})
+        control = {"rx_bytes": {"total": 9, "delta": 345}, "tx_bytes": {"total": 9, "delta": 282}}
+        self.assertEqual(nr.impact_facts(control, 30), {"has_traffic": False})      # control frames, not traffic
+        self.assertEqual(nr.impact_facts(control), {"has_traffic": True})           # window length unknown
+        self.assertEqual(nr.impact_facts(dict(control, tx_bytes={"total": 9, "delta": 3001}), 30), {"has_traffic": True})
         self.assertEqual(nr.service_label({"bond": "bond0", "in_use": True, "bond_link_failures": 1200}),
                          "bond0 member, in use, 1,200 bond link failures")
         self.assertEqual(nr.service_label({"in_use": False, "has_traffic": False}), "not in use")
@@ -2569,7 +2573,13 @@ class TestPrioritisation(Phase7Base):
         self.assertEqual(self.lane(None), (1.0, 1, None))                                       # no P3: not judged
         self.assertEqual(self.lane(IDLE), (2.0, 2, True))
         self.assertEqual(self.lane(dict(IDLE, in_use=True, in_use_reasons=["global_address"])), (1.0, 1, False))
-        self.assertEqual(self.lane(dict(IDLE, rx_bytes={"total": 4096, "delta": 2048})), (1.0, 1, False))  # traffic: not idle
+        self.assertEqual(self.lane(dict(IDLE, rx_bytes={"total": 409600, "delta": 204800})), (1.0, 1, False))  # traffic
+        # Control frames only (LLDP and the like, as on a live fleet: 345 B in, 282 B out over 30 s): still idle
+        control = dict(IDLE, rx_bytes={"total": 57384195, "delta": 345}, tx_bytes={"total": 808778, "delta": 282})
+        self.assertEqual(self.lane(control), (2.0, 2, True))
+        at_floor = nr.CONTROL_TRAFFIC_BPS * 30
+        self.assertEqual(self.lane(dict(IDLE, rx_bytes={"total": 10 ** 6, "delta": at_floor})), (2.0, 2, True))
+        self.assertEqual(self.lane(dict(IDLE, rx_bytes={"total": 10 ** 6, "delta": at_floor + 1})), (1.0, 1, False))
 
     def test_service_impact_raises_half_a_level(self):
         self.assertEqual(self.lane(BOND_MEMBER), (0.5, 1, False))
@@ -3581,6 +3591,13 @@ class TestNarrativeCheck(unittest.TestCase):
         start = time.monotonic()
         nr.fact_pool(doc)
         self.assertLess(time.monotonic() - start, 5)
+
+    def test_compound_durations_as_the_report_writes_them(self):
+        doc = dict(self.DOC, elapsed_s=62018)                 # the report prints it as nr._duration: '17 h 13 min'
+        for ok in (nr._duration(62018), "17 hours and 13 minutes", "(17 h 13 min)", "17 h"):
+            self.assertEqual(nr.check_narrative([(1, ok)], doc)[0], [], ok)
+        for bad in ("17 h 20 min", "16 h 13 min", "3 d 4 h"):
+            self.assertEqual([p["token"] for p in nr.check_narrative([(1, bad)], doc)[0]], [bad], bad)
 
     def test_order_and_spelling_as_written(self):
         problems = nr.check_narrative([(1, "55 then 2026-01-01 and 55, BER 3.3×10^-9 or 7.1 × 10⁻⁹")], self.DOC)[0]

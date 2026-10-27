@@ -49,6 +49,9 @@
 #                 between hash-tagged lines). -n/--narrative FILE merges the model's text as subsection 1.1,
 #                 labelled as such and sanitised, after checking every number (unit-aware rounding), date and
 #                 recommendation ID against the facts; -N/--strict-narrative refuses it on a problem
+#   - 2026-10-27: Fixes from a live sweep: window traffic up to CONTROL_TRAFFIC_BPS (control frames such as
+#                 LLDP) no longer counts as traffic, so an unused port can be idle; the narrative check reads the
+#                 report's own compound durations ('17 h 13 min') as one number
 #
 # Version: 2.13.0
 """nic-report.py: single- and multi-site reports from nic-sweep sweeps and legacy nic-health CSV."""
@@ -145,6 +148,9 @@ PATTERN_ITEMS_SHOWN = 6         # places listed per pattern row before "and N mo
 MAX_COUNTER_DIGITS = 20         # 64-bit counters; longer digit runs in untrusted input are not counters
 MLX5_BITS_COUNTER = "rx_bits_phy"   # BER denominator: nic-health never lists it in the evidence
 # Service-impact facts (nic-health generic.link.state metrics, design §7 P3)
+# Window traffic per direction at or below this is control frames only (LLDP, STP, ARP, neighbour discovery: about
+# 10-25 B/s on unused ports of a live fleet), not service traffic: such a port can still be idle (P3, §6.3.2)
+CONTROL_TRAFFIC_BPS = 100
 IMPACT_KEYS = ("in_use", "in_use_reasons", "in_use_reasons_complete", "bond", "bond_link_failures", "rx_bytes", "tx_bytes")
 USE_REASONS = ("bond", "bridge", "upper", "sriov_vfs", "global_address")   # nic-health's in_use_reasons tokens
 # An interface name as the kernel allows it (1-15 characters, no whitespace, '/' or ':'); CONTROL_RE characters
@@ -1396,7 +1402,7 @@ def port_facts(sites):
                 m, cid = r["metrics"], r["check_id"]
                 if cid == LINK_STATE:
                     p["link"] = r["value"] == LINK_UP
-                    service = impact_facts(m)
+                    service = impact_facts(m, host.meta.get("interval_s"))
                     if service:
                         p["service"] = service
                 elif cid == "mlx5.deep.module":
@@ -1447,16 +1453,18 @@ def port_facts(sites):
     return list(ports.values())
 
 
-def impact_facts(m):
+def impact_facts(m, interval_s=None):
     """Service-impact facts of a port from its generic.link.state metrics (P3): in_use, in_use_reasons (and
     in_use_reasons_complete when nic-health could not check addresses), bond, bond_link_failures, and has_traffic:
     bytes received or sent in the sampling window. Totals since boot do not tell (LLDP and ARP alone make them grow),
     so without a window has_traffic is left out: true when either direction moved, false only when both have a
-    window and neither moved (a counter reset leaves its direction unknown). Each only when known."""
+    window and neither moved (a counter reset leaves its direction unknown). With the window's length, moving means
+    more than CONTROL_TRAFFIC_BPS: below it a port only sees control frames. Each only when known."""
     out = {k: m[k] for k in ("in_use", "in_use_reasons", "in_use_reasons_complete", "bond", "bond_link_failures")
            if k in m}
+    floor = CONTROL_TRAFFIC_BPS * interval_s if interval_s and interval_s > 0 else 0
     window = [m[k].get("delta") if isinstance(m.get(k), dict) else None for k in ("rx_bytes", "tx_bytes")]
-    if any(window):
+    if any(d is not None and d > floor for d in window):
         out["has_traffic"] = True
     elif all(d is not None for d in window):
         out["has_traffic"] = False
@@ -3612,6 +3620,9 @@ RATIO_TOKEN_RE = re.compile(r"\d+/\d+")              # '9/12 hosts': two numbers
 SUPERSCRIPT = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺", "0123456789-+")
 # 2.5×10^-6, 2.5 x 10⁻⁶ and a bare 10^-12: one token each, read as e-notation
 POWER_FORM_RE = re.compile(r"(?<![\w.,])(?:([-−+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s?[×x·*]\s?)?10(?:\^([-−+]?\d{1,3})|([⁻⁺]?[⁰¹²³⁴⁵⁶⁷⁸⁹]{1,3}))(?![\w^])")
+# A compound duration as the report writes it ('5 h 12 min', '3 d 4 h'; also 'hours', 'and'): one number
+_DAY, _HOUR, _MIN = "d|days?", "h|hrs?|hours?", "min|mins|minutes?"
+DURATION_RE = re.compile(rf"(?<![\w.,])(\d{{1,6}})\s?({_DAY}|{_HOUR})\s+(?:and\s+)?(\d{{1,6}})\s?({_HOUR}|{_MIN})(?![\w/])")
 TOKEN_RE = re.compile(r"(?:(?<!\.)\.(?!\.)|[^\s–—….])+")   # words; dashes, ellipses and '..' (ranges) separate them
 FACT_SPLIT_RE = re.compile(r"[=;()\[\]{}<>|/]")      # fact strings: 'rx=-8.8', '(25G)' and 'et-0/0/1' give numbers too
 TOKEN_LEAD = "([{\"'“‘«<>≈~≥≤±"
@@ -3696,7 +3707,7 @@ def _tokens(text):
     def mask(m):
         found.append((m.start(), m.group(0)))
         return " " * len(m.group(0))
-    masked = POWER_FORM_RE.sub(mask, text)               # one pass: linear in the text
+    masked = POWER_FORM_RE.sub(mask, DURATION_RE.sub(mask, text))   # one pass each: linear in the text
     for m in TOKEN_RE.finditer(masked):
         tok, start = m.group(0), m.start()
         lead = len(tok) - len(tok.lstrip(TOKEN_LEAD))
@@ -3732,6 +3743,11 @@ def _scan(text):
     toks, out = _tokens(text), []
     for k, (pos, tok) in enumerate(toks):
         nxt = toks[k + 1][1] if k + 1 < len(toks) else ""
+        m = DURATION_RE.fullmatch(tok)
+        if m:                                            # '17 h 13 min': within one smaller unit (the report
+            big, small = UNIT_FACTORS[m.group(2)], UNIT_FACTORS[m.group(4)]   # truncates its durations, _duration)
+            out.append((pos, tok, "number", [int(m.group(1)) * big + int(m.group(3)) * small], [small]))
+            continue
         m = POWER_FORM_RE.fullmatch(tok)
         if m:
             mant, power = m.group(1) or "1", m.group(2) or m.group(3).translate(SUPERSCRIPT)

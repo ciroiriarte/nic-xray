@@ -608,7 +608,9 @@ number of targets that have it.
 Recommendations are ranked by the rule's base priority, raised by modifiers and
 by half a level for a bond member with bond link failures, link drops or
 traffic in the window, and lowered one level for a port that is up but unused
-(not in use and no traffic, from nic-health service-impact facts); then by
+(not in use and no traffic, from nic-health service-impact facts). Traffic means
+more than 100 bytes per second in either direction over the sampling window:
+below that a port only sees control frames such as LLDP; then by
 activity (growing in the window before history only), service impact, number of
 hosts and place. The order and the text are the same on every run over the same
 data.
@@ -648,7 +650,9 @@ anything from 5,000 to 15,000, the usual ambiguity of trailing zeros). A unit gl
 to it, after a hyphen (4-hour) or in the next word converts it first: s, min, h,
 d, weeks against seconds; k and M; G, Gb/s and Gbps against Mb/s; a percentage
 as is or as a share (75% matches 0.75). Rates (98,765/h) and multiples (3x) are
-compared as written, and 9/12 is two numbers. Facts are every number of the JSON
+compared as written, and 9/12 is two numbers. A compound duration as the report
+writes it (17 h 13 min, 3 d 4 h) is one number, within one unit of its smaller
+part, since the report truncates durations. Facts are every number of the JSON
 document (a value in days or minutes also in seconds) and every number in its
 text.
 .TP
