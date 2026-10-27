@@ -6,8 +6,14 @@ _nic_report() {
 	# -s splits "--opt=value" so values complete in both forms
 	_init_completion -s || return
 
+	# -C/--compare OLD NEW: both are sweep directories (NEW follows OLD)
+	if (( cword >= 2 )) && [[ "${words[cword-2]}" == -C || "${words[cword-2]}" == --compare ]]; then
+		_filedir -d
+		return
+	fi
+
 	case "$prev" in
-		-R|--sweep-root|-T|--theme)
+		-R|--sweep-root|-T|--theme|-C|--compare)
 			_filedir -d
 			return
 			;;
@@ -65,6 +71,7 @@ _nic_report() {
 			-s --site
 			-a --at
 			-i --import
+			-C --compare
 			-r --role-regex
 			-b --baseline
 			-d --rx-delta-db

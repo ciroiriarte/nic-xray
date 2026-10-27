@@ -4,9 +4,9 @@
 # Description: Companion to nic-xray.sh, nic-health.sh and nic-sweep.sh. Reads nic-sweep sweeps
 #              (and legacy nic-health CSV) for one site, several or all, and writes a report:
 #              coverage and comparability, verdicts, every finding with its evidence, fleet
-#              baselines and outliers, patterns within and across sites, and known issues suppressed
-#              on request (Markdown, JSON, HTML, PDF). Read-only, offline: never contacts a host or
-#              the network.
+#              baselines and outliers, patterns within and across sites, known issues suppressed
+#              on request, and the changes between two sweeps of a site (Markdown, JSON, HTML, PDF).
+#              Read-only, offline: never contacts a host or the network.
 #              Design: docs/design/nic-sweep.md (§6)
 #
 # Author: Ciro Iriarte <ciro.iriarte+software@gmail.com>
@@ -38,6 +38,11 @@
 #                 by priority, modifiers, service impact and activity; executive summary and recommended
 #                 actions from templates, with unexplained findings listed; a port without an LLDP
 #                 neighbour names the one of an earlier sweep (-L/--lldp-lookback)
+#   - 2026-10-27: Phase 8: sweep comparison (A6), -C/--compare OLD NEW: NEW's report plus new, resolved and
+#                 persisting findings keyed by host, target and check (suppression applied to both sweeps), hosts
+#                 rebooted (boot ID, else uptime) or not comparable, and growth per hour of the since-boot symbol
+#                 error, carrier change and discard counters, with resets on the same boot; one summary line, a
+#                 last section and a JSON 'comparison' object. Without --compare every output is unchanged
 #
 # Version: 2.13.0
 """nic-report.py: single- and multi-site reports from nic-sweep sweeps and legacy nic-health CSV."""
@@ -159,6 +164,18 @@ VLAN_MAX = 4094
 LLDP_IFNAME = "ifname "              # LLDP port ID subtype prefix nic-xray keeps ("ifname et-0/0/1:0")
 MTU_RANGE = (68, 65535)
 SECONDS_PER_HOUR = 3600
+SECONDS_PER_MINUTE = 60
+SECONDS_PER_DAY = 86400
+# A6 sweep comparison (-C/--compare OLD NEW)
+COLLECTED_AT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})$")
+ST_ABSENT = "absent"                       # a host not in that sweep's manifest
+BOOT_SAME, BOOT_REBOOTED, BOOT_UNKNOWN = "same", "rebooted", "unknown"
+BOOT_BY_ID, BOOT_BY_UPTIME = "boot_id", "uptime"
+UPTIME_SLACK_S = 300                 # without boot_id: NEW uptime this far below OLD uptime + elapsed means a reboot
+ELAPSED_BY_COLLECTED, ELAPSED_BY_STAMPS = "collected_at", "sweep stamps"
+# Counters compared between sweeps (the since-boot/driver-load totals port_facts extracts): key, column title
+COMPARE_COUNTERS = (("symbol_errors", "Symbol errors"), ("carrier_changes", "Carrier changes"), ("discards", "Rx discards"))
+CT_GREW, CT_UNCHANGED, CT_RESET, CT_SINCE_REBOOT, CT_UNKNOWN = "grew", "unchanged", "reset", "since-reboot", "unknown"
 BASELINES = ("scope", "all")
 OUTLIER_KIND = "Rx outlier (low)"
 FLAP_KIND = "link flaps since driver load"
@@ -1046,11 +1063,30 @@ def load_selection(args):
     dup = [s for s, n in seen.items() if n > 1]
     if dup:
         raise InputError(f"site(s) {', '.join(sorted(dup))} selected more than once; comparing two sweeps "
-                         f"of a site is --compare (design §6.3 A6, not available yet)")
+                         f"of a site is -C/--compare OLD NEW (design §6.3 A6)")
     if not sites:
         raise InputError("nothing to report: " + (f"no sweep at or before the requested date for "
                                                     f"{', '.join(missing)}" if missing else "the selection is empty"))
     return sorted(sites, key=lambda s: s.site), missing
+
+
+def load_compare(args):
+    """-C/--compare OLD NEW: (NEW, OLD) as SiteData. Both must be sweeps of one site, two different ones, OLD's
+    stamp (directory name) strictly earlier than NEW's. NEW is the reported sweep; OLD only feeds A6."""
+    old_path, new_path = args.compare
+    old, new = load_sweep_dir(old_path), load_sweep_dir(new_path)
+    if os.path.realpath(old_path) == os.path.realpath(new_path):
+        raise InputError(f"--compare: OLD and NEW are the same sweep ({new_path})")
+    if old.site != new.site:
+        raise InputError(f"--compare: OLD is a sweep of site {old.site}, NEW of site {new.site}; "
+                         "both must be of the same site")
+    for path, data in ((old_path, old), (new_path, new)):
+        if sweep_stamp_dt(data.stamp) is None:
+            raise InputError(f"--compare: {path}: directory name {data.stamp!r} is not a sweep time (YYYYmmddTHHMMSSZ, UTC)")
+    if sweep_stamp_dt(old.stamp) >= sweep_stamp_dt(new.stamp):
+        raise InputError(f"--compare: OLD ({old.stamp}) must be an earlier sweep than NEW ({new.stamp})")
+    fill_lldp_history(new, getattr(args, "lldp_lookback", DEFAULT_LLDP_LOOKBACK_DAYS))
+    return finalize(new, args.role_re), finalize(old, args.role_re)
 
 
 def load_baseline_sites(args, sites):
@@ -2444,6 +2480,131 @@ def site_status(verdict_rows):
     return out
 
 
+def parse_collected_at(text):
+    """UTC-aware datetime of a nic-health collected_at ('2026-10-26T12:00:00Z' or with an offset); None otherwise."""
+    if not isinstance(text, str) or not COLLECTED_AT_RE.match(text):
+        return None
+    try:
+        return datetime.datetime.fromisoformat(text[:-1] + "+00:00" if text.endswith("Z") else text)
+    except ValueError:
+        return None
+
+
+def _counter_total(p, key):
+    """A port's since-boot total of one COMPARE_COUNTERS counter, or None."""
+    v = p.get(key)
+    if isinstance(v, dict):
+        v = v.get("total")
+    return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+
+def _boot_change(o, n, elapsed=None):
+    """(BOOT_SAME | BOOT_REBOOTED | BOOT_UNKNOWN, basis) of a host between two sweeps: boot_id when both carry one,
+    else uptime: with the time between the collections known, NEW uptime well below OLD uptime + elapsed is a
+    reboot (a reboot after OLD whose new uptime still exceeds OLD's), else NEW uptime below OLD's (nic-health < 2.13
+    has neither)."""
+    ob, nb = o.meta.get("boot_id"), n.meta.get("boot_id")
+    if ob and nb:
+        return (BOOT_SAME if ob == nb else BOOT_REBOOTED), BOOT_BY_ID
+    ou, nu = o.meta.get("uptime_s"), n.meta.get("uptime_s")
+    if ou is not None and nu is not None:
+        floor = ou + elapsed - UPTIME_SLACK_S if elapsed is not None and elapsed > 0 else ou
+        return (BOOT_REBOOTED if nu < floor else BOOT_SAME), BOOT_BY_UPTIME
+    return BOOT_UNKNOWN, None
+
+
+def _finding_keys(host):
+    """({(target, check_id): worst active WARN/CRIT/UNKNOWN record}, {keys with a suppressed result})."""
+    active, suppressed = {}, set()
+    for r in host.records:
+        if r["severity"] not in FINDING_SEVERITIES:
+            continue
+        key = (r["target"], r["check_id"])
+        if r.get("suppressed"):
+            suppressed.add(key)
+        elif key not in active or VERDICT_RANK[r["severity"]] > VERDICT_RANK[active[key]["severity"]]:
+            active[key] = r
+    return active, suppressed
+
+
+def compare_sweeps(old, new):
+    """A6: NEW against OLD, two sweeps of one site. Findings keyed by (host, target, check_id) over the active
+    results of hosts collected in both; since-boot counters per port with growth, reset or since-reboot values."""
+    rank = {s: i for i, s in enumerate(SEVERITIES)}
+    names = sorted(set(old.hosts) | set(new.hosts))
+    comparable = [h for h in names if h in old.hosts and h in new.hosts
+                  and old.hosts[h].status == ST_OK and new.hosts[h].status == ST_OK]
+    not_comparable = [{"host": h, "old_status": old.hosts[h].status if h in old.hosts else ST_ABSENT,
+                       "new_status": new.hosts[h].status if h in new.hosts else ST_ABSENT}
+                      for h in names if h not in comparable]
+    stamps_s = int((sweep_stamp_dt(new.stamp) - sweep_stamp_dt(old.stamp)).total_seconds())
+    old_ports, new_ports = port_facts([old]), port_facts([new])
+    old_by = {(p["host"], p["port"]): p for p in old_ports}
+    new_by_host = collections.defaultdict(list)
+    for p in new_ports:
+        new_by_host[p["host"]].append(p)
+    added, resolved, persisting, hosts, counters = [], [], [], [], []
+    suppressed_keys = 0
+    for name in comparable:
+        o, n = old.hosts[name], new.hosts[name]
+        o_act, o_sup = _finding_keys(o)
+        n_act, n_sup = _finding_keys(n)
+        suppressed_keys += len(o_sup | n_sup)
+        for key in sorted(set(o_act) | set(n_act)):
+            if key in o_sup or key in n_sup:
+                continue          # suppressed in either sweep: neither new, resolved nor persisting
+            base = {"host": name, "role": n.role, "target": key[0], "check_id": key[1]}
+            if key not in o_act:
+                added.append({**base, "severity": n_act[key]["severity"], "value": n_act[key]["value"]})
+            elif key not in n_act:
+                resolved.append({**base, "severity": o_act[key]["severity"], "value": o_act[key]["value"]})
+            else:
+                was, now = o_act[key]["severity"], n_act[key]["severity"]
+                persisting.append({**base, "old_severity": was, "severity": now, "changed": was != now,
+                                   "value": n_act[key]["value"]})
+        a, b = parse_collected_at(o.meta.get("collected_at")), parse_collected_at(n.meta.get("collected_at"))
+        elapsed, how = (int((b - a).total_seconds()), ELAPSED_BY_COLLECTED) if a and b else (stamps_s, ELAPSED_BY_STAMPS)
+        boot, basis = _boot_change(o, n, elapsed if how == ELAPSED_BY_COLLECTED else None)
+        hosts.append({"host": name, "role": n.role, "boot": boot, "boot_basis": basis, "elapsed_s": elapsed,
+                      "elapsed_basis": how, "old_collected_at": o.meta.get("collected_at"),
+                      "new_collected_at": n.meta.get("collected_at"), "old_uptime_s": o.meta.get("uptime_s"),
+                      "new_uptime_s": n.meta.get("uptime_s"), "old_boot_id": o.meta.get("boot_id"),
+                      "new_boot_id": n.meta.get("boot_id")})
+        for p in new_by_host[name]:
+            op = old_by.get((name, p["port"]))
+            if op is None:
+                continue
+            row, listed = {}, False
+            for key, _ in COMPARE_COUNTERS:
+                was, now = _counter_total(op, key), _counter_total(p, key)
+                c = {"old": was, "new": now, "growth": None, "per_hour": None}
+                if now is not None and boot == BOOT_REBOOTED:
+                    c["state"] = CT_SINCE_REBOOT
+                    listed = listed or now > 0
+                elif now is None or was is None:
+                    c["state"] = CT_UNKNOWN
+                elif now < was:
+                    c["state"], listed = CT_RESET, True
+                elif now == was:
+                    c["state"] = CT_UNCHANGED
+                else:
+                    c.update(state=CT_GREW, growth=now - was,
+                             per_hour=float(f"{(now - was) * SECONDS_PER_HOUR / elapsed:.3g}") if elapsed > 0 else None)
+                    listed = True
+                row[key] = c
+            if listed:
+                counters.append({"host": name, "role": n.role, "port": p["port"], "boot": boot, "boot_basis": basis,
+                                 "elapsed_s": elapsed, "counters": row})
+    order = lambda r: (rank.get(r["severity"], len(SEVERITIES)), r["host"], r["target"], r["check_id"])  # noqa: E731
+    return {"old_sweep": {"stamp": old.stamp, "path": old.path}, "new_sweep": {"stamp": new.stamp, "path": new.path},
+            "elapsed_s": stamps_s, "hosts": hosts, "new": sorted(added, key=order),
+            "resolved": sorted(resolved, key=order), "persisting": sorted(persisting, key=order),
+            "suppressed_keys": suppressed_keys, "not_comparable": not_comparable,
+            "rebooted": [h["host"] for h in hosts if h["boot"] == BOOT_REBOOTED],
+            "boot_unknown": [h["host"] for h in hosts if h["boot"] == BOOT_UNKNOWN],
+            "counters": sorted(counters, key=lambda r: (r["host"], r["port"]))}
+
+
 def analyse(sites, missing, args=None, baseline_sites=None):
     multi = len(sites) + len(missing) > 1
     args = args or argparse.Namespace(rx_delta_db=DEFAULT_RX_DELTA_DB, flap_min=DEFAULT_FLAP_MIN, baseline="scope")
@@ -2479,9 +2640,13 @@ def analyse(sites, missing, args=None, baseline_sites=None):
     diag = diagnose(targets, getattr(args, "catalog", None), multi)
     diag["unexplained"] = unexplained(sites, diag["recommendations"])
     diag["summary"] = site_status(vd)
-    return {"multi_site": multi, "coverage": cov,
-            "verdicts": vd, "findings": fnd, "baselines": a4,
-            "patterns": pt, "suppressed": supp, "diagnosis": diag}
+    out = {"multi_site": multi, "coverage": cov,
+           "verdicts": vd, "findings": fnd, "baselines": a4,
+           "patterns": pt, "suppressed": supp, "diagnosis": diag}
+    old = getattr(args, "compare_old", None)
+    if old is not None:             # -C/--compare: sites is NEW alone
+        out["comparison"] = compare_sweeps(old, sites[0])
+    return out
 
 
 # --------------------------------------------------------------------------------- themes (§6.8)
@@ -2751,6 +2916,7 @@ def render_md(result, sites, missing, args, now):
     md += render_md_patterns(result, multi)
     md += render_md_actions(result, multi)
     md += render_md_suppressed(result, multi)
+    md += render_md_compare(result, multi)
     md += ["---", "", attribution(now), ""]
     return "\n".join(md)
 
@@ -2924,6 +3090,7 @@ def render_md_summary(result, multi):
                      _MD(f"{STATUS_ICON[st['status']]} **{st['status']}**"), " / ".join(str(here[p]) for p in PRIORITIES)])
     md += [md_table(["Site", "Hosts", "Clean (of collected)", "Hosts CRIT / WARN / UNKNOWN", "Status",
                      "Actions P1 / P2 / P3 / P4"], rows), ""]
+    md += _compare_summary(result)
     if not dg["catalogs"]:
         md += ["No rule catalog loaded: no recommendations (see section 7).", ""]
         return md
@@ -2997,6 +3164,109 @@ def render_md_suppressed(result, multi):
                          for x in sp["results"]]), ""]
     else:
         md += ["No result matched.", ""]
+    return md
+
+
+def _duration(seconds):
+    """'45 s', '23 min', '5 h 12 min', '3 d 4 h' (negative with a leading '−': a host clock went backwards)."""
+    if seconds < 0:
+        return "−" + _duration(-seconds)
+    if seconds < SECONDS_PER_MINUTE:
+        return f"{seconds} s"
+    if seconds < SECONDS_PER_HOUR:
+        return f"{seconds // SECONDS_PER_MINUTE} min"
+    if seconds < SECONDS_PER_DAY:
+        return f"{seconds // SECONDS_PER_HOUR} h {seconds % SECONDS_PER_HOUR // SECONDS_PER_MINUTE} min"
+    return f"{seconds // SECONDS_PER_DAY} d {seconds % SECONDS_PER_DAY // SECONDS_PER_HOUR} h"
+
+
+def _compare_section(result):
+    """Number of the A6 section: after the suppressed known issues when that section is present."""
+    return 9 if result.get("suppressed") else 8
+
+
+def _compare_summary(result):
+    """The executive summary's line about -C/--compare; [] without it."""
+    cp = result.get("comparison")
+    if not cp:
+        return []
+    changed = sum(1 for x in cp["persisting"] if x["changed"])
+    return [f"🔁 **Changes since {md_inline(cp['old_sweep']['stamp'])}** ({_duration(cp['elapsed_s'])} between the "
+            f"sweeps): {len(cp['new'])} new, {len(cp['resolved'])} resolved and {len(cp['persisting'])} persisting "
+            f"finding(s) ({changed} with a changed severity); {len(cp['rebooted'])} host(s) rebooted, "
+            f"{len(cp['not_comparable'])} not comparable. Details in section {_compare_section(result)}.", ""]
+
+
+def _boot_note(r):
+    if r["boot"] == BOOT_REBOOTED:
+        return "rebooted (boot ID changed)" if r["boot_basis"] == BOOT_BY_ID else "rebooted (by uptime)"
+    if r["boot"] == BOOT_UNKNOWN:
+        return "boot unknown: a reboot cannot be ruled out"
+    return "same boot" + (" (by uptime)" if r["boot_basis"] == BOOT_BY_UPTIME else "")
+
+
+def _counter_cell(c):
+    st = c["state"]
+    if st == CT_GREW:
+        return f"+{c['growth']:,}" + (f" ({_rate(c['per_hour'])}/h)" if c["per_hour"] is not None else "")
+    if st == CT_RESET:
+        return f"reset ({c['old']:,} → {c['new']:,})"
+    if st == CT_SINCE_REBOOT:
+        return f"{c['new']:,} since reboot"
+    return "+0" if st == CT_UNCHANGED else None
+
+
+def render_md_compare(result, multi):
+    """A6 section: findings new, resolved and persisting since OLD; reboots and hosts not comparable; counters."""
+    cp = result.get("comparison")
+    if not cp:
+        return []
+    n = _compare_section(result)
+    old, new = md_inline(cp["old_sweep"]["stamp"]), md_inline(cp["new_sweep"]["stamp"])
+    md = [f"## {n}. Changes since {old}", "",
+          f"This report's sweep {new} against the earlier sweep {old} of the site, {_duration(cp['elapsed_s'])} apart. "
+          "Findings are keyed by host, target and check over the WARN, CRIT and UNKNOWN results of the hosts collected "
+          "in both sweeps" + (", leaving out every key with a suppressed result in either sweep "
+                              f"({cp['suppressed_keys']})" if result.get("suppressed") else "") + ".", ""]
+    sev = lambda x: (_MD(f"**{x['old_severity']}** → **{x['severity']}**") if x["changed"]  # noqa: E731
+                     else _badge(x["severity"]))
+    for i, (title, rows, cell) in enumerate((("New findings", cp["new"], lambda x: _badge(x["severity"])),
+                                             ("Resolved findings", cp["resolved"], lambda x: _badge(x["severity"])),
+                                             ("Persisting findings", cp["persisting"], sev)), 1):
+        md += [f"### {n}.{i} {title} ({len(rows)})", ""]
+        md += [md_table(["Host", "Target", "Check", "Severity", "Value" if i != 2 else "Value then"],
+                        [[x["host"], x["target"], x["check_id"], cell(x), x["value"]] for x in rows]) if rows
+               else "None.", ""]
+    md += [f"### {n}.4 Hosts rebooted or not comparable", ""]
+    hosts = {h["host"]: h for h in cp["hosts"]}
+    if cp["rebooted"]:
+        md += [md_table(["Host", "Detected by", "Uptime then → now"],
+                        [[h, _boot_note(hosts[h]),
+                          f"{_duration(hosts[h]['old_uptime_s'])} → {_duration(hosts[h]['new_uptime_s'])}"
+                          if hosts[h]["old_uptime_s"] is not None and hosts[h]["new_uptime_s"] is not None else None]
+                         for h in cp["rebooted"]]), ""]
+    else:
+        md += ["No host rebooted between the sweeps.", ""]
+    if cp["boot_unknown"]:
+        md += [f"Boot unknown (no boot ID or uptime in one of the sweeps: nic-health older than {HOST_CLOCK_MIN_VERSION}): "
+               f"{md_inline(', '.join(cp['boot_unknown']))}. Their counter growth cannot rule out a reboot.", ""]
+    if cp["not_comparable"]:
+        md += ["Not comparable (not collected in both sweeps): their findings are neither new nor resolved.", "",
+               md_table(["Host", f"Status in {old}", f"Status in {new}"],
+                        [[x["host"], x["old_status"], x["new_status"]] for x in cp["not_comparable"]]), ""]
+    md += [f"### {n}.5 Counter growth", "",
+           "Counters since boot or driver load, per port of the hosts collected in both sweeps: growth and rate per hour "
+           "over the time between the two collections, a reset on the same boot (driver reload or counter clear), or "
+           "the value since reboot. Listed: ports with growth, a reset, or a non-zero value on a rebooted host.", ""]
+    rows = []
+    for r in cp["counters"]:
+        reset = any(c["state"] == CT_RESET for c in r["counters"].values())
+        note = _boot_note(r) + ("; reset on the same boot (driver reload or counter clear)" if reset and r["boot"] == BOOT_SAME
+                                else "; reset (driver reload, counter clear or reboot)" if reset else "")
+        rows.append([r["host"], r["port"], *[_counter_cell(r["counters"][k]) for k, _ in COMPARE_COUNTERS],
+                     _duration(r["elapsed_s"]), note])
+    md += [md_table(["Host", "Port", *[t for _, t in COMPARE_COUNTERS], "Over", "Note"], rows) if rows
+           else "No counter grew or reset between the sweeps.", ""]
     return md
 
 
@@ -3302,7 +3572,8 @@ def build_parser():
                      "Reports on nic-sweep sweeps (and legacy nic-health CSV) for one site, several or all:\n"
                      "coverage, verdicts, every finding with its evidence, baselines and outliers over\n"
                      "ports with link, patterns within and across sites, suppressed known issues, and ranked\n"
-                     "recommendations from a declarative rule catalog with an executive summary.\n"
+                     "recommendations from a declarative rule catalog with an executive summary; with\n"
+                     "--compare, the changes since an earlier sweep of the site.\n"
                      "Read-only and offline."),
         epilog=("--import takes SITE and every following path: put SWEEP_DIRs before it, or end its list with --.\n"
                 f"-O pdf needs WeasyPrint ({PDF_PACKAGE_HINT}) and -o FILE.\n"
@@ -3311,7 +3582,8 @@ def build_parser():
                 f"in ../share/nic-xray from it, or in {RULES_SYSTEM_DIR}).\n"
                 f"Report files are written atomically with mode {REPORT_MODE:04o} (less the umask).\n\n"
                 "Exit status:\n 0  report written\n 1  input error (unreadable input, unknown schema or site, a site\n"
-                "    selected twice, no data for the selection, an invalid suppress file, rule catalog or theme, theme contrast\n"
+                "    selected twice, no data for the selection, --compare sweeps that are not two different sweeps of one\n"
+                "    site with OLD earlier, an invalid suppress file, rule catalog or theme, theme contrast\n"
                 f"    below {MIN_CONTRAST}:1 with --strict-theme, WeasyPrint missing or failing for -O pdf) or an\n"
                 "    output file cannot be written\n 3  usage error\n\n"
                 f"See also: nic-sweep.sh(8), nic-health.sh(8), nic-xray.sh(8). Design: {DESIGN_REF}"))
@@ -3321,6 +3593,10 @@ def build_parser():
     p.add_argument("-a", "--at", metavar="DATE", help="latest sweep on or before DATE (YYYY-MM-DD or YYYY-MM-DDTHH:MM[:SS]Z, UTC)")
     p.add_argument("-i", "--import", dest="imports", action="append", nargs="+", metavar=("SITE", "PATH"),
                    help="legacy nic-health CSV for SITE: files or directories of *.csv (repeatable)")
+    p.add_argument("-C", "--compare", nargs=2, metavar=("OLD", "NEW"),
+                   help="report on sweep NEW plus the changes since sweep OLD of the same site (OLD earlier): new, "
+                        "resolved and persisting findings, reboots, counter growth; not with SWEEP_DIR, -R, -s, -a, "
+                        "-i, -b all or -P")
     p.add_argument("-r", "--role-regex", metavar="RE", help="role from the host name: a group named 'role' (or the first group)")
     p.add_argument("-b", "--baseline", choices=BASELINES, default="scope",
                    help="medians for outliers from the selected sites (scope, default) or from every site "
@@ -3357,9 +3633,16 @@ def build_parser():
 def parse_args(argv):
     p = build_parser()
     args = p.parse_args(argv)
-    if not (args.sweep_dirs or args.sweep_root or args.imports):
+    if args.compare:
+        clash = [name for name, given in (("SWEEP_DIR", args.sweep_dirs), ("-R/--sweep-root", args.sweep_root),
+                                          ("-s/--site", args.site), ("-a/--at", args.at), ("-i/--import", args.imports),
+                                          ("-b/--baseline all", args.baseline == "all"), ("-P/--per-site", args.per_site))
+                 if given]
+        if clash:
+            p.error(f"--compare OLD NEW selects the two sweeps itself: not with {', '.join(clash)}")
+    elif not (args.sweep_dirs or args.sweep_root or args.imports):
         p.print_help(sys.stderr)
-        sys.stderr.write("\n❌ Nothing to report: give SWEEP_DIR, --sweep-root or --import.\n")
+        sys.stderr.write("\n❌ Nothing to report: give SWEEP_DIR, --sweep-root, --import or --compare.\n")
         sys.exit(EXIT_USAGE)
     for site in args.site or []:
         if not NAME_RE.match(site):
@@ -3434,11 +3717,16 @@ def build_outputs(args, now):
         _warn(f"no rule catalog found ({RULES_FILE} next to the script, in ../share/nic-xray or {RULES_SYSTEM_DIR}): "
               "recommendations use --rules files only")
     args.catalog = load_catalog(default_rules, args.rules) if default_rules or args.rules else None
-    sites, missing = load_selection(args)
+    if args.compare:
+        new, args.compare_old = load_compare(args)
+        sites, missing, pool = [new], [], [new, args.compare_old]
+    else:
+        sites, missing = load_selection(args)
+        args.compare_old, pool = None, sites
     if args.suppress_rules:
-        apply_suppress(sites, args.suppress_rules)
+        apply_suppress(pool, args.suppress_rules)       # the same rules on both sweeps of -C/--compare
         selected = {s.site for s in sites}
-        hits = collections.Counter(r["suppressed"] for s in sites for h in s.hosts.values() for r in h.records
+        hits = collections.Counter(r["suppressed"] for s in pool for h in s.hosts.values() for r in h.records
                                    if r.get("suppressed"))
         for rule in args.suppress_rules:
             if not hits[rule["rule"]]:

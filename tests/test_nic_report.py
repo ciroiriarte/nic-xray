@@ -3176,5 +3176,330 @@ class TestReviewFixes(Phase7Base):
         self.assertNotIn("Traceback", err)
 
 
+
+# --------------------------------------------------------------------------------- Phase 8: sweep comparison (A6)
+
+class TestCompare(Phase7Base):
+    """-C/--compare OLD NEW over a fictional pair of SITE1 sweeps two hours apart (exit criterion: a reboot between)."""
+
+    OLD, NEW = "20261026T100000Z", "20261026T120000Z"
+    S1, S2, S3, S4, S5 = (f"acme-s1-stop1d-0{i}" for i in range(1, 6))
+    C1, C2 = "acme-s1-ctrl2d-01", "acme-s1-ctrl2d-02"
+
+    def host(self, name, ports, extra=(), boot=None, uptime=None, collected=None):
+        d = self.doc(name, ports, extra)
+        d.update(boot_id=boot, uptime_s=uptime, collected_at=collected)
+        d["verdict"] = nr.worst_verdict(d["results"])
+        return d
+
+    @staticmethod
+    def port(name, sym=None, carrier=1, discards=None):
+        return {"port": name, "rx": -0.4, "sym": sym, "carrier": carrier, "discards": discards}
+
+    def write_pair(self, value="effective 3E-9"):
+        """OLD and NEW of SITE1: S1 same boot with grown counters and a WARN that became CRIT plus a new WARN; S2
+        rebooted (boot ID changed, counters lower) with a resolved and a persisting WARN; S3 a counter reset on the
+        same boot and a new UNKNOWN; S4 only in NEW; S5 unreachable in NEW; C1 rebooted by uptime (no boot ID);
+        C2 boot unknown (neither), no collected_at in NEW."""
+        ber = lambda sev, port="eth0": rec(sev, "port", port, "mlx5.deep.ber", value, EV_BER)  # noqa: E731
+        lookback = rec("WARN", "port", "eth1", "generic.link.lookback", "3", "3 link-downs")
+        pcie = rec("WARN", "asic", "0000:04:00", "generic.pcie.link", "2.5 GT/s x4", threshold="16.0 GT/s x4 (slot)")
+        at = lambda stamp: f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]}T{stamp[9:11]}:00:30Z"  # noqa: E731
+        o, n = at(self.OLD), at(self.NEW)
+        old = [
+            (self.S1, [self.port("eth0", 1000, 3, 500), self.port("eth1")], [ber("WARN")], "b-1", 7200, o),
+            (self.S2, [self.port("eth0", 50000, 9), self.port("eth1")], [lookback, pcie], "b-2a", 3600000, o),
+            (self.S3, [self.port("eth0", 9000, 2), self.port("eth1")], [], "b-3", 7200, o),
+            (self.S5, [self.port("eth0")], [ber("WARN")], "b-5", 7200, o),
+            (self.C1, [self.port("eth0", 40)], [], None, 5000, o),
+            (self.C2, [self.port("eth0", 10), self.port("eth1", 5)], [], None, None, o),
+        ]
+        new = [
+            (self.S1, [self.port("eth0", 4600, 7, 800), self.port("eth1")], [ber("CRIT"), lookback], "b-1", 14400, n),
+            (self.S2, [self.port("eth0", 20, 1), self.port("eth1")], [pcie], "b-2b", 600, n),
+            (self.S3, [self.port("eth0", 100, 2), self.port("eth1")], [ber("UNKNOWN")], "b-3", 14400, n),
+            (self.S4, [self.port("eth0")], [ber("WARN")], "b-4", 600, n),
+            (self.C1, [self.port("eth0", 10)], [], None, 100, n),
+            (self.C2, [self.port("eth0", 30), self.port("eth1", 2)], [], None, None, None),
+        ]
+        dirs = []
+        for stamp, hosts in ((self.OLD, old), (self.NEW, new)):
+            rows = [(h, "ok", None, self.host(h, ps, ex, b, u, c)) for h, ps, ex, b, u, c in hosts]
+            rows = [(h, st, d["verdict"], d) for h, st, _, d in rows]
+            if stamp == self.NEW:
+                rows.append((self.S5, "ssh-fail", None, None))
+            dirs.append(write_sweep(self.root, "SITE1", stamp, sorted(rows)))
+        return dirs
+
+    def comparison(self, extra=()):
+        old, new = self.write_pair()
+        result, _, _, args = self.analyse(list(extra) + ["-C", old, new])
+        return result["comparison"], args
+
+    def analyse(self, argv, rules=()):
+        args = nr.parse_args(argv + ["-r", ROLE_RE] + [x for r in rules for x in ("-u", r)])
+        args.suppress_rules = nr.load_suppress(args.suppress) if args.suppress else None
+        args.catalog = nr.load_catalog(DEFAULT_RULES, args.rules)
+        new, args.compare_old = nr.load_compare(args)
+        if args.suppress_rules:
+            nr.apply_suppress([new, args.compare_old], args.suppress_rules)
+        return nr.analyse([new], [], args), [new], [], args
+
+    @staticmethod
+    def keys(rows):
+        return [(r["severity"], r["host"], r["target"], r["check_id"]) for r in rows]
+
+    def counter_rows(self, cp):
+        return {(r["host"], r["port"]): r for r in cp["counters"]}
+
+    @staticmethod
+    def counter_line(md, host, port):
+        """host's port row of the counter growth table (section 8.5)."""
+        table = md.split("### 8.5 Counter growth", 1)[1]
+        return next(ln for ln in table.splitlines() if ln.startswith(f"| {host} | {port} |"))
+
+    def test_findings_new_resolved_persisting(self):
+        cp, _ = self.comparison()
+        self.assertEqual(self.keys(cp["new"]), [("WARN", self.S1, "eth1", "generic.link.lookback"),
+                                                ("UNKNOWN", self.S3, "eth0", "mlx5.deep.ber")])
+        self.assertEqual(self.keys(cp["resolved"]), [("WARN", self.S2, "eth1", "generic.link.lookback")])
+        self.assertEqual([(*k, r["old_severity"], r["changed"]) for k, r in zip(self.keys(cp["persisting"]), cp["persisting"])],
+                         [("CRIT", self.S1, "eth0", "mlx5.deep.ber", "WARN", True),
+                          ("WARN", self.S1, "eth0", "mlx5.nic.discards", "WARN", False),
+                          ("WARN", self.S2, "0000:04:00", "generic.pcie.link", "WARN", False)])
+        self.assertEqual(cp["new"][1]["value"], "effective 3E-9")
+        self.assertEqual((cp["old_sweep"]["stamp"], cp["new_sweep"]["stamp"], cp["elapsed_s"]), (self.OLD, self.NEW, 7200))
+
+    def test_not_comparable_hosts_are_neither_new_nor_resolved(self):
+        cp, _ = self.comparison()
+        self.assertEqual(cp["not_comparable"], [{"host": self.S4, "old_status": "absent", "new_status": "ok"},
+                                                {"host": self.S5, "old_status": "ok", "new_status": "ssh-fail"}])
+        listed = {r["host"] for k in ("new", "resolved", "persisting", "counters") for r in cp[k]}
+        self.assertFalse(listed & {self.S4, self.S5})
+        self.assertEqual([h["host"] for h in cp["hosts"]], [self.C1, self.C2, self.S1, self.S2, self.S3])
+
+    def test_reboot_by_boot_id_shows_since_reboot_no_growth(self):
+        cp, _ = self.comparison()
+        self.assertEqual(cp["rebooted"], [self.C1, self.S2])
+        row = self.counter_rows(cp)[(self.S2, "eth0")]
+        self.assertEqual((row["boot"], row["boot_basis"]), ("rebooted", "boot_id"))
+        self.assertEqual(row["counters"]["symbol_errors"],
+                         {"old": 50000, "new": 20, "growth": None, "per_hour": None, "state": "since-reboot"})
+        self.assertEqual(row["counters"]["carrier_changes"]["state"], "since-reboot")
+        for r in cp["counters"]:                 # never negative or bogus growth
+            for c in r["counters"].values():
+                self.assertTrue(c["growth"] is None or c["growth"] > 0, r)
+                if c["state"] != "grew":
+                    self.assertIsNone(c["growth"])
+
+    def test_growth_and_rate_per_hour(self):
+        cp, _ = self.comparison()
+        rows = self.counter_rows(cp)
+        c = rows[(self.S1, "eth0")]["counters"]
+        self.assertEqual(rows[(self.S1, "eth0")]["elapsed_s"], 7200)
+        self.assertEqual((c["symbol_errors"]["growth"], c["symbol_errors"]["per_hour"]), (3600, 1800.0))
+        self.assertEqual((c["carrier_changes"]["growth"], c["carrier_changes"]["per_hour"]), (4, 2.0))
+        self.assertEqual((c["discards"]["growth"], c["discards"]["per_hour"]), (300, 150.0))
+        # Unchanged ports are not listed; the order is host, port
+        self.assertNotIn((self.S1, "eth1"), rows)
+        self.assertNotIn((self.S3, "eth1"), rows)
+        self.assertEqual(list(rows), sorted(rows))
+
+    def test_reset_on_the_same_boot(self):
+        cp, _ = self.comparison()
+        row = self.counter_rows(cp)[(self.S3, "eth0")]
+        self.assertEqual(row["boot"], "same")
+        self.assertEqual(row["counters"]["symbol_errors"],
+                         {"old": 9000, "new": 100, "growth": None, "per_hour": None, "state": "reset"})
+        self.assertEqual(row["counters"]["carrier_changes"]["state"], "unchanged")
+        md, _ = self.report(["-C", *self.dirs()])
+        line = self.counter_line(md, self.S3, "eth0")
+        self.assertIn("reset (9,000 → 100)", line)
+        self.assertIn("reset on the same boot (driver reload or counter clear)", line)
+
+    def dirs(self):
+        return [os.path.join(self.root, "SITE1", s) for s in (self.OLD, self.NEW)]
+
+    def test_uptime_inference_and_boot_unknown(self):
+        cp, _ = self.comparison()
+        rows, hosts = self.counter_rows(cp), {h["host"]: h for h in cp["hosts"]}
+        self.assertEqual((hosts[self.C1]["boot"], hosts[self.C1]["boot_basis"]), ("rebooted", "uptime"))
+        self.assertEqual(rows[(self.C1, "eth0")]["counters"]["symbol_errors"]["state"], "since-reboot")
+        self.assertEqual((hosts[self.C2]["boot"], hosts[self.C2]["boot_basis"]), ("unknown", None))
+        self.assertEqual(cp["boot_unknown"], [self.C2])
+        # No collected_at in NEW: elapsed from the sweep stamps; growth shown, a decrease is a reset
+        self.assertEqual((hosts[self.C2]["elapsed_s"], hosts[self.C2]["elapsed_basis"]), (7200, "sweep stamps"))
+        self.assertEqual((hosts[self.S1]["elapsed_s"], hosts[self.S1]["elapsed_basis"]), (7200, "collected_at"))
+        sym = rows[(self.C2, "eth0")]["counters"]["symbol_errors"]
+        self.assertEqual((sym["state"], sym["growth"], sym["per_hour"]), ("grew", 20, 10.0))
+        self.assertEqual(rows[(self.C2, "eth1")]["counters"]["symbol_errors"]["state"], "reset")
+        md, _ = self.report(["-C", *self.dirs()])
+        line = self.counter_line(md, self.C2, "eth0")
+        self.assertIn("boot unknown: a reboot cannot be ruled out", line)
+        self.assertIn(f"| {self.C1} | rebooted (by uptime) | 1 h 23 min → 1 min |", md)
+        self.assertIn(f"Boot unknown (no boot ID or uptime in one of the sweeps: nic-health older than 2.13.0): {self.C2}.", md)
+
+    def test_uptime_reboot_after_old_and_partial_data(self):
+        """Without both boot IDs: a reboot after OLD whose uptime overtook OLD's is still a reboot; a boot ID in one
+        sweep only, a malformed collected_at and a counter missing in one sweep never give bogus growth."""
+        at_old, at_new = "2026-10-26T10:00:30Z", "2026-10-26T12:00:30Z"          # 7200 s apart
+        r1, r2, r3 = "acme-s1-ctrl2d-03", "acme-s1-ctrl2d-04", "acme-s1-ctrl2d-05"
+        pairs = {  # host: (OLD ports, boot, uptime, collected), (NEW ...)
+            r1: (([self.port("eth0", 100)], None, 1000, at_old), ([self.port("eth0", 500)], None, 5000, at_new)),
+            r2: (([self.port("eth0", 100)], "b-4", 1000, at_old), ([self.port("eth0", 500)], None, 8150, at_new)),
+            r3: (([self.port("eth0", 100, 1, 500)], None, 1000, at_old), ([self.port("eth0", 100)], None, 9000, "not-a-time")),
+        }
+        dirs = []
+        for i, stamp in enumerate((self.OLD, self.NEW)):
+            rows = []
+            for h, sides in sorted(pairs.items()):
+                ps, boot, up, coll = sides[i]
+                d = self.host(h, ps, (), boot, up, coll)
+                rows.append((h, "ok", d["verdict"], d))
+            dirs.append(write_sweep(self.root, "SITE1", stamp, rows))
+        cp = self.analyse(["-C", *dirs])[0]["comparison"]
+        hosts, rows = {h["host"]: h for h in cp["hosts"]}, self.counter_rows(cp)
+        self.assertEqual((hosts[r1]["boot"], hosts[r1]["boot_basis"]), ("rebooted", "uptime"))   # 5000 < 1000+7200-300
+        self.assertEqual(rows[(r1, "eth0")]["counters"]["symbol_errors"]["state"], "since-reboot")
+        self.assertEqual(hosts[r2]["boot"], "same")                     # boot ID in OLD only: uptime, 8150 ≥ 7900
+        self.assertEqual(rows[(r2, "eth0")]["counters"]["symbol_errors"]["growth"], 400)
+        # Malformed collected_at: elapsed from the stamps, uptime compared without it (9000 ≥ 1000: same boot);
+        # Rx discards only in OLD: unknown, no growth, and nothing else changed, so the port is not listed
+        self.assertEqual((hosts[r3]["elapsed_basis"], hosts[r3]["boot"]), ("sweep stamps", "same"))
+        self.assertNotIn((r3, "eth0"), rows)
+        dg = self.analyse(["-C", *dirs])[0]["comparison"]
+        self.assertTrue(all(r["counters"]["discards"]["growth"] is None for r in dg["counters"] if r["host"] == r3))
+
+    def test_suppression_applies_to_both_sweeps(self):
+        rules = self.write_json("s.json", {"schema_version": 1, "suppress": [
+            {"check_id": "mlx5.deep.ber", "hosts": "stop1d-0[13]$", "reason": "Known BER issue (fictional)"},
+            {"check_id": "generic.link.lookback", "hosts": "stop1d-02$", "reason": "Old link-downs (fictional)"}]})
+        cp, _ = self.comparison(["-S", rules])
+        self.assertEqual(self.keys(cp["new"]), [("WARN", self.S1, "eth1", "generic.link.lookback")])
+        self.assertEqual(cp["resolved"], [])
+        self.assertEqual(self.keys(cp["persisting"]), [("WARN", self.S1, "eth0", "mlx5.nic.discards"),
+                                                       ("WARN", self.S2, "0000:04:00", "generic.pcie.link")])
+        self.assertEqual(cp["suppressed_keys"], 3)
+        md, _ = self.report(["-S", rules, "-C", *self.dirs()])
+        self.assertIn("## 8. Suppressed known issues", md)
+        self.assertIn(f"## 9. Changes since {self.OLD}", md)
+        self.assertIn("Details in section 9.", md)
+        self.assertIn("leaving out every key with a suppressed result in either sweep (3)", md)
+        self.assertLess(md.index("## 8. Suppressed"), md.index("## 9. Changes"))
+
+    def test_deterministic(self):
+        self.write_pair()
+        first = self.report(["-C", *self.dirs()], "json")[0]
+        shutil.rmtree(self.root)
+        self.write_pair()
+        self.assertEqual(self.report(["-C", *self.dirs()], "json")[0], first)
+
+    def test_markdown_section_and_summary(self):
+        self.write_pair()
+        md, _ = self.report(["-C", *self.dirs()])
+        self.assertIn(f"🔁 **Changes since {self.OLD}** (2 h 0 min between the sweeps): 2 new, 1 resolved and 3 "
+                      "persisting finding(s) (1 with a changed severity); 2 host(s) rebooted, 2 not comparable. "
+                      "Details in section 8.", md)
+        self.assertLess(md.index("🔁"), md.index("## 2. Coverage"))
+        heads = [ln for ln in md.splitlines() if ln.startswith("## ") or ln.startswith("### 8.")]
+        self.assertEqual(heads[-6:], [f"## 8. Changes since {self.OLD}", "### 8.1 New findings (2)",
+                                      "### 8.2 Resolved findings (1)", "### 8.3 Persisting findings (3)",
+                                      "### 8.4 Hosts rebooted or not comparable", "### 8.5 Counter growth"])
+        self.assertIn(f"| {self.S1} | eth0 | mlx5.deep.ber | **WARN** → **CRIT** | effective 3E-9 |", md)
+        self.assertIn(f"| {self.S1} | eth0 | +3,600 (1,800/h) | +4 (2/h) | +300 (150/h) | 2 h 0 min | same boot |", md)
+        self.assertIn(f"| {self.S2} | eth0 | 20 since reboot | 1 since reboot | — | 2 h 0 min | rebooted (boot ID changed) |", md)
+        self.assertIn(f"| {self.S4} | absent | ok |", md)
+        self.assertIn(f"| {self.S5} | ok | ssh-fail |", md)
+
+    def test_html_pdf_contents_and_escaping(self):
+        old, new = self.write_pair(value="<b>x</b> & `y` *z* [l](http://e.example)")
+        page, _ = self.report(["-C", old, new], "html")
+        self.assertIn(f'<h2 id="sec-8">8. Changes since {self.OLD}</h2>', page)
+        self.assertIn('<span class="sev sev-WARN">WARN</span> → <span class="sev sev-CRIT">CRIT</span>', page)
+        self.assertIn("&lt;b&gt;x&lt;/b&gt; &amp; 'y' ∗z∗ [l］(http://e.example)", page)
+        self.assertNotIn("&amp;lt;", page)
+        self.assertNotIn("<b>x", page)
+        md, args = self.report(["-C", old, new])
+        self.assertNotIn("<b>", md)
+        result, sites, missing, args = self.analyse(["-C", old, new])
+        paged = nr.render_html(result, sites, missing, args, self.NOW, paged=True)
+        toc = re.search(r'<nav class="toc">.*?</nav>', paged).group(0)
+        self.assertIn(f'<a href="#sec-8">8. Changes since {self.OLD}</a>', toc)
+
+    def test_json_comparison_object(self):
+        self.write_pair()
+        doc = json.loads(self.report(["-C", *self.dirs()], "json")[0])
+        cp = doc["comparison"]
+        self.assertEqual(set(cp), {"old_sweep", "new_sweep", "elapsed_s", "hosts", "new", "resolved", "persisting",
+                                   "suppressed_keys", "not_comparable", "rebooted", "boot_unknown", "counters"})
+        self.assertEqual(cp["old_sweep"], {"stamp": self.OLD, "path": self.dirs()[0]})
+        self.assertEqual(cp["new_sweep"], {"stamp": self.NEW, "path": self.dirs()[1]})
+        self.assertEqual([s["sweep"] for s in doc["selection"]["sites"]], [self.NEW])
+        self.assertEqual(len(cp["counters"]), 7)
+
+    def test_report_is_new_sweep_plus_the_comparison(self):
+        """Without --compare nothing changes: the -C report minus its summary line and section is the plain report
+        of NEW, byte for byte, in md, json and html; the plain report has no comparison."""
+        old, new = self.write_pair()
+        for fmt in ("md", "json", "html"):
+            with_c, plain = self.report(["-C", old, new], fmt)[0], self.report([new], fmt)[0]
+            self.assertNotIn("Changes since", plain)
+            if fmt == "json":
+                doc = json.loads(with_c)
+                self.assertNotIn("comparison", json.loads(plain))
+                del doc["comparison"]
+                self.assertEqual(json.dumps(doc, indent=2, ensure_ascii=False) + "\n", plain)
+                continue
+            if fmt == "md":
+                stripped = re.sub(r"🔁 [^\n]*\n\n", "", with_c, count=1)
+                stripped = re.sub(r"## 8\. Changes since .*?(?=---\n)", "", stripped, flags=re.S)
+            else:
+                stripped = re.sub(r"<p>🔁 .*?</p>\n", "", with_c, count=1)
+                stripped = re.sub(r'\n<h2 id="sec-8">8\. Changes since .*?(?=\n<footer>)', "", stripped, flags=re.S)
+            self.assertNotEqual(stripped, with_c)
+            self.assertEqual(stripped, plain, fmt)
+
+    def test_usage_errors_exit_3(self):
+        old, new = self.write_pair()
+        for extra in ([new], ["-R", self.root], ["-s", "SITE1"], ["-a", "2026-10-26"], ["-i", "SITE3", self.tmp.name, "--"],
+                      ["-b", "all"], ["-P", "-o", os.path.join(self.tmp.name, "r.md")]):
+            rc, out, err = self.cli("-C", old, new, *extra)
+            self.assertEqual((rc, out), (3, ""), f"{extra}: {err}")
+            self.assertIn("--compare OLD NEW selects the two sweeps itself: not with", err)
+        rc, _, err = self.cli("-C", old)
+        self.assertEqual(rc, 3, err)
+        rc, _, err = self.cli("--compare", old, new, "-R", self.root)
+        self.assertIn("not with -R/--sweep-root", err)
+
+    def test_input_errors_exit_1(self):
+        old, new = self.write_pair()
+        other = write_sweep(self.root, "SITE2", "20261026T130000Z", [("acme-s2-stop1d-01", "ok", "OK", host_doc("acme-s2-stop1d-01", "OK"))])
+        odd = write_sweep(self.root, "SITE1", "latest", [("acme-s1-stop1d-01", "ok", "OK", host_doc("acme-s1-stop1d-01", "OK"))])
+        link = os.path.join(self.tmp.name, "same")
+        os.symlink(new, link)
+        for argv, text in (([self.tmp.name, new], "not a nic-sweep directory"),
+                           ([old, os.path.join(self.tmp.name, "missing")], "not a nic-sweep directory"),
+                           ([old, other], "OLD is a sweep of site SITE1, NEW of site SITE2"),
+                           ([new, new], "OLD and NEW are the same sweep"),
+                           ([link, new], "OLD and NEW are the same sweep"),
+                           ([new, old], f"OLD ({self.NEW}) must be an earlier sweep than NEW ({self.OLD})"),
+                           ([old, odd], "directory name 'latest' is not a sweep time")):
+            rc, out, err = self.cli("-C", *argv)
+            self.assertEqual((rc, out), (1, ""), f"{argv}: {err}")
+            self.assertTrue(err.startswith("❌"), err)
+            self.assertIn(text, err)
+            self.assertNotIn("Traceback", err)
+
+    def test_help_and_cli_run(self):
+        rc, out, _ = self.cli("--help")
+        self.assertEqual(rc, 0)
+        self.assertIn("-C OLD NEW, --compare OLD NEW", out)
+        self.assertIn("not with SWEEP_DIR, -R, -s, -a, -i, -b all or -P", " ".join(out.split()))
+        old, new = self.write_pair()
+        rc, out, err = self.cli("--compare", old, new, "-O", "json", env={nr.RULES_ENV: ""})
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)["comparison"]["rebooted"], [self.C1, self.S2])
+
+
 if __name__ == "__main__":
     unittest.main()
