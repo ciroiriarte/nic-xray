@@ -307,6 +307,13 @@ Multi-lane modules (for example QSFP28 100G SR4) are judged lane by lane: the
 value shows the lowest and highest lane, the evidence lists every lane and the
 hint names the lane at fault.
 .TP
+.B mlx5.deep.rx_peers
+Rx power (lowest lane) 5 dB or more below the median of the host's other linked
+ports with the same module compliance \(-> WARN, while the value may still be
+inside the module's own range: an attenuated fibre or dirty connector shows
+before errors start. Judged with at least 3 such peers, else N/A; N/A without
+link. The value is the difference in dB and the evidence lists the peers.
+.TP
 .B mlx5.deep
 The query failed or timed out \(-> UNKNOWN. No deep tool installed \(-> N/A.
 .SH SEVERITIES
@@ -466,6 +473,9 @@ temperature_c, voltage_mv, bias_ma, rx_dbm, tx_dbm, each with _low and _high (th
 module's own range) and, on multi-lane modules, _lanes (the value is then the lowest
 lane); rx_dbm_judged (false without link); tx_fault, rx_los, tx_cdr_lol, rx_cdr_lol
 (lists, one per lane); vendor, part_number, compliance.
+.TP
+.B mlx5.deep.rx_peers
+rx_dbm, peers_median_dbm, delta_db, peers, compliance.
 .SH REQUIREMENTS
 .IP \(bu 2
 Bash 4.4 or newer.

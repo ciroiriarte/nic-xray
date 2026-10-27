@@ -197,7 +197,8 @@ FLAP_KIND = "link flaps since driver load"
 ISSUE_FAMILY = {"mlx5.phy.errors": "link errors (symbol/CRC/BER)", "mlx5.frame.errors": "link errors (symbol/CRC/BER)",
                 "mlx5.deep.ber": "link errors (symbol/CRC/BER)", "generic.link.lookback": "link instability",
                 "generic.link.flaps": "link instability",
-                FLAP_KIND: "link instability", "mlx5.link.phy_down": "link instability"}
+                FLAP_KIND: "link instability", "mlx5.link.phy_down": "link instability",
+                "mlx5.deep.rx_peers": OUTLIER_KIND}     # nic-health's own per-host low-Rx check
 PCIE_BELOW = "PCIe below capability"
 
 # Known tool issues (design §6.3 A7): --suppress FILE

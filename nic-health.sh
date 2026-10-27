@@ -45,6 +45,9 @@
 #                 generic.link.state, service-impact facts: in_use and why, bond, bond link
 #                 failures, traffic in the window (docs/design/nic-sweep.md §7 P2/P3). Evidence,
 #                 table and CSV unchanged. Global addresses are read with one ip call per run
+#   - 2026-10-27: mlx5.deep.rx_peers: a linked port's Rx >= 5 dB below the median of the host's
+#                 other linked ports with the same module is WARN (3 peers needed), so attenuation
+#                 shows before errors start, while Rx is still inside the module's range
 #
 # Version: 2.15.0
 
@@ -270,6 +273,12 @@ BER_ZERO_EXPONENT=-999
 DEEP_RANGE_KEYS=("Temperature [C]" "Voltage [mV]" "Bias Current [mA]" "Rx Power Current [dBm]" "Tx Power Current [dBm]")
 # Module per-lane fault flags; any non-zero lane is WARN
 DEEP_FLAG_KEYS=("Tx Fault [per lane]" "Rx LOS [per lane]" "Tx CDR LOL [per lane]" "Rx CDR LOL [per lane]")
+# mlx5.deep.rx_peers: a linked port's Rx (lowest lane) at least DEEP_RX_PEERS_DELTA_DB below the median of
+# the host's other linked ports with the same module compliance is WARN, judged with at least
+# DEEP_RX_PEERS_MIN such peers. It catches attenuation while the value is still inside the module's range
+DEEP_RX_KEY="Rx Power Current [dBm]"
+DEEP_RX_PEERS_DELTA_DB=5
+DEEP_RX_PEERS_MIN=3
 # mlx5.deep.ber evidence: always listed ("?" when missing), then listed only when the tool printed
 # them. Link Down Counter is printed by MFT mlxlink and mstflint >= 4.31, not by mstflint 4.26
 DEEP_BER_EVIDENCE_KEYS=("Effective Physical BER" "Raw Physical BER" "Effective Physical Errors")
@@ -367,6 +376,10 @@ declare -A DEEP_KV=()
 declare -A DEEP_ERR=()
 declare -A DEEP_TOOL_USED=()
 DEEP_ARGV=()
+# Module Rx per deep port for mlx5.deep.rx_peers, in module order: DEEP_RX_MILLI[IFACE] (lowest lane, milli-dBm),
+# DEEP_RX_TEXT[IFACE] (as printed), DEEP_RX_MODULE[IFACE] (compliance), DEEP_RX_LINK[IFACE] (true/false)
+DEEP_RX_PORTS=()
+declare -A DEEP_RX_MILLI=() DEEP_RX_TEXT=() DEEP_RX_MODULE=() DEEP_RX_LINK=()
 # Look-back results: LOOKBACK_DOWNS[IFACE]=link-down messages; state is empty until collected
 declare -A LOOKBACK_DOWNS=()
 LOOKBACK_STATE=""
@@ -487,7 +500,9 @@ usage() {
     echo -e "                        PHY/frame errors not growing in the window but high since boot"
     echo -e "                        (>=$MLX5_HISTORY_MIN_ERRORS, >=$MLX5_HISTORY_WARN_PER_HOUR/h over uptime): WARN"
     echo -e " mlx5.deep.*            -l deep: tool troubleshooting code, module/link FEC mismatch,"
-    echo -e "                        effective BER since last clear, module ranges and lane fault flags"
+    echo -e "                        effective BER since last clear, module ranges and lane fault flags;"
+    echo -e "                        Rx >=${DEEP_RX_PEERS_DELTA_DB} dB below the median of the host's other linked ports with"
+    echo -e "                        the same module (>=${DEEP_RX_PEERS_MIN} needed): WARN"
     echo -e "                        (ports without carrier: link checks N/A, Rx power/LOS/CDR LOL not judged)"
     echo -e ""
     echo -e "Exit status (Nagios-compatible):"
@@ -1784,6 +1799,9 @@ check_deep_port() {
         done
         EVIDENCE+="$KEY=$V; "
         M="${DEEP_RANGE_METRIC[$KEY]}"
+        if [[ "$KEY" == "$DEEP_RX_KEY" ]]; then
+            DEEP_RX_MILLI[$IFACE]=$M_MIN; DEEP_RX_TEXT[$IFACE]="$RAW_MIN"
+        fi
         if (( ${#LANES[@]} > 1 )); then
             VALUE+="${KEY%% *}=$RAW_MIN..$RAW_MAX "
             metric_num "$M" "$RAW_MIN"
@@ -1836,6 +1854,74 @@ check_deep_port() {
     metric_str part_number "${DEEP_KV["$IFACE|Vendor Part Number"]:-}"
     metric_str compliance "${DEEP_KV["$IFACE|Compliance"]:-}"
     add_record "port" "$IFACE" "mlx5.deep.module" "${VALUE% }" "" "within module ranges, no lane faults" "$SEV" "$EVIDENCE" "$HINT" "$REF" "$METRICS"
+    DEEP_RX_PORTS+=("$IFACE")
+    DEEP_RX_MODULE[$IFACE]="${DEEP_KV["$IFACE|Compliance"]:-}"
+    [[ "${DEEP_RX_MODULE[$IFACE]}" == "$DEEP_NA" ]] && DEEP_RX_MODULE[$IFACE]=""
+    DEEP_RX_LINK[$IFACE]=$LINK_UP
+}
+
+# Milli-units as a decimal: -8660 -> -8.66, 5000 -> 5
+milli_text() {
+    local SIGN="" A="$1" F
+    (( A < 0 )) && { SIGN="-"; A=$(( -A )); }
+    printf -v F '%03d' $(( A % 1000 ))
+    while [[ "$F" == *0 ]]; do F="${F%0}"; done
+    printf '%s%d%s' "$SIGN" $(( A / 1000 )) "${F:+.$F}"
+}
+
+# mlx5.deep.rx_peers (§7, nic-sweep.md §8): each linked port's Rx against the median of the host's other
+# linked ports with the same module compliance, from the Rx that check_deep_port recorded
+check_deep_rx_peers() {
+    local IFACE P REF="$DESIGN_REF §7" CHECK="mlx5.deep.rx_peers" UNIT="dB"
+    local THRESH="> -$DEEP_RX_PEERS_DELTA_DB vs peers' median" N MED DELTA I J T SEV HINT METRICS PEERS_TEXT
+    local -a VALS
+    for IFACE in "${DEEP_RX_PORTS[@]}"; do
+        if [[ "${DEEP_RX_LINK[$IFACE]}" != true ]]; then
+            add_record "port" "$IFACE" "$CHECK" "-" "$UNIT" "$THRESH" "$SEV_NA" "no link: see generic.link.state" "" "$REF"
+            continue
+        fi
+        if [[ -z "${DEEP_RX_MILLI[$IFACE]:-}" || -z "${DEEP_RX_MODULE[$IFACE]}" ]]; then
+            add_record "port" "$IFACE" "$CHECK" "-" "$UNIT" "$THRESH" "$SEV_NA" \
+                "no Rx power or module compliance from ${DEEP_TOOL_USED[$IFACE]:-the deep tool}" "" "$REF"
+            continue
+        fi
+        VALS=(); PEERS_TEXT=""
+        for P in "${DEEP_RX_PORTS[@]}"; do
+            [[ "$P" == "$IFACE" || "${DEEP_RX_LINK[$P]}" != true || -z "${DEEP_RX_MILLI[$P]:-}" ]] && continue
+            [[ "${DEEP_RX_MODULE[$P]}" == "${DEEP_RX_MODULE[$IFACE]}" ]] || continue
+            VALS+=("${DEEP_RX_MILLI[$P]}"); PEERS_TEXT+="$P ${DEEP_RX_TEXT[$P]}, "
+        done
+        N=${#VALS[@]}
+        if (( N < DEEP_RX_PEERS_MIN )); then
+            add_record "port" "$IFACE" "$CHECK" "-" "$UNIT" "$THRESH" "$SEV_NA" \
+                "$N linked peer(s) with module ${DEEP_RX_MODULE[$IFACE]}, $DEEP_RX_PEERS_MIN needed" "" "$REF"
+            continue
+        fi
+        # Median by insertion sort (a host has a handful of ports)
+        for (( I = 1; I < N; I++ )); do
+            T=${VALS[I]}
+            for (( J = I - 1; J >= 0 && VALS[J] > T; J-- )); do VALS[J + 1]=${VALS[J]}; done
+            VALS[J + 1]=$T
+        done
+        if (( N % 2 )); then MED=${VALS[N / 2]}; else MED=$(( (VALS[N / 2 - 1] + VALS[N / 2]) / 2 )); fi
+        DELTA=$(( DEEP_RX_MILLI[$IFACE] - MED ))
+        if (( DELTA <= -DEEP_RX_PEERS_DELTA_DB * 1000 )); then
+            SEV="$SEV_WARN"
+            HINT="Rx $(milli_text $(( -DELTA ))) dB below the host's other ports with the same module, still inside the module's range: clean or inspect both fibre ends and the patch cord, check the peer optic's Tx"
+        else
+            SEV="$SEV_OK"; HINT=""
+        fi
+        METRICS=""
+        metric_num rx_dbm "${DEEP_RX_TEXT[$IFACE]}"
+        metric_num peers_median_dbm "$(milli_text "$MED")"
+        metric_num delta_db "$(milli_text "$DELTA")"
+        metric_int peers "$N"
+        metric_str compliance "${DEEP_RX_MODULE[$IFACE]}"
+        add_record "port" "$IFACE" "$CHECK" "$(milli_text "$DELTA")" "$UNIT" "$THRESH" "$SEV" \
+            "Rx ${DEEP_RX_TEXT[$IFACE]} dBm; median $(milli_text "$MED") dBm over $N peer(s) with module ${DEEP_RX_MODULE[$IFACE]}: ${PEERS_TEXT%, }" \
+            "$HINT" "$REF" "$METRICS"
+    done
+    return 0
 }
 
 check_deep() {
@@ -1848,10 +1934,11 @@ check_deep() {
             "Install mstflint (distribution package) or NVIDIA MFT to enable deep mode" "$DESIGN_REF §7"
         return 0
     fi
+    DEEP_RX_PORTS=(); DEEP_RX_MILLI=(); DEEP_RX_TEXT=(); DEEP_RX_MODULE=(); DEEP_RX_LINK=()
     for IDX in "${!PORT_IFACE[@]}"; do
         mlx5_port_eligible "$IDX" && check_deep_port "$IDX"
     done
-    return 0
+    check_deep_rx_peers
 }
 
 # --- Checks ---

@@ -2,8 +2,8 @@
   "schema_version": 1,
   "generator": {
     "tool": "nic-report.py",
-    "version": "2.14.0",
-    "generated_at": "2026-10-27T18:13:28+00:00"
+    "version": "2.15.0",
+    "generated_at": "2026-10-27T18:54:23+00:00"
   },
   "title": "NIC Health: cross-site comparison (SITE1 · SITE2)",
   "classification": "Fictional sample data",
@@ -725,12 +725,12 @@
     "catalogs": [
       {
         "file": "nic-report-rules.json",
-        "catalog_version": "2026.10.2",
-        "rules": 17,
+        "catalog_version": "2026.10.3",
+        "rules": 18,
         "overrides": []
       }
     ],
-    "rules": 17,
+    "rules": 18,
     "matches": [
       {
         "rule": "OPT-ATTEN-ACTIVE",
@@ -850,6 +850,12 @@
             "acme-s1-cmp1-01",
             "eth0",
             "mlx5.deep.module"
+          ],
+          [
+            "SITE1",
+            "acme-s1-cmp1-01",
+            "eth0",
+            "mlx5.deep.rx_peers"
           ],
           [
             "SITE1",

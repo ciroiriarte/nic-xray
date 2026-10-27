@@ -1118,6 +1118,45 @@ reset_results; check_deep_port 0
 assert_eq "unparseable BER (UNKNOWN): no metrics" "UNKNOWN|" "$(sev_of mlx5.deep.ber eth0)|$(metrics_of mlx5.deep.ber eth0)"
 assert_eq "no module (N/A): no metrics" "N/A|" "$(sev_of mlx5.deep.module eth0)|$(metrics_of mlx5.deep.module eth0)"
 
+# mlx5.deep.rx_peers: each linked port's Rx against the host's other linked ports with the same module
+# (nic-sweep.md §8). p0 is attenuated while still inside its module range; p5 has no link and is no peer;
+# p6 has a different module and so no peers
+DEEP_TOOL_USED=()
+DEEP_RX_PORTS=(p0 p1 p2 p3 p4 p5 p6)
+DEEP_RX_MILLI=([p0]=-8540 [p1]=-130 [p2]=-200 [p3]=-100 [p4]=-3000 [p5]=-40000 [p6]=-500)
+DEEP_RX_TEXT=([p0]=-8.54 [p1]=-0.13 [p2]=-0.2 [p3]=-0.1 [p4]=-3 [p5]=-40 [p6]=-0.5)
+DEEP_RX_MODULE=([p0]=SR [p1]=SR [p2]=SR [p3]=SR [p4]=SR [p5]=SR [p6]=LR)
+DEEP_RX_LINK=([p0]=true [p1]=true [p2]=true [p3]=true [p4]=true [p5]=false [p6]=true)
+reset_results; check_deep_rx_peers
+assert_eq "rx_peers: severities" "WARN OK OK OK OK N/A N/A" \
+    "$(for P in p0 p1 p2 p3 p4 p5 p6; do printf '%s ' "$(sev_of mlx5.deep.rx_peers "$P")"; done | sed 's/ $//')"
+assert_eq "rx_peers: value is the delta to the even-count median" "-8.375" "$(mlx5_rec REC_VALUE mlx5.deep.rx_peers p0)"
+assert_eq "rx_peers: evidence names the peers" "Rx -8.54 dBm; median -0.165 dBm over 4 peer(s) with module SR: p1 -0.13, p2 -0.2, p3 -0.1, p4 -3" \
+    "$(mlx5_rec REC_EVIDENCE mlx5.deep.rx_peers p0)"
+assert_eq "rx_peers: hint" "Rx 8.375 dB below the host's other ports with the same module, still inside the module's range: clean or inspect both fibre ends and the patch cord, check the peer optic's Tx" \
+    "$(mlx5_rec REC_HINT mlx5.deep.rx_peers p0)"
+assert_eq "rx_peers: metrics" '"rx_dbm": -8.54, "peers_median_dbm": -0.165, "delta_db": -8.375, "peers": 4, "compliance": "SR"' \
+    "$(metrics_of mlx5.deep.rx_peers p0)"
+assert_eq "rx_peers: a low peer pulls the median, not the verdict" "1.47" "$(mlx5_rec REC_VALUE mlx5.deep.rx_peers p1)"
+assert_eq "rx_peers: no link" "no link: see generic.link.state" "$(mlx5_rec REC_EVIDENCE mlx5.deep.rx_peers p5)"
+assert_eq "rx_peers: too few peers" "0 linked peer(s) with module LR, $DEEP_RX_PEERS_MIN needed" "$(mlx5_rec REC_EVIDENCE mlx5.deep.rx_peers p6)"
+# Exactly the margin below is WARN; the odd-count median is the middle value
+DEEP_RX_PORTS=(q0 q1 q2 q3)
+DEEP_RX_MILLI=([q0]=-5100 [q1]=-100 [q2]=-90 [q3]=-110)
+DEEP_RX_TEXT=([q0]=-5.1 [q1]=-0.1 [q2]=-0.09 [q3]=-0.11)
+DEEP_RX_MODULE=([q0]=SR [q1]=SR [q2]=SR [q3]=SR)
+DEEP_RX_LINK=([q0]=true [q1]=true [q2]=true [q3]=true)
+reset_results; check_deep_rx_peers
+assert_eq "rx_peers: margin itself is WARN" "WARN|-5" "$(sev_of mlx5.deep.rx_peers q0)|$(mlx5_rec REC_VALUE mlx5.deep.rx_peers q0)"
+DEEP_RX_MILLI[q0]=-5099; DEEP_RX_TEXT[q0]=-5.099
+reset_results; check_deep_rx_peers
+assert_eq "rx_peers: just inside the margin is OK" "OK|-4.999" "$(sev_of mlx5.deep.rx_peers q0)|$(mlx5_rec REC_VALUE mlx5.deep.rx_peers q0)"
+assert_eq "rx_peers: one record per port" "1 1 1 1" "$(for P in q0 q1 q2 q3; do printf '%s ' "$(count_of mlx5.deep.rx_peers "$P")"; done | sed 's/ $//')"
+DEEP_RX_MODULE[q0]=""
+reset_results; check_deep_rx_peers
+assert_eq "rx_peers: no compliance, not judged" "N/A" "$(sev_of mlx5.deep.rx_peers q0)"
+assert_eq "milli_text" "-8.66 5 -0.079 0 1.5" "$(for V in -8660 5000 -79 0 1500; do printf '%s ' "$(milli_text "$V")"; done | sed 's/ $//')"
+
 # Failures: timeout, tool error, tool missing; mlxlink preferred
 # shellcheck disable=SC2329
 timeout() { return 124; }

@@ -2245,10 +2245,10 @@ class TestRuleCatalog(Phase7Base):
     def test_packaged_catalog_loads(self):
         cat = nr.load_catalog(DEFAULT_RULES, [])
         self.assertEqual([r["id"] for r in cat["rules"]],
-                         ["OPT-ATTEN-ACTIVE", "OPT-ATTEN-LATENT", "OPT-LANE", "LINK-FLAP-HIST", "PCIE-SHARED", "PCIE-SEAT",
+                         ["OPT-ATTEN-ACTIVE", "OPT-ATTEN-LATENT", "OPT-ATTEN-EARLY", "OPT-LANE", "LINK-FLAP-HIST", "PCIE-SHARED", "PCIE-SEAT",
                           "PCIE-SEAT-FEW", "PCIE-DISCARDS", "FEC-MISMATCH", "SIG-INTEGRITY", "PATTERN-CROSS-SITE", "LAG-SPLIT",
                           "BOND-SPEED-MISMATCH", "BOND-MTU-MISMATCH", "BOND-SINGLE-SWITCH", "VLAN-DRIFT", "OPT-WEAK-ANY-VENDOR"])
-        self.assertEqual(cat["files"], [{"file": DEFAULT_RULES, "catalog_version": "2026.10.2", "rules": 17, "overrides": []}])
+        self.assertEqual(cat["files"], [{"file": DEFAULT_RULES, "catalog_version": "2026.10.3", "rules": 18, "overrides": []}])
 
     def test_file_level_errors(self):
         self.bad({**catalog(), "schema_version": 2}, "unsupported schema_version 2")
@@ -2327,14 +2327,14 @@ class TestRuleCatalog(Phase7Base):
         md, args = self.report(["-R", self.root, "-u", first, "-u", second])
         dg = nr.analyse(*nr.load_selection(args), args)["diagnosis"]
         self.assertEqual([(c["file"], c["catalog_version"], c["rules"], c["overrides"]) for c in dg["catalogs"]],
-                         [(DEFAULT_RULES, "2026.10.2", 17, []), (first, "site.1", 2, ["OPT-ATTEN-ACTIVE"]),
+                         [(DEFAULT_RULES, "2026.10.3", 18, []), (first, "site.1", 2, ["OPT-ATTEN-ACTIVE"]),
                           (second, "site.2", 1, ["OPT-ATTEN-ACTIVE"])])
-        self.assertEqual(dg["rules"], 18)
+        self.assertEqual(dg["rules"], 19)
         port = next(r for r in dg["recommendations"] if r["scope"] == "port")
         self.assertEqual((port["diagnosis"], port["base_priority"], port["rules"][0]["file"]), ("Second eth0.", 2, second))
         self.assertEqual([r["rules"][0]["id"] for r in dg["recommendations"]], ["OPT-ATTEN-ACTIVE", "SITE-NEW"])
         # The report names each catalog file, not where it lives; the JSON keeps the path
-        self.assertIn("Rule catalogs: nic-report-rules.json (catalog 2026.10.2, 17 rules); first.json (catalog site.1, 2 "
+        self.assertIn("Rule catalogs: nic-report-rules.json (catalog 2026.10.3, 18 rules); first.json (catalog site.1, 2 "
                       "rules; overrides OPT-ATTEN-ACTIVE); second.json (catalog site.2, 1 rules; overrides OPT-ATTEN-ACTIVE).", md)
         self.assertNotIn(os.path.dirname(DEFAULT_RULES), md)
 
@@ -2652,7 +2652,14 @@ class TestMergeAndPatterns(Phase7Base):
     def test_pattern_alone_when_a_place_has_no_recommendation(self):
         for site in ("SITE1", "SITE2"):
             self.sweep(site, [(f"acme-{site.lower()}-stop1d-01", self.ports4(rx=-8.5), [PHY_GROWING] if site == "SITE1" else [], None)])
+        # By default the error-free low-Rx place gets OPT-ATTEN-EARLY; the pattern is listed once, with the first
         recs = self.diagnosis()["recommendations"]
+        self.assertEqual([(r["scope"], r["rules"][0]["id"], len(r["patterns"])) for r in recs],
+                         [("port", "OPT-ATTEN-ACTIVE", 1), ("port", "OPT-ATTEN-EARLY", 0)])
+        self.assertIn(["SITE2", "acme-site2-stop1d-01", "eth0", "mlx5.deep.module"], recs[0]["covers"])
+        # Without that rule (a site override that never matches) SITE2 has no recommendation: the pattern stands alone
+        off = self.write_json("off.json", catalog(rule("OPT-ATTEN-EARLY", when={"fact": "site", "op": "eq", "value": "none"})))
+        recs = self.diagnosis(rules=[off])["recommendations"]
         self.assertEqual([(r["scope"], r["rules"][0]["id"]) for r in recs], [("port", "OPT-ATTEN-ACTIVE"), ("fleet", "PATTERN-CROSS-SITE")])
         self.assertEqual((recs[1]["target"], recs[1]["patterns"]), ("stop1d", []))
         self.assertIn(["SITE2", "acme-site2-stop1d-01", "eth0", "mlx5.deep.module"], recs[1]["covers"])
@@ -2660,6 +2667,18 @@ class TestMergeAndPatterns(Phase7Base):
 
 class TestUnexplained(Phase7Base):
     BER = rec("WARN", "port", "eth1", "mlx5.deep.ber", "effective 3E-9", EV_BER, "Clean the optic")
+
+    def test_early_attenuation_explains_nic_health_rx_peers(self):
+        # Low Rx, inside the module range and without errors: nic-health's per-host check warns, the report
+        # recommends cleaning before errors start, and counts that finding as explained
+        peers = rec("WARN", "port", "eth0", "mlx5.deep.rx_peers", "-8", "Rx -8.5 dBm; median -0.5 dBm over 3 peer(s)")
+        self.one_host(extra=[peers], rx=-8.5)
+        dg = self.diagnosis()
+        self.assertEqual([(r["rules"][0]["id"], r["priority"]) for r in dg["recommendations"]], [("OPT-ATTEN-EARLY", 2)])
+        self.assertIn(["SITE1", "acme-s1-stop1d-01", "eth0", "mlx5.deep.rx_peers"], dg["recommendations"][0]["covers"])
+        self.assertEqual(dg["unexplained"], [])
+        self.assertTrue(dg["recommendations"][0]["diagnosis"].startswith(
+            "Early attenuation: Rx -8.5 dBm is 8 dB below the median of the host's other ports of this module type, "))
 
     def test_findings_no_rule_explains(self):
         self.one_host(extra=[PHY_GROWING, self.BER])
