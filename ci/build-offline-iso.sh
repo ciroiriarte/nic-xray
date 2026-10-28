@@ -242,6 +242,14 @@ APT
 	write_apt_installer
 }
 
+# The bundle must install on a system that has none of it
+verify_rpm_bundle() {
+	local check_root="$WORKDIR/rpm-check"
+	mkdir -p "$check_root"
+	rpm --root "$check_root" --initdb
+	rpm --root "$check_root" --install --test --nosignature "$PKG_DIR"/*.rpm
+}
+
 install_zypper_tools() {
 	zypper --non-interactive refresh
 	zypper --non-interactive install --no-recommends ca-certificates curl findutils xorriso createrepo_c
@@ -284,9 +292,7 @@ build_zypper_repo() {
 		echo "No RPMs were downloaded" >&2
 		exit 1
 	fi
-	# The bundle must install on a system that has none of it
-	rpm --root "$WORKDIR/zypper-check" --initdb
-	rpm --root "$WORKDIR/zypper-check" --install --test --nosignature "$PKG_DIR"/*.rpm
+	verify_rpm_bundle
 	createrepo_c "$STAGING_DIR/repo"
 	write_rpm_installer
 }
@@ -306,9 +312,8 @@ build_dnf_repo() {
 		echo "No RPMs were downloaded" >&2
 		exit 1
 	fi
+	verify_rpm_bundle
 	createrepo_c "$STAGING_DIR/repo"
-	# Every requirement must be satisfied within the bundle
-	dnf repoclosure --repofrompath="nic-xray-iso,file://$STAGING_DIR/repo" --repo=nic-xray-iso
 	write_rpm_installer
 }
 

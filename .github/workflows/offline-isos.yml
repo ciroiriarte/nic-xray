@@ -112,7 +112,14 @@ jobs:
             version="${{ github.event.release.tag_name }}"
             version="${version#v}"
           else
-            version="$(awk -F'"' '/^SCRIPT_VERSION=/ { print $2; exit }' nic-xray.sh)"
+            # Bash only: the Tumbleweed image ships no awk
+            version_re='^SCRIPT_VERSION="([^"]+)"'
+            while IFS= read -r line; do
+              if [[ "$line" =~ $version_re ]]; then
+                version="${BASH_REMATCH[1]}"
+                break
+              fi
+            done < nic-xray.sh
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
