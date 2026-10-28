@@ -27,9 +27,8 @@ on:
       - ci/build-offline-iso.sh
       - nic-xray.sh
       - nic-health.sh
-  push:
-    tags:
-      - 'v*'
+  # Release assets come from the release event only: a tag push trigger too
+  # would build twice and race the uploads
   release:
     types: [published]
 
@@ -73,6 +72,10 @@ jobs:
           - id: opensuse-leap-15.6
             container: opensuse/leap:15.6
             obs_path: openSUSE_Leap_15.6
+            package_manager: zypper
+          - id: opensuse-leap-16.0
+            container: opensuse/leap:16.0
+            obs_path: openSUSE_Leap_16.0
             package_manager: zypper
           - id: rocky-9
             container: rockylinux/rockylinux:9
@@ -126,6 +129,23 @@ jobs:
             --with-graphviz '${{ github.event_name != 'workflow_dispatch' || inputs.with_graphviz }}' \
             --with-vendor-tools '${{ github.event_name == 'workflow_dispatch' && inputs.with_vendor_tools }}'
 
+      - name: Smoke-test the installer
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          # A mount path with a space exercises the installer's URL encoding
+          mount_dir="$RUNNER_TEMP/iso mount"
+          xorriso -osirrox on -indev dist/*.iso -extract / "$mount_dir"
+          bash "$mount_dir/install.sh"
+          nic-xray --version
+          nic-health --version
+          for repo_file in /etc/yum.repos.d/nic-xray-offline.repo /etc/zypp/repos.d/nic-xray-offline.repo; do
+            if [[ -e "$repo_file" ]]; then
+              echo "install.sh left $repo_file behind" >&2
+              exit 1
+            fi
+          done
+
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
@@ -137,7 +157,7 @@ jobs:
 
   release-assets:
     name: Attach offline ISOs to release
-    if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v') || (inputs.release_tag || '') != ''
+    if: github.event_name == 'release' || (inputs.release_tag || '') != ''
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -163,6 +183,9 @@ jobs:
           elif [[ "${{ github.event_name }}" == "release" ]]; then
             tag="${{ github.event.release.tag_name }}"
           fi
-          gh release view "$tag" >/dev/null 2>&1 || \
-            gh release create "$tag" --verify-tag --title "$tag" --notes "nic-xray $tag"
+          # Attach to the maintainer's release; never create a placeholder one
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag does not exist; publish it first" >&2
+            exit 1
+          fi
           gh release upload "$tag" release-assets/* --clobber
