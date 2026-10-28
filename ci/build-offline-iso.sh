@@ -52,7 +52,9 @@ STAGING_DIR="$WORKDIR/staging"
 PKG_DIR="$STAGING_DIR/repo/packages"
 OUT_DIR="${GITHUB_WORKSPACE:-$PWD}/dist"
 ISO_NAME="nic-xray-${VERSION}-offline-${DISTRO_ID}-${ARCH}.iso"
-INSTALL_PKGS=(nic-xray)
+# The closure is built without recommends, so the optional tools nic-xray
+# recommends are listed explicitly and only when their flag asks for them
+INSTALL_PKGS=(nic-xray pciutils)
 if [[ "$WITH_GRAPHVIZ" == "true" ]]; then
 	INSTALL_PKGS+=(graphviz)
 fi
@@ -85,11 +87,36 @@ Packages:      ${INSTALL_PKGS[*]}
 
 Mount this ISO on the target host, then run:
 
-  sudo ./install.sh
+  sudo bash /path/to/mount/install.sh
 
 The installer points the system package manager at the ISO-local repository and
 uses only that repository for the nic-xray installation transaction.
 README
+}
+
+# Installer snippet: percent-encode the mount path for use in a repository URL
+read -r -d '' INSTALL_URL_PATH_FN <<'URLFN' || true
+url_path() {
+	local LC_ALL=C path="$1" out="" ch i
+	for (( i = 0; i < ${#path}; i++ )); do
+		ch="${path:i:1}"
+		case "$ch" in
+			[A-Za-z0-9/._~-]) out+="$ch" ;;
+			*) printf -v ch '%%%02X' "'$ch"; out+="$ch" ;;
+		esac
+	done
+	printf '%s' "$out"
+}
+URLFN
+
+# Replace the installer placeholders with the package list and shared helpers
+fill_installer() {
+	local installer="$STAGING_DIR/install.sh" content
+	content="$(<"$installer")"
+	content="${content//@INSTALL_PACKAGES@/"${INSTALL_PKGS[*]}"}"
+	content="${content//@URL_PATH_FN@/"$INSTALL_URL_PATH_FN"}"
+	printf '%s\n' "$content" > "$installer"
+	chmod +x "$installer"
 }
 
 write_apt_installer() {
@@ -98,16 +125,19 @@ write_apt_installer() {
 set -Eeuo pipefail
 
 if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-	echo "Run as root: sudo $0" >&2
+	echo "Run as root: sudo bash $0" >&2
 	exit 1
 fi
 
+@URL_PATH_FN@
+
 ISO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO_URL_PATH="$(url_path "$ISO_DIR/repo")"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 mkdir -p "$TMP_DIR/empty" "$TMP_DIR/lists/partial" "$TMP_DIR/cache/archives/partial"
 cat > "$TMP_DIR/sources.list" <<-APT
-deb [trusted=yes] file:${ISO_DIR}/repo ./
+deb [trusted=yes] file:${REPO_URL_PATH} ./
 APT
 
 apt-get \
@@ -123,10 +153,9 @@ apt-get \
 	-o Dir::State::Lists="$TMP_DIR/lists" \
 	-o Dir::Cache="$TMP_DIR/cache" \
 	-o APT::Get::List-Cleanup=0 \
-	install -y @INSTALL_PACKAGES@
+	install -y --no-install-recommends @INSTALL_PACKAGES@
 INSTALL
-	sed -i "s/@INSTALL_PACKAGES@/${INSTALL_PKGS[*]}/g" "$STAGING_DIR/install.sh"
-	chmod +x "$STAGING_DIR/install.sh"
+	fill_installer
 }
 
 write_rpm_installer() {
@@ -135,34 +164,32 @@ write_rpm_installer() {
 set -Eeuo pipefail
 
 if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-	echo "Run as root: sudo $0" >&2
+	echo "Run as root: sudo bash $0" >&2
 	exit 1
 fi
 
+@URL_PATH_FN@
+
 ISO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO_URL_PATH="$(url_path "$ISO_DIR/repo")"
+REPO_ALIAS="nic-xray-offline"
 if command -v dnf >/dev/null 2>&1; then
-	REPO_FILE="/etc/yum.repos.d/nic-xray-offline.repo"
-	cat > "$REPO_FILE" <<-REPO
-[nic-xray-offline]
-name=nic-xray offline ISO
-baseurl=file://${ISO_DIR}/repo
-enabled=1
-gpgcheck=0
-repo_gpgcheck=0
-REPO
-	dnf --disablerepo='*' --enablerepo='nic-xray-offline' install -y @INSTALL_PACKAGES@
+	# Transient repository: nothing is left in /etc/yum.repos.d
+	dnf --repofrompath="${REPO_ALIAS},file://${REPO_URL_PATH}" --repo="$REPO_ALIAS" --nogpgcheck \
+		--setopt=install_weak_deps=False install -y @INSTALL_PACKAGES@
 elif command -v zypper >/dev/null 2>&1; then
-	zypper --non-interactive removerepo nic-xray-offline >/dev/null 2>&1 || true
-	zypper --non-interactive addrepo --no-gpgcheck "dir://${ISO_DIR}/repo" nic-xray-offline
-	zypper --non-interactive --gpg-auto-import-keys refresh nic-xray-offline
-	zypper --non-interactive --repo nic-xray-offline install @INSTALL_PACKAGES@
+	# The repository points at the mount; remove it however the install ends
+	trap 'zypper --non-interactive removerepo "$REPO_ALIAS" >/dev/null 2>&1 || true' EXIT
+	zypper --non-interactive removerepo "$REPO_ALIAS" >/dev/null 2>&1 || true
+	zypper --non-interactive addrepo --no-gpgcheck "dir://${REPO_URL_PATH}" "$REPO_ALIAS"
+	zypper --non-interactive refresh "$REPO_ALIAS"
+	zypper --non-interactive install --repo "$REPO_ALIAS" --no-recommends @INSTALL_PACKAGES@
 else
 	echo "Neither dnf nor zypper is available on this host" >&2
 	exit 1
 fi
 INSTALL
-	sed -i "s/@INSTALL_PACKAGES@/${INSTALL_PKGS[*]}/g" "$STAGING_DIR/install.sh"
-	chmod +x "$STAGING_DIR/install.sh"
+	fill_installer
 }
 
 build_iso() {
@@ -196,10 +223,10 @@ APT
 	apt-get update
 
 	pushd "$PKG_DIR" >/dev/null
-	# Download the recursive dependency/recommendation closure, including packages
+	# Download the recursive dependency closure, including packages
 	# already present in the build container, so the ISO does not depend on the
 	# container's installed state.
-	mapfile -t closure < <(apt-cache depends --recurse --no-conflicts --no-breaks --no-replaces --no-enhances --no-suggests "${INSTALL_PKGS[@]}" \
+	mapfile -t closure < <(apt-cache depends --recurse --no-recommends --no-conflicts --no-breaks --no-replaces --no-enhances --no-suggests "${INSTALL_PKGS[@]}" \
 		| awk '/^[[:alnum:]][[:alnum:].+:-]*$/ { print $1 }' \
 		| sort -u)
 	if [[ ${#closure[@]} -eq 0 ]]; then
@@ -239,12 +266,27 @@ build_zypper_repo() {
 	configure_slowroll_repos
 	zypper --non-interactive addrepo --check --refresh "$OBS_BASE_URL/" nic-xray-obs
 	zypper --non-interactive --gpg-auto-import-keys refresh nic-xray-obs
-	zypper --non-interactive install --download-only --recommends "${INSTALL_PKGS[@]}"
-	find /var/cache/zypp/packages -type f -name '*.rpm' -exec cp -n {} "$PKG_DIR" \;
+	# Resolve against an empty root that uses the container's repositories, so
+	# packages already installed in the container are downloaded too
+	local resolve_root="$WORKDIR/zypper-root" pkg_cache="$WORKDIR/zypper-packages"
+	local key key_file="$WORKDIR/gpg-pubkey.asc"
+	mkdir -p "$resolve_root" "$pkg_cache"
+	rpm --root "$resolve_root" --initdb
+	# Same trusted keys as the container, so downloads are still verified
+	while read -r key; do
+		rpm -q --qf '%{DESCRIPTION}\n' "$key" > "$key_file"
+		rpm --root "$resolve_root" --import "$key_file"
+	done < <(rpm -q gpg-pubkey)
+	zypper --non-interactive --installroot "$resolve_root" --pkg-cache-dir "$pkg_cache" \
+		install --download-only --no-recommends "${INSTALL_PKGS[@]}"
+	find "$pkg_cache" -type f -name '*.rpm' -exec cp -n {} "$PKG_DIR" \;
 	if ! find "$PKG_DIR" -type f -name '*.rpm' -print -quit | grep -q .; then
 		echo "No RPMs were downloaded" >&2
 		exit 1
 	fi
+	# The bundle must install on a system that has none of it
+	rpm --root "$WORKDIR/zypper-check" --initdb
+	rpm --root "$WORKDIR/zypper-check" --install --test --nosignature "$PKG_DIR"/*.rpm
 	createrepo_c "$STAGING_DIR/repo"
 	write_rpm_installer
 }
@@ -257,12 +299,16 @@ build_dnf_repo() {
 	install_dnf_tools
 	curl -fsSL -o /etc/yum.repos.d/home_ciriarte_network-tools.repo "$OBS_BASE_URL/home:ciriarte:network-tools.repo"
 	dnf makecache --repo='home_ciriarte_network-tools' || dnf makecache
-	dnf download --resolve --alldeps --destdir "$PKG_DIR" "${INSTALL_PKGS[@]}"
+	# Without --arch the name query also matches i686 builds and resolves their closure
+	dnf download --resolve --alldeps --arch "${ARCH},noarch" --setopt=install_weak_deps=False \
+		--destdir "$PKG_DIR" "${INSTALL_PKGS[@]}"
 	if ! find "$PKG_DIR" -type f -name '*.rpm' -print -quit | grep -q .; then
 		echo "No RPMs were downloaded" >&2
 		exit 1
 	fi
 	createrepo_c "$STAGING_DIR/repo"
+	# Every requirement must be satisfied within the bundle
+	dnf repoclosure --repofrompath="nic-xray-iso,file://$STAGING_DIR/repo" --repo=nic-xray-iso
 	write_rpm_installer
 }
 
