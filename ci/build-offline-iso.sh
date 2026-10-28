@@ -55,11 +55,17 @@ ISO_NAME="nic-xray-${VERSION}-offline-${DISTRO_ID}-${ARCH}.iso"
 # The closure is built without recommends, so the optional tools nic-xray
 # recommends are listed explicitly and only when their flag asks for them
 INSTALL_PKGS=(nic-xray pciutils)
+# Optional packages left out by their flag
+EXCLUDED_PKGS=()
 if [[ "$WITH_GRAPHVIZ" == "true" ]]; then
 	INSTALL_PKGS+=(graphviz)
+else
+	EXCLUDED_PKGS+=(graphviz)
 fi
 if [[ "$WITH_VENDOR_TOOLS" == "true" ]]; then
 	INSTALL_PKGS+=("${VENDOR_TOOL_PKGS[@]}")
+else
+	EXCLUDED_PKGS+=("${VENDOR_TOOL_PKGS[@]}")
 fi
 
 log() { printf '::notice::%s\n' "$*"; }
@@ -305,9 +311,15 @@ build_dnf_repo() {
 	install_dnf_tools
 	curl -fsSL -o /etc/yum.repos.d/home_ciriarte_network-tools.repo "$OBS_BASE_URL/home:ciriarte:network-tools.repo"
 	dnf makecache --repo='home_ciriarte_network-tools' || dnf makecache
-	# Without --arch the name query also matches i686 builds and resolves their closure
+	# Without --arch the name query also matches i686 builds and resolves their closure.
+	# Older dnf download (EL9) ignores install_weak_deps, so hide the optional
+	# packages left out by their flag instead of relying on it.
+	local exclude_args=() pkg
+	for pkg in "${EXCLUDED_PKGS[@]}"; do
+		exclude_args+=(--exclude="$pkg")
+	done
 	dnf download --resolve --alldeps --arch "${ARCH},noarch" --setopt=install_weak_deps=False \
-		--destdir "$PKG_DIR" "${INSTALL_PKGS[@]}"
+		"${exclude_args[@]}" --destdir "$PKG_DIR" "${INSTALL_PKGS[@]}"
 	if ! find "$PKG_DIR" -type f -name '*.rpm' -print -quit | grep -q .; then
 		echo "No RPMs were downloaded" >&2
 		exit 1
