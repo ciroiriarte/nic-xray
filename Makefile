@@ -13,7 +13,7 @@ PY_MIN      := (3, 9)
 # Primary script and companions: each ships a man page (section 8) and a completion
 SCRIPTS     := nic-xray nic-health nic-sweep nic-report
 
-.PHONY: install-man uninstall-man install-completion uninstall-completion install-rules uninstall-rules test lint fixtures
+.PHONY: install-man uninstall-man install-completion uninstall-completion install-rules uninstall-rules test lint fixtures security-scan
 
 install-man:
 	install -d $(DESTDIR)$(MANDIR)/man8
@@ -56,6 +56,7 @@ lint:
 	@command -v $(SHELLCHECK) >/dev/null || { echo "lint: $(SHELLCHECK) not found; install shellcheck" >&2; exit 1; }
 	$(SHELLCHECK) nic-xray.sh nic-health.sh nic-sweep.sh
 	$(SHELLCHECK) -x tests/nic-health-test.sh tests/nic-xray-test.sh tests/nic-sweep-test.sh
+	$(SHELLCHECK) ci/*.sh completions/*.bash
 	@# nic-report.py: Python 3.9 grammar (no bytecode written; needs Python 3.8+ to check); ruff when installed
 	@if $(PYTHON) -c 'import sys; sys.exit(sys.version_info < (3, 8))' 2>/dev/null; then \
 		echo "$(PYTHON): nic-report.py grammar check for Python 3.9"; \
@@ -64,3 +65,12 @@ lint:
 		echo "⏭️  SKIP nic-report.py grammar check: Python 3.8+ required"; \
 	fi
 	@if command -v ruff >/dev/null; then ruff check nic-report.py tests/test_nic_report.py; fi
+
+# Security scan (Trivy secrets/CVEs/misconfigs, Checkov on the workflows): the same pinned
+# tools and gates as .github/workflows/security-scan.yml; tools install once into .ci-tools/
+#   make security-scan               # every check
+#   make security-scan CHECK=trivy   # one check (trivy|checkov)
+CHECK       ?= all
+security-scan:
+	@bash ci/install-tools.sh $(filter-out all,$(CHECK))
+	@bash ci/security-scan.sh $(CHECK)

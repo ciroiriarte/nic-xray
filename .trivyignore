@@ -1,0 +1,3 @@
+# Accepted Trivy findings, one ID per line with a reason and a review date.
+# Example:
+# CVE-0000-00000  # <why it does not apply> — review by YYYY-MM-DD

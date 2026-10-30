@@ -1,0 +1,85 @@
+# Security scan: Trivy and Checkov, one job (and one check) per tool so each can be
+# made a required check on main. ShellCheck stays in ci.yml (`make lint`, every shell file).
+#
+# Tools are pinned and checksum-verified by ci/install-tools.sh; the gates live in
+# ci/security-scan.sh so `make security-scan` reproduces a run locally. Reports are
+# kept as artifacts and, outside fork PRs (read-only token), published to the
+# repository's Security → Code scanning tab.
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trivy:
+    name: trivy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Trivy
+        run: bash ci/install-tools.sh trivy
+
+      - name: Scan (secrets, vulnerabilities, misconfigurations)
+        run: bash ci/security-scan.sh trivy
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-reports
+          path: .ci-tools/reports/
+          if-no-files-found: warn
+
+      - name: Publish to code scanning
+        if: always() && hashFiles('.ci-tools/reports/trivy.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: .ci-tools/reports/trivy.sarif
+          category: trivy
+
+  checkov:
+    name: checkov
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Checkov
+        run: bash ci/install-tools.sh checkov
+
+      - name: Scan GitHub Actions workflows
+        run: bash ci/security-scan.sh checkov
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkov-reports
+          path: .ci-tools/reports/
+          if-no-files-found: warn
+
+      - name: Publish to code scanning
+        if: always() && hashFiles('.ci-tools/reports/checkov.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: .ci-tools/reports/checkov.sarif
+          category: checkov

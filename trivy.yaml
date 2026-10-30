@@ -1,0 +1,15 @@
+# Trivy config (security-scan workflow, `make security-scan`).
+# Gate: vulnerabilities and misconfigurations at HIGH/CRITICAL fail the run; the
+# secret scan runs separately at every severity (see ci/security-scan.sh).
+severity:
+  - HIGH
+  - CRITICAL
+exit-code: 1
+scan:
+  skip-dirs:
+    - .ci-tools
+    - .omc
+    - local
+    - samples/raw
+vulnerability:
+  ignore-unfixed: true

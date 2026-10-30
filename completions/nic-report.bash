@@ -2,6 +2,7 @@
 # Source this file or place it in /etc/bash_completion.d/
 
 _nic_report() {
+	# shellcheck disable=SC2034  # _init_completion sets all five; not every one is read
 	local cur prev words cword split
 	# -s splits "--opt=value" so values complete in both forms
 	_init_completion -s || return
@@ -22,7 +23,7 @@ _nic_report() {
 			return
 			;;
 		-U|--audience)
-			COMPREPLY=($(compgen -W "engineer management field" -- "$cur"))
+			mapfile -t COMPREPLY < <(compgen -W "engineer management field" -- "$cur")
 			return
 			;;
 		-S|--suppress|-u|--rules)
@@ -30,11 +31,11 @@ _nic_report() {
 			return
 			;;
 		-O|--output-format)
-			COMPREPLY=($(compgen -W "md json html pdf" -- "$cur"))
+			mapfile -t COMPREPLY < <(compgen -W "md json html pdf" -- "$cur")
 			return
 			;;
 		-b|--baseline)
-			COMPREPLY=($(compgen -W "scope all" -- "$cur"))
+			mapfile -t COMPREPLY < <(compgen -W "scope all" -- "$cur")
 			return
 			;;
 		-d|--rx-delta-db|-f|--flap-min|-L|--lldp-lookback)
@@ -53,7 +54,7 @@ _nic_report() {
 				local d
 				local -a SITES=()
 				while IFS= read -r d; do SITES+=("${d##*/}"); done < <(compgen -d -- "$root/")
-				COMPREPLY=($(compgen -W "${SITES[*]}" -- "$cur"))
+				mapfile -t COMPREPLY < <(compgen -W "${SITES[*]}" -- "$cur")
 			fi
 			return
 			;;
@@ -95,7 +96,7 @@ _nic_report() {
 			-t --title
 			-c --classification
 		"
-		COMPREPLY=($(compgen -W "$opts" -- "$cur"))
+		mapfile -t COMPREPLY < <(compgen -W "$opts" -- "$cur")
 		return
 	fi
 	# Positional SWEEP_DIR arguments and --import paths
