@@ -12,3 +12,6 @@ samples/obfuscation-table.sed
 
 # Python bytecode (nic-report.py tests)
 __pycache__/
+
+# Security-scan tools and reports (ci/install-tools.sh)
+.ci-tools/

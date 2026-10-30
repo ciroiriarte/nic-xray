@@ -2,6 +2,7 @@
 # Source this file or place it in /etc/bash_completion.d/
 
 _nic_sweep() {
+	# shellcheck disable=SC2034  # _init_completion sets all five; not every one is read
 	local cur prev words cword split
 	# -s splits "--opt=value" so values complete in both forms
 	_init_completion -s || return
@@ -16,7 +17,7 @@ _nic_sweep() {
 			return
 			;;
 		-l|--level)
-			COMPREPLY=($(compgen -W "basic deep" -- "$cur"))
+			mapfile -t COMPREPLY < <(compgen -W "basic deep" -- "$cur")
 			return
 			;;
 		-J|--jump)
@@ -49,7 +50,7 @@ _nic_sweep() {
 			--accept-new-hostkeys
 			-n --no-color
 		"
-		COMPREPLY=($(compgen -W "$opts" -- "$cur"))
+		mapfile -t COMPREPLY < <(compgen -W "$opts" -- "$cur")
 		return
 	fi
 } &&

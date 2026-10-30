@@ -4,4 +4,5 @@
 - Submit a pull request explaining what are you improving
 - Include tests for the new features
 - Run `make test` (unit tests) and `make lint` (shellcheck) before submitting; CI runs both (`make lint` with shellcheck v0.11.0)
+- Make the security scan pass (`make security-scan`: Trivy and Checkov, pinned tools installed into the gitignored `.ci-tools/`); CI runs the same checks on the PR
 - Update documentation

@@ -1,0 +1,14 @@
+# Checkov config (security-scan workflow, `make security-scan`).
+# Only the GitHub Actions workflows are infrastructure here; secrets are owned by
+# Trivy (trivy.yaml). Accepted findings are skipped inline in the workflow, with
+# the reason next to them.
+directory:
+  - .
+framework:
+  - github_actions
+skip-path:
+  - .ci-tools
+  - .omc
+  - local
+compact: true
+quiet: true

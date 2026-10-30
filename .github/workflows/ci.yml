@@ -5,12 +5,14 @@ on:
     branches: [main]
     paths:
       - '**.sh'
+      - completions/**
       - tests/**
       - Makefile
       - .github/workflows/ci.yml
   pull_request:
     paths:
       - '**.sh'
+      - completions/**
       - tests/**
       - Makefile
       - .github/workflows/ci.yml

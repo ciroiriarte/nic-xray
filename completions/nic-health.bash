@@ -2,6 +2,7 @@
 # Source this file or place it in /etc/bash_completion.d/
 
 _nic_health() {
+	# shellcheck disable=SC2034  # _init_completion sets all five; not every one is read
 	local cur prev words cword split
 	# -s splits "--opt=value" so values complete in both forms
 	_init_completion -s || return
@@ -11,15 +12,15 @@ _nic_health() {
 			# Interface names from sysfs (no external command)
 			local -a IFACES=(/sys/class/net/*)
 			IFACES=("${IFACES[@]##*/}")
-			COMPREPLY=($(compgen -W "${IFACES[*]}" -- "$cur"))
+			mapfile -t COMPREPLY < <(compgen -W "${IFACES[*]}" -- "$cur")
 			return
 			;;
 		-O|--output)
-			COMPREPLY=($(compgen -W "table csv json" -- "$cur"))
+			mapfile -t COMPREPLY < <(compgen -W "table csv json" -- "$cur")
 			return
 			;;
 		-l|--level)
-			COMPREPLY=($(compgen -W "basic deep" -- "$cur"))
+			mapfile -t COMPREPLY < <(compgen -W "basic deep" -- "$cur")
 			return
 			;;
 		-I|--interval)
@@ -28,7 +29,7 @@ _nic_health() {
 			;;
 		-L|--lookback)
 			# Free-form minutes; offer the common windows (0 = off, 1 h, 24 h)
-			COMPREPLY=($(compgen -W "0 60 1440" -- "$cur"))
+			mapfile -t COMPREPLY < <(compgen -W "0 60 1440" -- "$cur")
 			return
 			;;
 	esac
@@ -47,7 +48,7 @@ _nic_health() {
 			-n --no-color
 			-t --check-tools
 		"
-		COMPREPLY=($(compgen -W "$opts" -- "$cur"))
+		mapfile -t COMPREPLY < <(compgen -W "$opts" -- "$cur")
 		return
 	fi
 } &&

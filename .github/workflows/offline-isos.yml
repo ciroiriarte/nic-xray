@@ -1,6 +1,7 @@
 name: Offline installer ISOs
 
 on:
+  # checkov:skip=CKV_GHA_7: maintainer-only manual builds; the inputs pick the ISO name, release and optional packages by design
   workflow_dispatch:
     inputs:
       version:

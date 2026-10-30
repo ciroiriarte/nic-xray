@@ -2,21 +2,22 @@
 # Source this file or place it in /etc/bash_completion.d/
 
 _nic_xray() {
+	# shellcheck disable=SC2034  # _init_completion sets all five; not every one is read
 	local cur prev words cword split
 	# -s splits "--opt=value" so values complete in both forms
 	_init_completion -s || return
 
 	case "$prev" in
 		--output)
-			COMPREPLY=($(compgen -W "table csv json dot svg png" -- "$cur"))
+			mapfile -t COMPREPLY < <(compgen -W "table csv json dot svg png" -- "$cur")
 			return
 			;;
 		--filter-link)
-			COMPREPLY=($(compgen -W "up down" -- "$cur"))
+			mapfile -t COMPREPLY < <(compgen -W "up down" -- "$cur")
 			return
 			;;
 		--cluster)
-			COMPREPLY=($(compgen -W "bond nic" -- "$cur"))
+			mapfile -t COMPREPLY < <(compgen -W "bond nic" -- "$cur")
 			return
 			;;
 		--diagram-out)
@@ -52,7 +53,7 @@ _nic_xray() {
 			--filter-link
 			--diagram-out
 		"
-		COMPREPLY=($(compgen -W "$opts" -- "$cur"))
+		mapfile -t COMPREPLY < <(compgen -W "$opts" -- "$cur")
 		return
 	fi
 } &&

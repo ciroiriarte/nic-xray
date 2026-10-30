@@ -4,6 +4,7 @@ Detailed physical network interface diagnostics for Linux.
 
 [![Latest Release](https://img.shields.io/github/v/release/ciroiriarte/nic-xray)](https://github.com/ciroiriarte/nic-xray/releases)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Security Scan](https://github.com/ciroiriarte/nic-xray/actions/workflows/security-scan.yml/badge.svg)](https://github.com/ciroiriarte/nic-xray/actions/workflows/security-scan.yml)
 
 ## Table of Contents
 
@@ -1076,9 +1077,17 @@ This project is licensed under the GNU General Public License v3.0. See [LICENSE
 
 Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
+🔒 Every pull request and push to `main` runs a security scan (`.github/workflows/security-scan.yml`); `make security-scan` runs the same pinned tools locally:
+
+| Check | Fails on |
+|-------|----------|
+| 🔑 Trivy | any committed secret; a HIGH/CRITICAL vulnerability with a fix, or a HIGH/CRITICAL misconfiguration |
+| ⚙️ Checkov | any failed GitHub Actions workflow check (e.g. shell injection, write-all permissions) |
+| 🐚 ShellCheck | any finding in a tracked shell script or completion (`make lint`, in the CI workflow) |
+
 ## ✍️ Authors
 
 **Ciro Iriarte**
 
 - **Created**: 2025-06-05
-- **Updated**: 2026-10-27
+- **Updated**: 2026-10-29
