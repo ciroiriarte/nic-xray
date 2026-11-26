@@ -502,6 +502,7 @@ sudo nic-xray.sh --group-bond --all -s # Combined example
 sudo nic-xray.sh --output csv                     # CSV output
 sudo nic-xray.sh --output csv --separator='|'      # Pipe-delimited CSV
 sudo nic-xray.sh --output csv --separator=$'\t'    # Tab-separated CSV
+sudo nic-xray.sh --output csv -s'\t'               # Same: escapes such as \t are interpreted
 sudo nic-xray.sh --output json                     # JSON output
 sudo nic-xray.sh --all --output json               # All columns as JSON
 ```

@@ -227,6 +227,15 @@ When used with CSV output, the separator replaces the default comma.
 Use
 .I SEP
 as the column separator in table and CSV output.
+Backslash escapes such as
+.B \et
+are interpreted (so
+.B \-s\(aq\et\(aq
+gives a tab,
+.B \e\e
+one backslash); any other character, including
+.B %
+and a backslash that does not start an escape, is printed as is.
 .TP
 .B \-\-group\-bond
 Sort rows by bond group, then by interface name within each group. Bonded
@@ -889,10 +898,17 @@ Completion therefore offers the option list, not a value, after
 .SH EXIT STATUS
 .TP
 .B 0
-Successful execution.
+Successful execution, including when no interface matches (for example with
+.BR \-\-filter\-link ).
+A message goes to standard error; JSON output is then an empty array
+.RB ( [] )
+and CSV output only the header row, so both stay parseable.
 .TP
 .B 1
-Error: not running as root, missing required commands, or invalid options.
+Error: not running as root, missing required commands, invalid options, or a
+requested diagram
+.RB ( \-\-output " svg|png, or " \-\-diagram\-out
+with table output) could not be rendered.
 .SH EXAMPLES
 Default table view:
 .PP
