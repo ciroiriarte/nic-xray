@@ -75,9 +75,11 @@ jobs:
       - name: Unit tests
         env:
           PYTHONDONTWRITEBYTECODE: '1'
+        # As an unprivileged user: job containers run as root, which ignores directory
+        # permissions and would skip the read-only output tests
         run: |
           python --version
-          python -m unittest discover -v -s tests -p 'test_nic_report.py'
+          su nobody -s /bin/sh -c "PATH='$PATH' python -m unittest discover -v -s tests -p 'test_nic_report.py'"
 
   # The scripts support Bash 4.4 (SLES 15 ships it); run the suite there too, with GNU tools
   test-bash44:

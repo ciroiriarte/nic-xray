@@ -36,7 +36,11 @@ def help_option_re(short, long, metavar=""):
     """Regex for an option line in --help output, in either argparse layout:
     '-C OLD NEW, --compare OLD NEW' (Python <= 3.12) or '-C, --compare OLD NEW' (3.13+)."""
     arg = " " + re.escape(metavar) if metavar else ""
-    return rf"(?m)^\s+{re.escape(short)}(?:{arg})?, {re.escape(long)}{arg}(?:\s|$)"
+    # A flag without a metavar must be followed by the help column (2+ spaces) or the line end,
+    # so an argument added by mistake ('-N, --strict-narrative N') does not match
+    end = r"(?:\s|$)" if metavar else r"(?:\s{2,}|$)"
+    return rf"(?m)^\s+{re.escape(short)}(?:{arg})?, {re.escape(long)}{arg}{end}"
+
 try:
     import weasyprint  # noqa: F401  # optional: PDF tests run only where it is installed
     HAVE_WEASYPRINT = True
@@ -1118,8 +1122,10 @@ class TestSuppress(Phase5Base):
         # Absurdly deep nesting is an input error. Whether the parser runs out of stack
         # (RecursionError) or reaches the end of the input (ValueError) depends on the
         # Python version and the C stack size, so the message is not checked.
-        with self.assertRaises(nr.InputError):
+        with self.assertRaises(nr.InputError) as cm:
             nr.load_suppress(self.write_json("deep.json", "[" * 100000))
+        self.assertTrue(str(cm.exception).startswith(os.path.join(self.tmp.name, "deep.json") + ": "),
+                        cm.exception)                  # names the file, then the parser's reason
         self.pcie_site()
         rc, _, err = self.cli("-R", self.root, "-S", self.write_json("broken.json", "{"))
         self.assertEqual(rc, 1, err)
@@ -1478,8 +1484,9 @@ class TestThemes(Phase5Base):
         d = self.theme_dir()
         with open(os.path.join(d, "theme.json"), "w") as fh:
             fh.write("[" * 50000)
-        with self.assertRaises(nr.InputError):      # RecursionError or ValueError: see TestSuppress
+        with self.assertRaises(nr.InputError) as cm:  # RecursionError or ValueError: see TestSuppress
             nr.load_theme(d)
+        self.assertTrue(str(cm.exception).startswith(os.path.join(d, nr.THEME_FILE) + ": "), cm.exception)
 
     def test_text_fields_cleaned(self):
         theme = nr.load_theme(self.theme_dir({"org": "Ex‮ample\x07 Corp", "labels": {"classification": "In⁦ternal\n"}}))
