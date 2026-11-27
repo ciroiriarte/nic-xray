@@ -61,18 +61,16 @@ jobs:
           bash --version | head -1
           make test
 
-  # nic-report.py supports Python 3.9+: run its tests on the oldest supported version
+  # nic-report.py supports Python 3.9+: run its tests on the oldest supported version.
+  # In the official image: actions/setup-python has no 3.9 build for newer runner images
+  # (none for Ubuntu 26.04, which ubuntu-latest moved to), and 3.9 is end of life.
   test-python39:
     name: nic-report tests (Python 3.9)
     runs-on: ubuntu-latest
+    container: python:3.9-slim
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set up Python 3.9
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.9'
 
       - name: Unit tests
         env:
