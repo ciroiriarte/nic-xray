@@ -117,8 +117,8 @@ assert_eq "squeeze_ws glob kept"        "spine *"         "$(cd / && printf 'spi
 assert_eq "squeeze_ws empty"            ""                "$(printf '' | squeeze_ws)"
 
 # Separators are literal inside printf formats
-for SEP in '%d' '%s' $'\\' '|' $'\t' '%%' '%n'; do
-    FMT=$(fmt_escape "$SEP")
+for SEP in '%d' '%s' $'\\' '|' $'\t' '%%' '%n' $'\n'; do
+    fmt_escape FMT "$SEP"
     # shellcheck disable=SC2059
     assert_eq "fmt_escape keeps '$SEP' literal" "a${SEP}b" "$(printf "%s${FMT}%s" a b)"
 done
@@ -218,9 +218,9 @@ assert_eq "single lane in range is OK"  "OK"    "$(evaluate_optics_health -2.00 
 
 # Separators in real rows: a table gap and a CSV row built the way the writers build them
 # shellcheck disable=SC2016  # a sed address, not a shell expansion
-COL_GAP_BLOCK=$(sed -n '/^# --- Column Gap ---$/,/^COL_GAP=\$(fmt_escape/p' "$SCRIPT")
+COL_GAP_BLOCK=$(sed -n '/^# --- Column Gap ---$/,/^fmt_escape COL_GAP/p' "$SCRIPT")
 [[ -n "$COL_GAP_BLOCK" ]] || { echo "❌ column gap block not found"; exit 1; }
-for FIELD_SEP in '%d' '|' $'\t' ''; do
+for FIELD_SEP in '%d' '|' $'\t' $'\n' ''; do
     eval "$COL_GAP_BLOCK"
     # shellcheck disable=SC2059
     ROW=$(printf "%-4s${COL_GAP}%s" eth0 up)
@@ -243,6 +243,9 @@ assert_eq "no match: CSV is the header row only" "1" "$(grep -c '' <<< "$HDR")"
 assert_eq "no match: CSV header starts with Device" "Device,Driver" "${HDR:0:13}"
 FIELD_SEP='%s'; HDR=$(render_empty_output 2>/dev/null)
 assert_eq "no match: CSV header keeps a % separator literal" "Device%sDriver" "${HDR:0:14}"
+FIELD_SEP=$'\n'; HDR=$(render_empty_output 2>/dev/null)
+assert_eq "no match: CSV header keeps a newline separator" $'Device\nDriver' "${HDR:0:13}"
+FIELD_SEP=""
 # shellcheck disable=SC2034
 OUTPUT_FORMAT=table
 assert_eq "no match: table prints nothing on stdout" "" "$(render_empty_output 2>/dev/null)"

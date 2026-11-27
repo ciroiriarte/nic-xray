@@ -498,10 +498,12 @@ squeeze_ws() {
 
 # --- Helper: text made safe to embed in a printf format ---
 # "%" and "\" are format directives; doubling them prints the text literally.
+# Usage: fmt_escape RESULT_VAR TEXT. Sets the variable instead of printing, because
+# $(...) would strip a trailing newline (e.g. -s'\n').
 fmt_escape() {
-    local BS=$'\\' PCT='%' TEXT="$1"
-    TEXT="${TEXT//"$BS"/"$BS$BS"}"
-    printf '%s' "${TEXT//"$PCT"/"$PCT$PCT"}"
+    local _FE_BS=$'\\' _FE_PCT='%' _FE_TEXT="$2"
+    _FE_TEXT="${_FE_TEXT//"$_FE_BS"/"$_FE_BS$_FE_BS"}"
+    printf -v "$1" '%s' "${_FE_TEXT//"$_FE_PCT"/"$_FE_PCT$_FE_PCT"}"
 }
 
 # --- Helper: optical power (dBm) as a JSON value ---
@@ -2258,7 +2260,7 @@ else
 fi
 COL_GAP_WIDTH=${#COL_GAP}
 COL_GAP_TEXT="$COL_GAP"            # for printf '%s' arguments
-COL_GAP=$(fmt_escape "$COL_GAP")   # for embedding in printf formats
+fmt_escape COL_GAP "$COL_GAP"   # for embedding in printf formats
 
 # --- Build Render Order ---
 RENDER_ORDER=()
@@ -3348,7 +3350,7 @@ render_empty_output() {
     echo "No matching network interfaces found." >&2
     case "$OUTPUT_FORMAT" in
         json) printf '[]\n' ;;
-        csv)  FS=$(fmt_escape "${FIELD_SEP:-,}"); print_csv_header ;;
+        csv)  fmt_escape FS "${FIELD_SEP:-,}"; print_csv_header ;;
     esac
 }
 
@@ -3525,7 +3527,7 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
         printf '\n📊 Metrics sampled over %ds\n' "$METRICS_ELAPSED"
     fi
 elif [[ "${OUTPUT_FORMAT}" == "csv" ]]; then
-    FS=$(fmt_escape "${FIELD_SEP:-,}")
+    fmt_escape FS "${FIELD_SEP:-,}"
     print_csv_header
     # CSV Data rows
     for i in "${RENDER_ORDER[@]}"; do
