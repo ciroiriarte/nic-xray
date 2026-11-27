@@ -351,6 +351,7 @@ cat > "$FIX/bin-fail/jq" <<STUB
 #!/bin/bash
 case "\$FAIL_ON:\$*" in
     csv-data:*@csv*)  exit 5 ;;
+    csv-partial:*@csv*) echo '"S1","partial-row"'; exit 5 ;;
     csv-write:*@csv*) exit 2 ;;
     json-write:*schema_version*) exit 2 ;;
     json-trunc:*schema_version*) printf '{"a":'; exit 0 ;;
@@ -378,6 +379,12 @@ assert_eq "bad host data: exit unchanged (0)" "0" "$RC"
 assert_eq "bad host data: warned" "1" "$(grep -c 'results not exported to merged.csv' "$FIX/stderr")"
 assert_eq "bad host data: site still published" "yes" "$(has "$D_F/sweep.json")"
 assert_eq "bad host data: merged.csv header only" "1" "$(wc -l < "$D_F/merged.csv" | tr -d ' ')"
+
+# A host whose export fails part-way (some rows out, then a runtime error) leaves no rows behind
+sweep_failing csv-partial
+assert_eq "partial export: warned" "1" "$(grep -c 'results not exported to merged.csv' "$FIX/stderr")"
+assert_eq "partial export: no stray rows" "0" "$(grep -c 'partial-row' "$D_F/merged.csv")"
+assert_eq "partial export: site still published" "yes" "$(has "$D_F/sweep.json")"
 
 sweep_failing csv-write
 assert_eq "merged.csv write error: exit 3" "3" "$RC"
@@ -493,12 +500,17 @@ count_procs() {
 
 # Interrupt: workers forward TERM to timeout(1), so no ssh or remote stand-in survives the sweep
 printf 'S1,hang1,h-hang\nS1,hang2,h-hang\n' > "$FIX/inv-hang.csv"
-PATH="$FIX/bin:$PATH" bash "$SCRIPT" -f "$FIX/inv-hang.csv" -o "$FIX/out-int" -n -T 60 > /dev/null 2>&1 &
+# TERM, not INT: a non-interactive shell starts background jobs with SIGINT ignored, and a signal
+# ignored on entry cannot be trapped, so INT would never reach on_interrupt (same handler for both)
+PATH="$FIX/bin:$PATH" bash "$SCRIPT" -f "$FIX/inv-hang.csv" -o "$FIX/out-int" -n -T 60 > /dev/null 2> "$FIX/int.err" &
 SWEEP_PID=$!
 for (( W = 0; W < 50; W++ )); do (( $(count_procs "sleep 31") > 0 )) && break; sleep 0.1; done
-kill -INT "$SWEEP_PID"
+INT_START=$SECONDS
+kill -TERM "$SWEEP_PID"
 wait "$SWEEP_PID"
 assert_eq "interrupt: exit 3" "3" "$?"
+assert_eq "interrupt: handled (not waited out)" "1" "$(grep -c 'Interrupted: stopping running collections' "$FIX/int.err")"
+assert_eq "interrupt: stops within 15 s" "yes" "$( (( SECONDS - INT_START < 15 )) && echo yes || echo no)"
 # Poll (up to 5 s) rather than a fixed pause: a loaded machine may need longer to reap them
 for (( R = 0; R < 50; R++ )); do (( $(count_procs "sleep 31") == 0 )) && break; sleep 0.1; done
 assert_eq "interrupt: stand-ins were running before" "yes" "$( (( W < 50 )) && echo yes)"

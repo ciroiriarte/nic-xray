@@ -562,19 +562,23 @@ write_merged_csv() {
     for COL in "${CSV_RECORD_COLS[@]}"; do JQ_PROG+=".$COL,"; done
     JQ_PROG="${JQ_PROG%,}] | @csv"
     # A host's data that cannot be exported (jq runtime error) only leaves that host out, with a
-    # warning: its JSON is kept and the site is still published. Any other failure is a write failure
-    local RC
+    # warning: its JSON is kept and the site is still published. Any other failure is a write failure.
+    # Each host's rows are rendered first and appended only when complete, so a host whose export
+    # fails part-way leaves no rows behind
+    local RC ROWS
     {
         (IFS=','; printf '%s\n' "${CSV_META_COLS[*]},${CSV_RECORD_COLS[*]}") || ST=1
         while IFS=$'\t' read -r HOST _ STATUS _; do
             [[ "$STATUS" == "$ST_OK" ]] || continue
-            jq -r --arg site "$SITE" --arg host "$HOST" "$JQ_PROG" "$DIR/nodes/$HOST.json" 2>> "$DIR/nodes/$HOST.err"
+            ROWS=$(jq -r --arg site "$SITE" --arg host "$HOST" "$JQ_PROG" "$DIR/nodes/$HOST.json" 2>> "$DIR/nodes/$HOST.err")
             RC=$?
             if (( RC == JQ_RC_RUNTIME )); then
                 warn "$SITE/$HOST: results not exported to merged.csv (see nodes/$HOST.err)"
                 echo "# nic-sweep: merged.csv export failed for this host" >> "$DIR/nodes/$HOST.err"
             elif (( RC != 0 )); then
                 ST=1
+            elif [[ -n "$ROWS" ]]; then
+                printf '%s\n' "$ROWS" || ST=1
             fi
         done < <(site_results "$SITE")
     } > "$OUT_F$PART_SUFFIX" || ST=1
