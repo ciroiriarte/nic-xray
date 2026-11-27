@@ -55,6 +55,8 @@ DEFAULT_OUTPUT_DIR="./sweeps"
 # Sweep directories 0750, files 0640: sweeps hold host names, addresses and switch ports
 SWEEP_UMASK=027
 PROGRESS_WIDTH=30
+# Sweep files are written to FILE.part and renamed when complete, so a reader never sees half a file
+PART_SUFFIX=".part"
 
 # jq filter: no non-finite number anywhere. JSON forbids inf/-inf/nan but jq accepts -inf (1.6, 1.7)
 # and nan (1.7); nic-xray < 2.13.0 wrote -inf for optics without light (#24)
@@ -63,8 +65,11 @@ JQ_ALL_FINITE='([.. | numbers | select(isinfinite or isnan)] | length == 0)'
 # Inventory fields reach command lines only after matching these
 # The first character must be alphanumeric: rules out ".", "..", and option-like "-x" values
 FIELD_RE='^[A-Za-z0-9][A-Za-z0-9._-]*$'
-ADDRESS_RE='^[A-Za-z0-9][A-Za-z0-9._:-]*$'
-JUMP_RE='^([A-Za-z0-9][A-Za-z0-9._-]*@)?[A-Za-z0-9][A-Za-z0-9._-]*(:[0-9]+)?$'
+# Address: a name, an IPv4 or an IPv6 address, including "::"-leading forms (::1, ::ffff:192.0.2.1)
+# and a zone ID (fe80::1%eth0). A leading ":" cannot start an option; "%" only before the zone
+ADDRESS_RE='^([A-Za-z0-9][A-Za-z0-9._:-]*|:[0-9A-Fa-f:.]*)(%[A-Za-z0-9._-]+)?$'
+# Jump host for ssh -J: [user@]host[:port], with an IPv6 host in brackets ([2001:db8::1]:22)
+JUMP_RE='^([A-Za-z0-9][A-Za-z0-9._-]*@)?([A-Za-z0-9][A-Za-z0-9._-]*|\[[0-9A-Fa-f:.]+(%[A-Za-z0-9._-]+)?\])(:[0-9]+)?$'
 # nodes/<host>.xray.json would collide with the canonical file of a host named "<host>.xray"
 XRAY_SUFFIX=".xray"
 INVENTORY_HEADER_RE='^site,host,address(,user)?$'
@@ -147,7 +152,7 @@ usage() {
     echo -e " -f, --inventory FILE    Hosts to sweep, one per line: site,host,address[,user]"
     echo -e "                         (# comments and a 'site,host,address,user' header allowed)"
     echo -e " -s, --site SITE         Only sweep this site (repeatable; default: every site)"
-    echo -e " -J, --jump HOST         SSH jump host ([user@]host[:port], passed to ssh -J)"
+    echo -e " -J, --jump HOST         SSH jump host ([user@]host[:port], IPv6 as [addr]; passed to ssh -J)"
     echo -e " -u, --user USER         SSH user when the inventory line has none (default: ssh config)"
     echo -e " -p, --parallel N        Hosts swept at once (default: $DEFAULT_PARALLEL, max: $MAX_PARALLEL)"
     echo -e " -T, --timeout SEC       Per-host limit for nic-health (default: interval + $TIMEOUT_MARGIN_DEEP s"
@@ -164,7 +169,7 @@ usage() {
     echo -e "                         Needs sudo for 'bash /tmp/nic-health.*', which amounts to full root"
     echo -e "     --accept-new-hostkeys  Trust unknown host keys on first contact"
     echo -e "                         (ssh StrictHostKeyChecking=accept-new; default: your ssh policy)"
-    echo -e " -n, --no-color          Disable color and the progress bar"
+    echo -e " -n, --no-color          Disable color (the progress bar shows whenever stderr is a terminal)"
     echo -e " -v, --version           Display version information"
     echo -e " -h, --help              Display this help message"
     echo -e ""
@@ -301,14 +306,16 @@ parse_args() {
 
 # Read the inventory into INV_* arrays: every field validated, bad or duplicate lines skipped
 load_inventory() {
-    local LINE LN=0 N SITE HOST ADDR USR KEY
+    local LINE LN=0 N SITE HOST ADDR USR KEY NORM
     local -a F
     local -A SEEN=()
     while IFS= read -r LINE || [[ -n "$LINE" ]]; do
         (( ++LN ))
         LINE=$(trim "${LINE%$'\r'}")
         [[ -z "$LINE" || "$LINE" == \#* ]] && continue
-        [[ "${LINE,,}" =~ $INVENTORY_HEADER_RE ]] && continue
+        # Header fields hold no spaces, so "site, host, address" is the header too
+        NORM="${LINE//[[:space:]]/}"
+        [[ "${NORM,,}" =~ $INVENTORY_HEADER_RE ]] && continue
         IFS=',' read -r -a F <<< "$LINE"
         N=${#F[@]}
         if (( N < 3 || N > 4 )); then
@@ -448,7 +455,8 @@ sweep_host() {
     [[ "$STATUS" == "$ST_OK" ]] && VERDICT=$(jq -r '.verdict' "$OUT")
 
     # nic-xray: optional, never a failure of the host; not attempted when the host was unreachable
-    if $COLLECT_XRAY && [[ "$STATUS" != "$ST_SSH" && "$STATUS" != "$ST_TIMEOUT" ]]; then
+    # or refused sudo (nic-xray runs under sudo -n too: it would only add a second denial)
+    if $COLLECT_XRAY && [[ "$STATUS" != "$ST_SSH" && "$STATUS" != "$ST_TIMEOUT" && "$STATUS" != "$ST_SUDO" ]]; then
         run_limited "$XRAY_TIMEOUT" /dev/null "$XOUT" "$ERR.xray" "${SSH_ARGV[@]}" "$REMOTE_XRAY"
         XRC=$?
         if (( XRC == 0 )) && valid_xray_json "$XOUT"; then
@@ -471,7 +479,8 @@ sweep_host() {
 
 progress() {
     local DONE="$1" TOTAL="$2" FILLED BAR PAD
-    $USE_COLOR && [[ -t 2 ]] || return 0
+    # On stderr, so it shows whenever stderr is a terminal, also with stdout redirected or --no-color
+    [[ -t 2 ]] || return 0
     FILLED=$(( DONE * PROGRESS_WIDTH / TOTAL ))
     printf -v BAR '%*s' "$FILLED" ''
     printf -v PAD '%*s' $(( PROGRESS_WIDTH - FILLED )) ''
@@ -516,31 +525,48 @@ site_results() {
     done | sort
 }
 
+# publish_part FILE STATUS: rename FILE.part to FILE when STATUS is 0, otherwise remove FILE.part.
+# Returns non-zero when the file was not published
+publish_part() {
+    local PUB_F="$1" ST="$2"
+    if (( ST == 0 )) && mv -f -- "$PUB_F$PART_SUFFIX" "$PUB_F"; then
+        return 0
+    fi
+    rm -f -- "$PUB_F$PART_SUFFIX"
+    return 1
+}
+
+# Each writer returns non-zero when its file could not be written completely (disk full, I/O error)
 write_manifest() {
-    local DIR="$1" SITE="$2"
+    local DIR="$1" SITE="$2" ST=0
+    local OUT_F="$DIR/MANIFEST.tsv"
     {
-        printf 'host\taddress\tstatus\texit_code\tduration_s\txray\tverdict\n'
-        site_results "$SITE"
-    } > "$DIR/MANIFEST.tsv"
+        printf 'host\taddress\tstatus\texit_code\tduration_s\txray\tverdict\n' && site_results "$SITE"
+    } > "$OUT_F$PART_SUFFIX" || ST=1
+    publish_part "$OUT_F" "$ST"
 }
 
 # merged.csv: every nic-health result of the site's collected hosts, prefixed with how it was collected
 write_merged_csv() {
-    local DIR="$1" SITE="$2" HOST STATUS JQ_PROG COL
+    local DIR="$1" SITE="$2" HOST STATUS JQ_PROG COL ST=0
+    local OUT_F="$DIR/merged.csv"
     # shellcheck disable=SC2016  # $site/$host/$m are jq variables, not shell expansions
     JQ_PROG='[$site, $host, .collected_at, .version, .level, .interval_s, .uptime_s, .boot_id] as $m | .results[] | $m + ['
     for COL in "${CSV_RECORD_COLS[@]}"; do JQ_PROG+=".$COL,"; done
     JQ_PROG="${JQ_PROG%,}] | @csv"
+    # A host whose export fails leaves merged.csv incomplete: that is a write failure as well
     {
-        (IFS=','; printf '%s\n' "${CSV_META_COLS[*]},${CSV_RECORD_COLS[*]}")
+        (IFS=','; printf '%s\n' "${CSV_META_COLS[*]},${CSV_RECORD_COLS[*]}") || ST=1
         while IFS=$'\t' read -r HOST _ STATUS _; do
             [[ "$STATUS" == "$ST_OK" ]] || continue
             if ! jq -r --arg site "$SITE" --arg host "$HOST" "$JQ_PROG" "$DIR/nodes/$HOST.json" 2>> "$DIR/nodes/$HOST.err"; then
+                ST=1
                 warn "$SITE/$HOST: results not exported to merged.csv (see nodes/$HOST.err)"
                 echo "# nic-sweep: merged.csv export failed for this host" >> "$DIR/nodes/$HOST.err"
             fi
         done < <(site_results "$SITE")
-    } > "$DIR/merged.csv"
+    } > "$OUT_F$PART_SUFFIX" || ST=1
+    publish_part "$OUT_F" "$ST"
 }
 
 # Count of result lines (stdin) whose column COL (1-based) equals VALUE; pure Bash, so a host without
@@ -600,7 +626,8 @@ results_exit_code() {
 }
 
 write_sweep_json() {
-    local DIR="$1" SITE="$2" FINISHED_AT="$3" RESULTS TOTAL
+    local DIR="$1" SITE="$2" FINISHED_AT="$3" RESULTS TOTAL ST=0
+    local OUT_F="$DIR/sweep.json"
     RESULTS=$(site_results "$SITE")
     TOTAL=$(grep -c . <<< "$RESULTS" || true)
     jq -n --argjson schema "$SWEEP_SCHEMA_VERSION" --arg tool "$SCRIPT_NAME" --arg version "$SCRIPT_VERSION" \
@@ -621,7 +648,36 @@ write_sweep_json() {
                     jump: (if $jump == "" then null else $jump end), ship: $ship, xray: $xray,
                     accept_new_hostkeys: $accept_new},
           hosts: {total: $total, by_status: $by_status, by_verdict: $by_verdict, xray: $by_xray},
-          exit_code: $exit_code}' > "$DIR/sweep.json"
+          exit_code: $exit_code}' > "$OUT_F$PART_SUFFIX" || ST=1
+    publish_part "$OUT_F" "$ST"
+}
+
+# Write a site's files. sweep.json goes last, and only over a complete MANIFEST.tsv and merged.csv:
+# it is what marks the directory as a sweep for nic-report, so an incomplete sweep is never
+# published as one. Returns non-zero (after a warning) when the sweep could not be published
+publish_site() {
+    local DIR="$1" SITE="$2" FINISHED_AT="$3"
+    if ! write_manifest "$DIR" "$SITE"; then
+        warn "$SITE: could not write $DIR/MANIFEST.tsv; sweep not published"
+    elif ! write_merged_csv "$DIR" "$SITE"; then
+        warn "$SITE: could not write $DIR/merged.csv completely; sweep not published"
+    elif ! write_sweep_json "$DIR" "$SITE" "$FINISHED_AT"; then
+        warn "$SITE: could not write $DIR/sweep.json; sweep not published"
+    else
+        return 0
+    fi
+    return 1
+}
+
+# Exit code of the run: results_exit_code, and a sweep that could not be published ranks like a
+# host not collected (below CRIT, above everything else)
+sweep_exit_code() {
+    local RESULTS="$1" WRITE_FAILED="$2" RC
+    RC=$(results_exit_code "$RESULTS")
+    if $WRITE_FAILED && (( RC != EXIT_CRIT )); then
+        RC=$EXIT_UNKNOWN
+    fi
+    echo "$RC"
 }
 
 print_site_summary() {
@@ -668,7 +724,7 @@ on_interrupt() {
 }
 
 main() {
-    local SITE DIR FINISHED_AT RC ALL_RESULTS
+    local SITE DIR FINISHED_AT RC ALL_RESULTS WRITE_FAILED=false
     local -a SITES
     parse_args "$@"
     setup_colors
@@ -704,13 +760,11 @@ main() {
     ALL_RESULTS=""
     for SITE in "${SITES[@]}"; do
         DIR="$OUTPUT_DIR/$SITE/$RUN_TS"
-        write_manifest "$DIR" "$SITE"
-        write_merged_csv "$DIR" "$SITE"
-        write_sweep_json "$DIR" "$SITE" "$FINISHED_AT"
+        publish_site "$DIR" "$SITE" "$FINISHED_AT" || WRITE_FAILED=true
         print_site_summary "$DIR" "$SITE"
         ALL_RESULTS+="$(site_results "$SITE")"$'\n'
     done
-    RC=$(results_exit_code "$(grep . <<< "$ALL_RESULTS")")
+    RC=$(sweep_exit_code "$(grep . <<< "$ALL_RESULTS")" "$WRITE_FAILED")
     exit "$RC"
 }
 

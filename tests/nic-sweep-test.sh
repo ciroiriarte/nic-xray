@@ -80,6 +80,25 @@ assert_eq "exit: WARN + UNKNOWN verdict -> WARN" "1" "$(results_exit_code "$R_WA
 assert_eq "exit: UNKNOWN verdict alone" "3" "$(results_exit_code "$R_OK"$'\n'"$R_UNK")"
 assert_eq "exit: not collected outranks WARN" "3" "$(results_exit_code "$R_WARN"$'\n'"$R_FAIL")"
 assert_eq "exit: CRIT outranks not collected" "2" "$(results_exit_code "$R_CRIT"$'\n'"$R_FAIL")"
+# A sweep that could not be published (#37) ranks like a host not collected
+assert_eq "exit: write failure turns OK into 3"   "3" "$(sweep_exit_code "$R_OK" true)"
+assert_eq "exit: write failure turns WARN into 3" "3" "$(sweep_exit_code "$R_WARN" true)"
+assert_eq "exit: CRIT outranks a write failure"   "2" "$(sweep_exit_code "$R_CRIT" true)"
+assert_eq "exit: no write failure, unchanged"     "1" "$(sweep_exit_code "$R_WARN" false)"
+
+# Inventory and jump host forms (#37): IPv6 with a leading "::" and zone IDs, bracketed IPv6 jumps
+for A in host1 192.0.2.10 2001:db8::1 fd00::5 ::1 ::ffff:192.0.2.1 fe80::1%eth0 fe80::1%enp1s0f0.100; do
+    assert_eq "address accepted: $A" "yes" "$([[ "$A" =~ $ADDRESS_RE ]] && echo yes || echo no)"
+done
+for A in -oProxyCommand=x . .. '%eth0' 'fe80::1%' 'a%b%c' 'h;x' 'h x' ':x:y'; do
+    assert_eq "address rejected: $A" "no" "$([[ "$A" =~ $ADDRESS_RE ]] && echo yes || echo no)"
+done
+for J in jump.example admin@jump.example admin@jump.example:2222 '[2001:db8::1]' 'admin@[2001:db8::1]:22' '[fe80::1%eth0]'; do
+    assert_eq "jump accepted: $J" "yes" "$([[ "$J" =~ $JUMP_RE ]] && echo yes || echo no)"
+done
+for J in -J '[x]' '[2001:db8::1' 'admin@[::1]:p' 'a b'; do
+    assert_eq "jump rejected: $J" "no" "$([[ "$J" =~ $JUMP_RE ]] && echo yes || echo no)"
+done
 
 # A worker that died before writing its result still appears (never silently dropped)
 WORK_DIR="$FIX/work"; mkdir -p "$WORK_DIR"
@@ -258,6 +277,7 @@ assert_eq "xray absent"         "absent"       "$(manifest_xray S1 noxray)"
 assert_eq "xray failed"         "failed"       "$(manifest_xray S1 xraybad)"
 assert_eq "xray skipped when unreachable" "skipped" "$(manifest_xray S1 sshfail)"
 assert_eq "xray skipped on timeout" "skipped"  "$(manifest_xray S1 slow)"
+assert_eq "xray skipped on sudo-fail" "skipped" "$(manifest_xray S1 sudo)"
 assert_eq "manifest: header + 11 hosts" "12" "$(wc -l < "$D1/MANIFEST.tsv" | tr -d ' ')"
 assert_eq "manifest header" $'host\taddress\tstatus\texit_code\tduration_s\txray\tverdict' "$(head -1 "$D1/MANIFEST.tsv")"
 assert_eq "inventory: 10 bad/duplicate lines skipped (incl. . .. a.xray -x)" "10" "$(grep -c 'skipped' "$FIX/stderr")"
@@ -274,8 +294,9 @@ assert_eq "stderr captured" "1" "$(grep -c 'Connection refused' "$D1/nodes/sshfa
 assert_eq "sweep.json valid" "1" "$(jq -r .schema_version "$D1/sweep.json")"
 # Collected (ok): ok, warn, crit, noxray, xraybad; one host per failure status
 assert_eq "sweep.json totals" "11 5 1 2 1 1 1 2" "$(jq -r '[.hosts.total, (.hosts.by_status | .ok, ."ssh-fail", ."sudo-fail", ."tool-missing", .timeout, ."bad-output"), .exit_code] | map(tostring) | join(" ")' "$D1/sweep.json")"
-# nic-xray runs wherever ssh worked (also when nic-health failed); skipped only for ssh-fail/timeout
-assert_eq "sweep.json xray" "7 1 1 2" "$(jq -r '[.hosts.xray.ok, .hosts.xray.absent, .hosts.xray.failed, .hosts.xray.skipped] | map(tostring) | join(" ")' "$D1/sweep.json")"
+# nic-xray runs wherever ssh worked (also when nic-health failed); skipped for ssh-fail/timeout,
+# and for sudo-fail (it runs under sudo -n too: it would only add a second denial)
+assert_eq "sweep.json xray" "5 1 1 4" "$(jq -r '[.hosts.xray.ok, .hosts.xray.absent, .hosts.xray.failed, .hosts.xray.skipped] | map(tostring) | join(" ")' "$D1/sweep.json")"
 assert_eq "sweep.json verdicts" "3 1 1" "$(jq -r '[.hosts.by_verdict.OK, .hosts.by_verdict.WARN, .hosts.by_verdict.CRIT] | map(tostring) | join(" ")' "$D1/sweep.json")"
 assert_eq "sweep.json options" "deep 30 4 2 false true" "$(jq -r '[.options.level, .options.interval_s, .options.parallel, .options.timeout_s, .options.ship, .options.xray] | map(tostring) | join(" ")' "$D1/sweep.json")"
 assert_eq "sweep.json records skipped inventory lines" "10" "$(jq -r .inventory.skipped_lines "$D1/sweep.json")"
@@ -312,6 +333,30 @@ assert_eq "schema 2: merged.csv header unchanged" "site,hostname,collected_at,ve
     "$(head -1 "$(latest S1)/merged.csv")"
 assert_eq "schema 2: merged.csv has header + 2 rows per collected host" "5" "$(wc -l < "$(latest S1)/merged.csv" | tr -d ' ')"
 assert_eq "schema 2: NaN in metrics is bad output" "bad-output" "$(manifest_status S1 v2nan)"
+
+# --- Inventory header with spaces around the commas is still the header (#37) ---
+printf 'Site, Host, Address\nS1,ok,h-ok\n' > "$FIX/inv-hdr.csv"
+sweep "$FIX/inv-hdr.csv"
+assert_eq "spaced header: run OK" "0" "$RC"
+assert_eq "spaced header: not swept as a host" "0" "$(grep -c -- '-- Address' "$STUB_LOG")"
+assert_eq "spaced header: no skipped line" "0" "$(jq -r .inventory.skipped_lines "$(latest S1)/sweep.json")"
+
+# --- A sweep that cannot be written completely is not published and not exit 0 (#37) ---
+# jq that fails the merged.csv export (the only call using @csv), as a full disk would
+mkdir -p "$FIX/bin-nocsv"
+REAL_JQ=$(command -v jq)
+printf '#!/bin/bash\n[[ "$*" == *@csv* ]] && exit 5\nexec %q "$@"\n' "$REAL_JQ" > "$FIX/bin-nocsv/jq"
+chmod +x "$FIX/bin-nocsv/jq"
+OUT="$FIX/out-nocsv"; : > "$STUB_LOG"
+PATH="$FIX/bin-nocsv:$FIX/bin:$PATH" bash "$SCRIPT" -f "$FIX/inv-hdr.csv" -o "$OUT" -n > "$FIX/stdout" 2> "$FIX/stderr"
+RC=$?
+D_NC=$(latest S1)
+assert_eq "write failure: exit 3, not 0" "3" "$RC"
+assert_eq "write failure: reported" "1" "$(grep -c 'could not write .*merged.csv completely; sweep not published' "$FIX/stderr")"
+assert_eq "write failure: no sweep.json (not a sweep for nic-report)" "no" "$([[ -e "$D_NC/sweep.json" ]] && echo yes || echo no)"
+assert_eq "write failure: no partial merged.csv" "no" "$([[ -e "$D_NC/merged.csv" ]] && echo yes || echo no)"
+assert_eq "write failure: no .part left" "0" "$(find "$D_NC" -name '*.part' | wc -l | tr -d ' ')"
+assert_eq "write failure: manifest still written" "2" "$(wc -l < "$D_NC/MANIFEST.tsv" | tr -d ' ')"
 
 # --- Exit codes (design §5.5) ---
 printf 'S1,ok,h-ok\nS1,ok2,h-noxray\n' > "$FIX/inv-ok.csv"

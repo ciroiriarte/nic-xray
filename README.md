@@ -338,6 +338,8 @@ sudo chmod +x /usr/local/bin/nic-report.py
 sudo make install-rules              # diagnosis rule catalog → /usr/local/share/nic-xray/
 ```
 
+> 🛰️ **For `nic-sweep`:** it runs `nic-health.sh` and `nic-xray.sh` (or `nic-health`/`nic-xray` from the package) through a non-interactive SSH session, so they must be on the **remote** user's `PATH` there. That PATH often lacks `/usr/local/sbin`; otherwise the host is recorded as `tool-missing`. Put the scripts in a directory on that PATH (for example `/usr/local/bin`), extend the PATH for non-interactive shells, or use `--ship`.
+
 #### Man page
 
 A man page is available under `man/man8/` for detailed reference (section 8: system administration commands).
@@ -936,7 +938,7 @@ Bash completion: `completions/nic-health.bash` (installed with `make install-com
 
 - 🔒 **Read-only and non-interactive.** It never installs or changes anything on the hosts. SSH runs with `BatchMode=yes` and the tools with `sudo -n`, so a host that would ask for a password is recorded as a failure instead of hanging the sweep.
 - 🧾 **Comparable sweeps.** One directory per site and run, with the per-host JSON kept byte for byte and a `merged.csv` that always records how the data was collected (tool version, level, window, time, uptime, boot ID).
-- 🚦 **Exit codes:** `0` all OK, `1` WARN, `2` CRIT (never hidden by an unreachable host), `3` a host not collected (or only UNKNOWN), or a usage error. Precedence: CRIT > not collected > WARN > UNKNOWN > OK.
+- 🚦 **Exit codes:** `0` all OK, `1` WARN, `2` CRIT (never hidden by an unreachable host), `3` a host not collected, a sweep that could not be written completely (disk full), only UNKNOWN, or a usage error. Precedence: CRIT > not collected or not written > WARN > UNKNOWN > OK.
 
 Design and rationale: [`docs/design/nic-sweep.md`](docs/design/nic-sweep.md). Full reference: `man -l man/man8/nic-sweep.8`.
 
@@ -949,7 +951,7 @@ SITE1,node-cmp-01,10.0.0.20,ops
 SITE2,node-ctrl-01,192.0.2.15
 ```
 
-`host` names the host in the sweep; `address` is what SSH connects to; `user` is optional. Every field is validated (`[A-Za-z0-9._-]`, plus `:` in addresses); a line that fails, or a duplicate host, is reported and skipped. An inventory can be generated, for example from Juju:
+`host` names the host in the sweep; `address` is what SSH connects to; `user` is optional. Every field is validated (`[A-Za-z0-9._-]`; addresses may also be IPv6, such as `::1` or `fe80::1%eth0`); a line that fails, or a duplicate host, is reported and skipped. An inventory can be generated, for example from Juju:
 
 ```bash
 juju machines -m openstack --format json \
