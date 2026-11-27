@@ -131,6 +131,8 @@ INV_USER=()
 INV_SKIPPED=0
 INV_SHA=""
 RUN_TS=""
+# Sites of this run (global: on_interrupt removes their unfinished files)
+SITES=()
 STARTED_AT=""
 WORK_DIR=""
 REMOTE_HEALTH=""
@@ -731,15 +733,17 @@ on_interrupt() {
     # Workers forward TERM to their timeout(1), which signals ssh
     (( ${#PIDS[@]} > 0 )) && kill -TERM "${PIDS[@]}" 2>/dev/null
     wait
-    # A publish cut short leaves FILE.part behind (never a sweep.json): remove it
-    [[ -n "${RUN_TS:-}" ]] && rm -f -- "$OUTPUT_DIR"/*/"$RUN_TS"/*"$PART_SUFFIX"
+    # A publish cut short leaves FILE.part behind (never a sweep.json): remove this run's
+    local SITE
+    if [[ -n "${RUN_TS:-}" ]]; then
+        for SITE in "${SITES[@]}"; do rm -f -- "$OUTPUT_DIR/$SITE/$RUN_TS"/*"$PART_SUFFIX"; done
+    fi
     cleanup
     exit "$EXIT_UNKNOWN"
 }
 
 main() {
     local SITE DIR FINISHED_AT RC ALL_RESULTS WRITE_FAILED=false
-    local -a SITES
     parse_args "$@"
     setup_colors
     check_requirements

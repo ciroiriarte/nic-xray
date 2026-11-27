@@ -353,6 +353,7 @@ case "\$FAIL_ON:\$*" in
     csv-data:*@csv*)  exit 5 ;;
     csv-write:*@csv*) exit 2 ;;
     json-write:*schema_version*) exit 2 ;;
+    json-trunc:*schema_version*) printf '{"a":'; exit 0 ;;
 esac
 exec $REAL_JQ "\$@"
 STUB
@@ -391,6 +392,13 @@ assert_eq "sweep.json write error: exit 3" "3" "$RC"
 assert_eq "sweep.json write error: reported" "1" "$(grep -c 'could not write .*sweep.json; sweep not published' "$FIX/stderr")"
 assert_eq "sweep.json write error: no sweep.json" "no" "$(has "$D_F/sweep.json")"
 assert_eq "sweep.json write error: no .part left" "0" "$(parts "$D_F")"
+
+# A truncated sweep.json written "successfully" is caught by the re-read before the rename
+sweep_failing json-trunc
+assert_eq "truncated sweep.json: exit 3" "3" "$RC"
+assert_eq "truncated sweep.json: reported" "1" "$(grep -c 'could not write .*sweep.json; sweep not published' "$FIX/stderr")"
+assert_eq "truncated sweep.json: not published" "no" "$(has "$D_F/sweep.json")"
+assert_eq "truncated sweep.json: no .part left" "0" "$(parts "$D_F")"
 
 sweep_failing sort
 assert_eq "manifest write error: exit 3" "3" "$RC"
