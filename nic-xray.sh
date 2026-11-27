@@ -106,11 +106,23 @@ PROC_UPTIME="/proc/uptime"
 #   the C locale, as nic-health.sh does, so their output and matching stay predictable.
 # Remove every locale variable from the environment (a caller's LC_ALL=C or LC_ALL=de_DE
 # included), then set LANG as a shell variable only: bash applies it to itself, and
-# children, which never see it, default to C. Quietly: bash warns when the locale is
-# not generated (minimal SLES/RHEL); parsing does not depend on it being installed.
+# children, which never see it, default to C. LANG is tried with each candidate until
+# a multibyte probe counts as one character: en_US.UTF-8 first, then C.UTF-8 (all that
+# minimal RHEL/SLES/Debian images ship), then whatever the caller had. Quietly: bash
+# warns for every candidate that is not installed; parsing does not depend on it.
+LOCALE_PREFERRED="en_US.UTF-8"
+LOCALE_FALLBACKS=("C.UTF-8" "C.utf8")
+LOCALE_PROBE="│"
 {
+    _CALLER_LOCALES=("${LC_ALL:-}" "${LC_CTYPE:-}" "${LANG:-}")
     unset LANG LANGUAGE LC_ALL LC_CTYPE LC_NUMERIC LC_TIME LC_COLLATE LC_MONETARY LC_MESSAGES
-    LANG=en_US.UTF-8
+    for _LOC in "$LOCALE_PREFERRED" "${LOCALE_FALLBACKS[@]}" "${_CALLER_LOCALES[@]}"; do
+        [[ -n "$_LOC" ]] || continue
+        LANG="$_LOC"
+        (( ${#LOCALE_PROBE} == 1 )) && break
+    done
+    (( ${#LOCALE_PROBE} == 1 )) || LANG="$LOCALE_PREFERRED"
+    unset _CALLER_LOCALES _LOC
 } 2>/dev/null
 
 # --- Argument Parsing ---

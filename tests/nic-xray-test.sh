@@ -146,6 +146,16 @@ assert_eq "dot_escape all chars"  '&amp;&lt;&gt;'       "$(dot_escape '&<>')"
 LOCALE_BLOCK=$(sed -n '/^# LOCALE setup/,/^} 2>\/dev\/null$/p' "$SCRIPT")
 assert_eq "child sees no locale" "|||" "$(LC_ALL=de_DE.UTF-8 LANG=fr_FR.UTF-8 LC_NUMERIC=de_DE.UTF-8 bash -c "$LOCALE_BLOCK"$'\n''bash -c '"'"'printf %s "$LANG|$LC_ALL|$LC_NUMERIC|$LANGUAGE"'"'"'')"
 
+# ...and bash's own locale stays UTF-8 (one column per icon), also under the caller's
+# LC_ALL=C and on hosts without en_US.UTF-8 (simulated with a locale that never exists)
+# shellcheck disable=SC2016  # expanded by the child bash
+WIDTH_CHECK=$'\n''printf %s "${#LOCALE_PROBE}"'
+assert_eq "bash width under LC_ALL=C" "1" "$(env -i LC_ALL=C bash -c "$LOCALE_BLOCK$WIDTH_CHECK")"
+NO_EN_US="${LOCALE_BLOCK/LOCALE_PREFERRED=\"en_US.UTF-8\"/LOCALE_PREFERRED=\"xx_XX.UTF-8\"}"
+[[ "$NO_EN_US" != "$LOCALE_BLOCK" ]] || echo "❌ LOCALE_PREFERRED not found in $SCRIPT"
+assert_eq "bash width without en_US"  "1" "$(env -i LANG=C.UTF-8 bash -c "$NO_EN_US$WIDTH_CHECK")"
+assert_eq "bash width, empty env, no en_US" "1" "$(env -i bash -c "$NO_EN_US$WIDTH_CHECK")"
+
 # Empty separator after escape interpretation is rejected
 assert_eq "empty separator rejected" 'Invalid separator: it is empty after interpreting escapes (\0, \c).' "$(bash "$SCRIPT" -s'\c' 2>&1)"
 
