@@ -1091,4 +1091,4 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for gui
 **Ciro Iriarte**
 
 - **Created**: 2025-06-05
-- **Updated**: 2026-10-29
+- **Updated**: 2026-11-27

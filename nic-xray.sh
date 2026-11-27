@@ -100,13 +100,18 @@ JSON_CTRL_CHAR=$'[\x01-\x1f]'
 # Monotonic clock source for metrics sampling (seconds since boot, unaffected by NTP steps)
 PROC_UPTIME="/proc/uptime"
 
-# LOCALE setup, we expect output in English for proper parsing.
-# A caller's LC_ALL (or LC_MESSAGES/LC_NUMERIC/LANGUAGE) would override LANG for the tools parsed
-# below, so drop them. LC_ALL=C is not used: it would break the UTF-8 icons in the output.
-# Unset quietly: bash re-applies LANG to those categories and warns when the locale
-# is not generated (minimal SLES/RHEL); parsing does not depend on it being installed.
-export LANG=en_US.UTF-8
-{ unset LC_ALL LC_MESSAGES LC_NUMERIC LANGUAGE; } 2>/dev/null
+# LOCALE setup. Two different needs:
+# * bash itself needs a UTF-8 locale so ${#STR} counts the icons as one column each;
+# * the tools whose output is parsed (ethtool, lldpctl, grep, awk, sort...) must run in
+#   the C locale, as nic-health.sh does, so their output and matching stay predictable.
+# Remove every locale variable from the environment (a caller's LC_ALL=C or LC_ALL=de_DE
+# included), then set LANG as a shell variable only: bash applies it to itself, and
+# children, which never see it, default to C. Quietly: bash warns when the locale is
+# not generated (minimal SLES/RHEL); parsing does not depend on it being installed.
+{
+    unset LANG LANGUAGE LC_ALL LC_CTYPE LC_NUMERIC LC_TIME LC_COLLATE LC_MONETARY LC_MESSAGES
+    LANG=en_US.UTF-8
+} 2>/dev/null
 
 # --- Argument Parsing ---
 SHOW_LACP=false
@@ -344,7 +349,14 @@ done
 
 # --- Separator: escapes such as \t are interpreted once, here; afterwards the
 # value is plain text (fmt_escape keeps it literal inside printf formats)
-[[ -n "$FIELD_SEP" ]] && printf -v FIELD_SEP '%b' "$FIELD_SEP"
+if [[ -n "$FIELD_SEP" ]]; then
+    printf -v FIELD_SEP '%b' "$FIELD_SEP"
+    # \0 or \c leave nothing to print: refuse rather than silently use the default gap
+    if [[ -z "$FIELD_SEP" ]]; then
+        printf '%s\n' 'Invalid separator: it is empty after interpreting escapes (\0, \c).' >&2
+        exit 1
+    fi
+fi
 
 # --- Auto-disable colors for non-terminal output ---
 [[ ! -t 1 ]] && USE_COLOR=false
@@ -622,24 +634,27 @@ read_iface_stats() {
 }
 
 # Usage: counter_delta RESULT_VAR S1_ARRAY S2_ARRAY IFACE
-# Sets RESULT_VAR to S2[IFACE] - S1[IFACE], or 0 when negative (counter wrap) or missing.
+# Sets RESULT_VAR to S2[IFACE] - S1[IFACE], or 0 when negative (counter wrap/reset) or missing.
+# Subtract first, then clamp: sysfs counters are unsigned 64-bit, and the two's-complement
+# difference stays correct when a counter crosses 2^63 (where a signed NEW >= OLD would not).
 # Values are read by parameter expansion and checked before arithmetic: bash < 5.2 expands
 # an associative subscript again inside $(( )), which would let an interface name run code.
 counter_delta() {
     local -n _RESULT="$1" _OLD_ARR="$2" _NEW_ARR="$3"
     local OLD="${_OLD_ARR[$4]:-0}" NEW="${_NEW_ARR[$4]:-0}"
-    if [[ "$OLD" =~ ^[0-9]+$ && "$NEW" =~ ^[0-9]+$ ]] && (( NEW >= OLD )); then
+    _RESULT=0
+    if [[ "$OLD" =~ ^[0-9]+$ && "$NEW" =~ ^[0-9]+$ ]]; then
         _RESULT=$(( NEW - OLD ))
-    else
-        _RESULT=0
+        (( _RESULT < 0 )) && _RESULT=0
     fi
+    return 0
 }
 
 # Whole seconds from a monotonic clock (/proc/uptime), so an NTP step during a metrics
 # window cannot skew the rates; falls back to wall-clock time if it cannot be read
 monotonic_s() {
     local UP _REST
-    if read -r UP _REST < "$PROC_UPTIME" 2>/dev/null && [[ "$UP" =~ ^([0-9]+) ]]; then
+    if { read -r UP _REST < "$PROC_UPTIME"; } 2>/dev/null && [[ "$UP" =~ ^([0-9]+) ]]; then
         printf '%d' "${BASH_REMATCH[1]}"
     else
         printf '%(%s)T' -1
@@ -777,7 +792,7 @@ optics_lanes_summary() {
             n = split(lanes, v, ":"); rank = 0; dark = 0; have = 0
             for (i = 1; i <= n; i++) {
                 if (v[i] ~ /^-inf/) { dark = 1; rank = 3; continue }
-                if (v[i] !~ /^[-+]?[0-9]+(\.[0-9]+)?$/) continue
+                if (v[i] !~ /^-?[0-9]+(\.[0-9]+)?$/) continue
                 x = v[i] + 0
                 if (!have || x < low) { low = x; have = 1 }
                 if (x <= floor + 0 || x < la + 0 || x > ha + 0) r = 3
@@ -2335,10 +2350,11 @@ dot_id() {
 # Escape HTML entities for DOT HTML labels
 dot_escape() {
     local STR="$1"
-    STR="${STR//&/&amp;}"
-    STR="${STR//</&lt;}"
-    STR="${STR//>/&gt;}"
-    STR="${STR//\"/&quot;}"
+    # Quoted replacements: bash 5.2+ (patsub_replacement) expands an unquoted & to the match
+    STR="${STR//&/"&amp;"}"
+    STR="${STR//</"&lt;"}"
+    STR="${STR//>/"&gt;"}"
+    STR="${STR//\"/"&quot;"}"
     printf '%s' "$STR"
 }
 

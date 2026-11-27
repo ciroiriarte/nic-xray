@@ -236,6 +236,7 @@ gives a tab,
 one backslash); any other character, including
 .B %
 and a backslash that does not start an escape, is printed as is.
+A separator that is empty once escapes are interpreted (\e0, \ec) is rejected.
 .TP
 .B \-\-group\-bond
 Sort rows by bond group, then by interface name within each group. Bonded
@@ -909,6 +910,9 @@ Error: not running as root, missing required commands, invalid options, or a
 requested diagram
 .RB ( \-\-output " svg|png, or " \-\-diagram\-out
 with table output) could not be rendered.
+In watch mode a failed
+.B \-\-diagram\-out
+render is reported and watching continues; leaving watch mode with Ctrl\-C exits 0.
 .SH EXAMPLES
 Default table view:
 .PP

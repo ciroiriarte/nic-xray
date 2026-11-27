@@ -65,6 +65,9 @@ else
 fi
 
 # --- Issue #34 ---
+# Private scratch directory: fixed /tmp names could be pre-created by another user
+TEST_TMP=$(mktemp -d) || { echo "❌ mktemp failed"; exit 1; }
+trap 'rm -rf "$TEST_TMP"' EXIT
 load_functions optics_lanes_summary optics_lane_variance squeeze_ws fmt_escape dot_id \
     counter_delta bond_slave_perm_mac
 OPTICS_DARK_DBM=$(sed -n 's/^OPTICS_DARK_DBM="\(.*\)"$/\1/p' "$SCRIPT")
@@ -74,11 +77,11 @@ DOT_ID_CHARS=$(sed -n 's/^DOT_ID_CHARS="\(.*\)"$/\1/p' "$SCRIPT")
 # Multi-lane optics: health is the worst lane, power shown is the lowest lane
 # 100GBASE-SR4 Rx thresholds: low alarm -12.0, low warn -10.3, high warn 1.9, high alarm 2.4
 SR4=(-12.0 -10.3 1.9 2.4)
-check_lanes() {  # check_lanes <awk> <label>
-    AWK_IMPL="$1"
-    local AWK_LABEL="$2"
+check_lanes() {  # check_lanes <label> <awk command...>
+    local AWK_LABEL="$1"
+    AWK_CMD=("${@:2}")
     # shellcheck disable=SC2329  # used by the functions under test
-    awk() { command "$AWK_IMPL" "$@"; }
+    awk() { command "${AWK_CMD[@]}" "$@"; }
     assert_eq "$AWK_LABEL: lanes all OK"         "-2.10 OK"    "$(optics_lanes_summary '-1.00:-2.10:-0.50:-1.20' "${SR4[@]}")"
     assert_eq "$AWK_LABEL: one lane over high alarm" "-2.00 ALARM" "$(optics_lanes_summary '3.00:-2.00:-2.00:-2.00' "${SR4[@]}")"
     assert_eq "$AWK_LABEL: one lane over high warn"  "-2.00 WARN"  "$(optics_lanes_summary '2.00:-2.00:-2.00:-2.00' "${SR4[@]}")"
@@ -91,15 +94,13 @@ check_lanes() {  # check_lanes <awk> <label>
     unset -f awk
 }
 AWKS=0
-for AWK_BIN in gawk mawk busybox-awk original-awk; do
-    if [[ "$AWK_BIN" == busybox-awk ]]; then
-        command -v busybox &>/dev/null || continue
-        printf '#!/bin/sh\nexec busybox awk "$@"\n' > "${TMPDIR:-/tmp}/nic-xray-test-busybox-awk"
-        chmod +x "${TMPDIR:-/tmp}/nic-xray-test-busybox-awk"
-        AWK_BIN="${TMPDIR:-/tmp}/nic-xray-test-busybox-awk"
-    fi
+for AWK_BIN in gawk mawk busybox original-awk; do
     command -v "$AWK_BIN" &>/dev/null || continue
-    check_lanes "$AWK_BIN" "$(basename "$AWK_BIN")"
+    if [[ "$AWK_BIN" == busybox ]]; then
+        check_lanes busybox-awk busybox awk
+    else
+        check_lanes "$AWK_BIN" "$AWK_BIN"
+    fi
     (( ++AWKS ))
 done
 (( AWKS > 0 )) || check_lanes awk awk
@@ -136,6 +137,18 @@ for NAME in eth0.100 eth0-100 eth0_100 eth0__100 eth0_2e_100 Eth1/1 Eth1-1 'sw a
 done
 assert_eq "dot_id is injective over similar names" "0" "$COLLISIONS"
 
+# DOT/HTML escaping: bash 5.2+ patsub_replacement must not expand & in the replacement
+load_functions dot_escape
+assert_eq "dot_escape quotes"     'to &quot;core&quot;' "$(dot_escape 'to "core"')"
+assert_eq "dot_escape all chars"  '&amp;&lt;&gt;'       "$(dot_escape '&<>')"
+
+# Locale: bash runs UTF-8 for itself, but parsed tools must not inherit any locale
+LOCALE_BLOCK=$(sed -n '/^# LOCALE setup/,/^} 2>\/dev\/null$/p' "$SCRIPT")
+assert_eq "child sees no locale" "|||" "$(LC_ALL=de_DE.UTF-8 LANG=fr_FR.UTF-8 LC_NUMERIC=de_DE.UTF-8 bash -c "$LOCALE_BLOCK"$'\n''bash -c '"'"'printf %s "$LANG|$LC_ALL|$LC_NUMERIC|$LANGUAGE"'"'"'')"
+
+# Empty separator after escape interpretation is rejected
+assert_eq "empty separator rejected" 'Invalid separator: it is empty after interpreting escapes (\0, \c).' "$(bash "$SCRIPT" -s'\c' 2>&1)"
+
 # Counter deltas: clamped, and interface names are never evaluated
 # shellcheck disable=SC2034  # read through namerefs by counter_delta
 declare -A T1=() T2=()
@@ -143,7 +156,7 @@ T1[eth0]=100; T2[eth0]=350
 T1[wrap]=500; T2[wrap]=20
 # shellcheck disable=SC2016  # the name must stay unexpanded: it is the payload
 EVIL='x$(touch "$PWNED")'
-PWNED="${TMPDIR:-/tmp}/nic-xray-test-pwned.$$"
+PWNED="$TEST_TMP/pwned"
 export PWNED
 # shellcheck disable=SC2034  # read through namerefs by counter_delta
 T1["$EVIL"]=1
@@ -155,10 +168,16 @@ counter_delta D T1 T2 missing; assert_eq "counter_delta missing" "0" "$D"
 counter_delta D T1 T2 "$EVIL"; assert_eq "counter_delta odd name" "4" "$D"
 assert_eq "counter_delta never runs a name as code" "no" "$([[ -e "$PWNED" ]] && echo yes || echo no)"
 rm -f "$PWNED"
+# Unsigned 64-bit counters: crossing 2^63 still gives the right difference
+# shellcheck disable=SC2034  # read through namerefs by counter_delta
+T1[big]=9223372036854775800
+# shellcheck disable=SC2034
+T2[big]=9223372036854775900
+counter_delta D T1 T2 big;     assert_eq "counter_delta across 2^63" "100" "$D"
 assert_eq "read_iface_stats has no eval" "0" "$(sed -n '/^read_iface_stats() {/,/^}/p' "$SCRIPT" | grep -cE '^[[:space:]]*eval[[:space:]]')"
 
 # Bond slave permanent MAC: exact slave name, not a prefix
-BOND_FILE="${TMPDIR:-/tmp}/nic-xray-test-bond.$$"
+BOND_FILE="$TEST_TMP/bond"
 cat > "$BOND_FILE" <<'BOND'
 Bonding Mode: IEEE 802.3ad Dynamic link aggregation
 
