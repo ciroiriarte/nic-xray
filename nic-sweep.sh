@@ -57,6 +57,9 @@ SWEEP_UMASK=027
 PROGRESS_WIDTH=30
 # Sweep files are written to FILE.part and renamed when complete, so a reader never sees half a file
 PART_SUFFIX=".part"
+# jq exit status for a runtime error in the filter (a host's data that @csv cannot export), as
+# opposed to 2 for a system error such as a failed write (jq 1.6 to 1.8)
+JQ_RC_RUNTIME=5
 
 # jq filter: no non-finite number anywhere. JSON forbids inf/-inf/nan but jq accepts -inf (1.6, 1.7)
 # and nan (1.7); nic-xray < 2.13.0 wrote -inf for optics without light (#24)
@@ -66,8 +69,9 @@ JQ_ALL_FINITE='([.. | numbers | select(isinfinite or isnan)] | length == 0)'
 # The first character must be alphanumeric: rules out ".", "..", and option-like "-x" values
 FIELD_RE='^[A-Za-z0-9][A-Za-z0-9._-]*$'
 # Address: a name, an IPv4 or an IPv6 address, including "::"-leading forms (::1, ::ffff:192.0.2.1)
-# and a zone ID (fe80::1%eth0). A leading ":" cannot start an option; "%" only before the zone
-ADDRESS_RE='^([A-Za-z0-9][A-Za-z0-9._:-]*|:[0-9A-Fa-f:.]*)(%[A-Za-z0-9._-]+)?$'
+# and a zone ID (fe80::1%eth0). A leading ":" cannot start an option; "%" only before the zone.
+# A bare "::" (unspecified address, which ssh turns into loopback) is rejected
+ADDRESS_RE='^([A-Za-z0-9][A-Za-z0-9._:-]*|::[0-9A-Fa-f][0-9A-Fa-f:.]*)(%[A-Za-z0-9._-]+)?$'
 # Jump host for ssh -J: [user@]host[:port], with an IPv6 host in brackets ([2001:db8::1]:22).
 # No zone ID: OpenSSH percent-expands the ProxyJump value, so "%eth0" fails as an unknown "%e" token
 JUMP_RE='^([A-Za-z0-9][A-Za-z0-9._-]*@)?([A-Za-z0-9][A-Za-z0-9._-]*|\[[0-9A-Fa-f:.]+\])(:[0-9]+)?$'
@@ -555,15 +559,20 @@ write_merged_csv() {
     JQ_PROG='[$site, $host, .collected_at, .version, .level, .interval_s, .uptime_s, .boot_id] as $m | .results[] | $m + ['
     for COL in "${CSV_RECORD_COLS[@]}"; do JQ_PROG+=".$COL,"; done
     JQ_PROG="${JQ_PROG%,}] | @csv"
-    # A host whose export fails leaves merged.csv incomplete: that is a write failure as well
+    # A host's data that cannot be exported (jq runtime error) only leaves that host out, with a
+    # warning: its JSON is kept and the site is still published. Any other failure is a write failure
+    local RC
     {
         (IFS=','; printf '%s\n' "${CSV_META_COLS[*]},${CSV_RECORD_COLS[*]}") || ST=1
         while IFS=$'\t' read -r HOST _ STATUS _; do
             [[ "$STATUS" == "$ST_OK" ]] || continue
-            if ! jq -r --arg site "$SITE" --arg host "$HOST" "$JQ_PROG" "$DIR/nodes/$HOST.json" 2>> "$DIR/nodes/$HOST.err"; then
-                ST=1
+            jq -r --arg site "$SITE" --arg host "$HOST" "$JQ_PROG" "$DIR/nodes/$HOST.json" 2>> "$DIR/nodes/$HOST.err"
+            RC=$?
+            if (( RC == JQ_RC_RUNTIME )); then
                 warn "$SITE/$HOST: results not exported to merged.csv (see nodes/$HOST.err)"
                 echo "# nic-sweep: merged.csv export failed for this host" >> "$DIR/nodes/$HOST.err"
+            elif (( RC != 0 )); then
+                ST=1
             fi
         done < <(site_results "$SITE")
     } > "$OUT_F$PART_SUFFIX" || ST=1
@@ -650,6 +659,8 @@ write_sweep_json() {
                     accept_new_hostkeys: $accept_new},
           hosts: {total: $total, by_status: $by_status, by_verdict: $by_verdict, xray: $by_xray},
           exit_code: $exit_code}' > "$OUT_F$PART_SUFFIX" || ST=1
+    # Re-read before publishing: a truncated sweep.json must never mark the directory as a sweep
+    (( ST == 0 )) && ! jq -e 'type == "object"' "$OUT_F$PART_SUFFIX" > /dev/null 2>&1 && ST=1
     publish_part "$OUT_F" "$ST"
 }
 
@@ -720,6 +731,8 @@ on_interrupt() {
     # Workers forward TERM to their timeout(1), which signals ssh
     (( ${#PIDS[@]} > 0 )) && kill -TERM "${PIDS[@]}" 2>/dev/null
     wait
+    # A publish cut short leaves FILE.part behind (never a sweep.json): remove it
+    [[ -n "${RUN_TS:-}" ]] && rm -f -- "$OUTPUT_DIR"/*/"$RUN_TS"/*"$PART_SUFFIX"
     cleanup
     exit "$EXIT_UNKNOWN"
 }

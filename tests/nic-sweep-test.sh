@@ -90,7 +90,7 @@ assert_eq "exit: no write failure, unchanged"     "1" "$(sweep_exit_code "$R_WAR
 for A in host1 192.0.2.10 2001:db8::1 fd00::5 ::1 ::ffff:192.0.2.1 fe80::1%eth0 fe80::1%enp1s0f0.100; do
     assert_eq "address accepted: $A" "yes" "$([[ "$A" =~ $ADDRESS_RE ]] && echo yes || echo no)"
 done
-for A in -oProxyCommand=x . .. '%eth0' 'fe80::1%' 'a%b%c' 'h;x' 'h x' ':x:y'; do
+for A in -oProxyCommand=x . .. '%eth0' 'fe80::1%' 'a%b%c' 'h;x' 'h x' ':x:y' '::' ':' ':1:2' ':::'; do
     assert_eq "address rejected: $A" "no" "$([[ "$A" =~ $ADDRESS_RE ]] && echo yes || echo no)"
 done
 for J in jump.example admin@jump.example admin@jump.example:2222 '[2001:db8::1]' 'admin@[2001:db8::1]:22'; do
@@ -342,22 +342,61 @@ assert_eq "spaced header: run OK" "0" "$RC"
 assert_eq "spaced header: not swept as a host" "0" "$(grep -c -- '-- Address' "$STUB_LOG")"
 assert_eq "spaced header: no skipped line" "0" "$(jq -r .inventory.skipped_lines "$(latest S1)/sweep.json")"
 
-# --- A sweep that cannot be written completely is not published and not exit 0 (#37) ---
-# jq that fails the merged.csv export (the only call using @csv), as a full disk would
-mkdir -p "$FIX/bin-nocsv"
-REAL_JQ=$(command -v jq)
-printf '#!/bin/bash\n[[ "$*" == *@csv* ]] && exit 5\nexec %q "$@"\n' "$REAL_JQ" > "$FIX/bin-nocsv/jq"
-chmod +x "$FIX/bin-nocsv/jq"
-OUT="$FIX/out-nocsv"; : > "$STUB_LOG"
-PATH="$FIX/bin-nocsv:$FIX/bin:$PATH" bash "$SCRIPT" -f "$FIX/inv-hdr.csv" -o "$OUT" -n > "$FIX/stdout" 2> "$FIX/stderr"
-RC=$?
-D_NC=$(latest S1)
-assert_eq "write failure: exit 3, not 0" "3" "$RC"
-assert_eq "write failure: reported" "1" "$(grep -c 'could not write .*merged.csv completely; sweep not published' "$FIX/stderr")"
-assert_eq "write failure: no sweep.json (not a sweep for nic-report)" "no" "$([[ -e "$D_NC/sweep.json" ]] && echo yes || echo no)"
-assert_eq "write failure: no partial merged.csv" "no" "$([[ -e "$D_NC/merged.csv" ]] && echo yes || echo no)"
-assert_eq "write failure: no .part left" "0" "$(find "$D_NC" -name '*.part' | wc -l | tr -d ' ')"
-assert_eq "write failure: manifest still written" "2" "$(wc -l < "$D_NC/MANIFEST.tsv" | tr -d ' ')"
+# --- Publication (#37): a write failure leaves no sweep.json and exits 3; bad host data does not ---
+# PATH stubs for jq and sort; FAIL_ON picks what fails: csv-data (jq runtime error, exit 5, on the
+# merged.csv export), csv-write / json-write (jq write error, exit 2), sort (manifest)
+mkdir -p "$FIX/bin-fail"
+REAL_JQ=$(command -v jq); REAL_SORT=$(command -v sort)
+cat > "$FIX/bin-fail/jq" <<STUB
+#!/bin/bash
+case "\$FAIL_ON:\$*" in
+    csv-data:*@csv*)  exit 5 ;;
+    csv-write:*@csv*) exit 2 ;;
+    json-write:*schema_version*) exit 2 ;;
+esac
+exec $REAL_JQ "\$@"
+STUB
+cat > "$FIX/bin-fail/sort" <<STUB
+#!/bin/bash
+[[ "\$FAIL_ON" == sort && \$# -eq 0 ]] && exit 2
+exec $REAL_SORT "\$@"
+STUB
+chmod +x "$FIX/bin-fail/jq" "$FIX/bin-fail/sort"
+# sweep_failing MODE: run the one-host inventory with FAIL_ON=MODE; sets RC and D_F (site directory)
+sweep_failing() {
+    OUT="$FIX/out-fail-$1"; : > "$STUB_LOG"
+    FAIL_ON="$1" PATH="$FIX/bin-fail:$FIX/bin:$PATH" bash "$SCRIPT" -f "$FIX/inv-hdr.csv" -o "$OUT" -n > "$FIX/stdout" 2> "$FIX/stderr"
+    RC=$?
+    D_F=$(latest S1)
+}
+has() { [[ -e "$1" ]] && echo yes || echo no; }
+parts() { find "$1" -name "*$PART_SUFFIX" | wc -l | tr -d ' '; }
+
+sweep_failing csv-data
+assert_eq "bad host data: exit unchanged (0)" "0" "$RC"
+assert_eq "bad host data: warned" "1" "$(grep -c 'results not exported to merged.csv' "$FIX/stderr")"
+assert_eq "bad host data: site still published" "yes" "$(has "$D_F/sweep.json")"
+assert_eq "bad host data: merged.csv header only" "1" "$(wc -l < "$D_F/merged.csv" | tr -d ' ')"
+
+sweep_failing csv-write
+assert_eq "merged.csv write error: exit 3" "3" "$RC"
+assert_eq "merged.csv write error: reported" "1" "$(grep -c 'could not write .*merged.csv completely; sweep not published' "$FIX/stderr")"
+assert_eq "merged.csv write error: no sweep.json" "no" "$(has "$D_F/sweep.json")"
+assert_eq "merged.csv write error: no partial merged.csv" "no" "$(has "$D_F/merged.csv")"
+assert_eq "merged.csv write error: no .part left" "0" "$(parts "$D_F")"
+assert_eq "merged.csv write error: manifest still written" "2" "$(wc -l < "$D_F/MANIFEST.tsv" | tr -d ' ')"
+
+sweep_failing json-write
+assert_eq "sweep.json write error: exit 3" "3" "$RC"
+assert_eq "sweep.json write error: reported" "1" "$(grep -c 'could not write .*sweep.json; sweep not published' "$FIX/stderr")"
+assert_eq "sweep.json write error: no sweep.json" "no" "$(has "$D_F/sweep.json")"
+assert_eq "sweep.json write error: no .part left" "0" "$(parts "$D_F")"
+
+sweep_failing sort
+assert_eq "manifest write error: exit 3" "3" "$RC"
+assert_eq "manifest write error: reported" "1" "$(grep -c 'could not write .*MANIFEST.tsv; sweep not published' "$FIX/stderr")"
+assert_eq "manifest write error: nothing published" "no no no" "$(has "$D_F/MANIFEST.tsv") $(has "$D_F/merged.csv") $(has "$D_F/sweep.json")"
+assert_eq "manifest write error: no .part left" "0" "$(parts "$D_F")"
 
 # --- Exit codes (design §5.5) ---
 printf 'S1,ok,h-ok\nS1,ok2,h-noxray\n' > "$FIX/inv-ok.csv"
@@ -429,14 +468,17 @@ assert_eq "existing sweep directory: exit 3" "3" "$?"
 assert_eq "existing sweep directory: refused with a message" "1" "$(grep -c 'already exists' "$FIX/clash.err")"
 assert_eq "existing sweep directory: nothing written into it" "0" "$(find "$OUTC" -name MANIFEST.tsv | wc -l | tr -d ' ')"
 
-# count_procs CMDLINE: processes whose full command line is exactly CMDLINE (from /proc; pure Bash,
-# CI images may lack pgrep)
+# count_procs CMDLINE: processes of this test run (STUB_DIR=$FIX in their environment, so a suite
+# running at the same time is not counted) whose full command line is exactly CMDLINE (from /proc;
+# pure Bash, CI images may lack pgrep)
 count_procs() {
     local P N=0
-    local -a ARGV
-    for P in /proc/[0-9]*/cmdline; do
-        mapfile -d '' ARGV < "$P" 2>/dev/null || continue
-        [[ "${ARGV[*]:-}" == "$1" ]] && (( ++N ))
+    local -a ARGV ENVV
+    for P in /proc/[0-9]*; do
+        mapfile -d '' ARGV < "$P/cmdline" 2>/dev/null || continue
+        [[ "${ARGV[*]:-}" == "$1" ]] || continue
+        mapfile -d '' ENVV < "$P/environ" 2>/dev/null || continue
+        [[ " ${ENVV[*]:-} " == *" STUB_DIR=$FIX "* ]] && (( ++N ))
     done
     echo "$N"
 }
@@ -449,7 +491,8 @@ for (( W = 0; W < 50; W++ )); do (( $(count_procs "sleep 31") > 0 )) && break; s
 kill -INT "$SWEEP_PID"
 wait "$SWEEP_PID"
 assert_eq "interrupt: exit 3" "3" "$?"
-sleep 0.5
+# Poll (up to 5 s) rather than a fixed pause: a loaded machine may need longer to reap them
+for (( R = 0; R < 50; R++ )); do (( $(count_procs "sleep 31") == 0 )) && break; sleep 0.1; done
 assert_eq "interrupt: stand-ins were running before" "yes" "$( (( W < 50 )) && echo yes)"
 assert_eq "interrupt: no stand-in ssh left running" "0" "$(count_procs "sleep 31")"
 

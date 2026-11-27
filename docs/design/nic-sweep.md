@@ -146,7 +146,7 @@ A missing `--inventory` prints the usage message (`CLAUDE.md` §3).
 5. A progress bar on stderr whenever stderr is a terminal (`CLAUDE.md` §3), as in `nic-health.sh`: also with stdout redirected to a log or with `-n` (which only turns color off).
 6. Requirements on the operator host: Bash 4.4+, `ssh`, `timeout`, `jq`, `sha256sum`, `getopt`. `jq` is the one addition to the repo's tool set; it runs only on the operator host, never on the swept nodes.
 7. `nic-xray` is not attempted on hosts that were unreachable, timed out or refused `sudo -n` (it runs under `sudo -n` too).
-8. Each site's files are written as `FILE.part` and renamed when complete. `sweep.json` is written last, and only after `MANIFEST.tsv` and `merged.csv` were both written completely: it is what marks the directory as a sweep for `nic-report`. A write failure (disk full, I/O error, a host whose results cannot be exported) is reported and makes the run exit 3 unless a CRIT outranks it.
+8. Each site's files are written as `FILE.part` and renamed when complete. `sweep.json` is written last, and only after `MANIFEST.tsv` and `merged.csv` were both written completely: it is what marks the directory as a sweep for `nic-report`. `sweep.json` is re-read before it is renamed. A write failure (disk full, I/O error) is reported and makes the run exit 3 unless a CRIT outranks it. A host whose valid JSON cannot be exported to CSV (a `jq` runtime error, exit 5, as opposed to 2 for a failed write) is left out of `merged.csv` with a warning, as before; its JSON is kept and the site is still published, so one odd host never hides the others from `nic-report`.
 
 ### 5.4 Output layout (the contract)
 
