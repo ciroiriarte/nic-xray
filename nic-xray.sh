@@ -97,8 +97,33 @@ VIRTUAL_SKIP_PATTERN='^(lo|ovs-system|bonding_masters)$'
 # variable, unquoted where used, so it acts as a pattern (and shellcheck can parse the script)
 JSON_CTRL_CHAR=$'[\x01-\x1f]'
 
-# LOCALE setup, we expect output in English for proper parsing
-LANG=en_US.UTF-8
+# Monotonic clock source for metrics sampling (seconds since boot, unaffected by NTP steps)
+PROC_UPTIME="/proc/uptime"
+
+# LOCALE setup. Two different needs:
+# * bash itself needs a UTF-8 locale so ${#STR} counts the icons as one column each;
+# * the tools whose output is parsed (ethtool, lldpctl, grep, awk, sort...) must run in
+#   the C locale, as nic-health.sh does, so their output and matching stay predictable.
+# Remove every locale variable from the environment (a caller's LC_ALL=C or LC_ALL=de_DE
+# included), then set LANG as a shell variable only: bash applies it to itself, and
+# children, which never see it, default to C. LANG is tried with each candidate until
+# a multibyte probe counts as one character: en_US.UTF-8 first, then C.UTF-8 (all that
+# minimal RHEL/SLES/Debian images ship), then whatever the caller had. Quietly: bash
+# warns for every candidate that is not installed; parsing does not depend on it.
+LOCALE_PREFERRED="en_US.UTF-8"
+LOCALE_FALLBACKS=("C.UTF-8" "C.utf8")
+LOCALE_PROBE="│"
+{
+    _CALLER_LOCALES=("${LC_ALL:-}" "${LC_CTYPE:-}" "${LANG:-}")
+    unset LANG LANGUAGE LC_ALL LC_CTYPE LC_NUMERIC LC_TIME LC_COLLATE LC_MONETARY LC_MESSAGES
+    for _LOC in "$LOCALE_PREFERRED" "${LOCALE_FALLBACKS[@]}" "${_CALLER_LOCALES[@]}"; do
+        [[ -n "$_LOC" ]] || continue
+        LANG="$_LOC"
+        (( ${#LOCALE_PROBE} == 1 )) && break
+    done
+    (( ${#LOCALE_PROBE} == 1 )) || LANG="$LOCALE_PREFERRED"
+    unset _CALLER_LOCALES _LOC
+} 2>/dev/null
 
 # --- Argument Parsing ---
 SHOW_LACP=false
@@ -292,6 +317,7 @@ while true; do
 			echo -e " -s, --separator     Show │ column separators in table output; applies to CSV too"
 			echo -e " -sSEP, --separator=SEP"
 			echo -e "                     Use SEP as column separator in table and CSV output"
+			echo -e "                     (escapes such as \\\\t are interpreted: -s'\\\\t' gives a tab)"
 			echo -e " --group-bond        Sort rows by bond group, then by interface name"
 			echo -e " --cluster MODE      Diagram clustering mode: bond (default) or nic"
 			echo -e "                     bond: group interfaces by bond membership"
@@ -332,6 +358,17 @@ while true; do
 	esac
 done
 
+
+# --- Separator: escapes such as \t are interpreted once, here; afterwards the
+# value is plain text (fmt_escape keeps it literal inside printf formats)
+if [[ -n "$FIELD_SEP" ]]; then
+    printf -v FIELD_SEP '%b' "$FIELD_SEP"
+    # \0 or \c leave nothing to print: refuse rather than silently use the default gap
+    if [[ -z "$FIELD_SEP" ]]; then
+        printf '%s\n' 'Invalid separator: it is empty after interpreting escapes (\0, \c).' >&2
+        exit 1
+    fi
+fi
 
 # --- Auto-disable colors for non-terminal output ---
 [[ ! -t 1 ]] && USE_COLOR=false
@@ -434,6 +471,7 @@ pad_color() {
     local STRIPPED
     STRIPPED=$(strip_ansi "$TEXT")
     local PAD=$((WIDTH - ${#STRIPPED}))
+    (( PAD < 0 )) && PAD=0
     printf "%b%*s" "$TEXT" "$PAD" ""
 }
 
@@ -446,6 +484,26 @@ pad_plain() {
     local PAD=$(( WIDTH - ${#TEXT} ))
     (( PAD < 0 )) && PAD=0
     printf "%s%*s" "$TEXT" "$PAD" ""
+}
+
+# --- Helper: squeeze whitespace ---
+# Reads stdin; trims it and joins words (across lines) with single spaces, as "xargs"
+# used to, but takes the text literally: quotes, backslashes and a leading "-n" survive.
+squeeze_ws() {
+    local IFS=$' \t\n'
+    local -a WORDS
+    read -r -d '' -a WORDS || true
+    printf '%s' "${WORDS[*]}"
+}
+
+# --- Helper: text made safe to embed in a printf format ---
+# "%" and "\" are format directives; doubling them prints the text literally.
+# Usage: fmt_escape RESULT_VAR TEXT. Sets the variable instead of printing, because
+# $(...) would strip a trailing newline (e.g. -s'\n').
+fmt_escape() {
+    local _FE_BS=$'\\' _FE_PCT='%' _FE_TEXT="$2"
+    _FE_TEXT="${_FE_TEXT//"$_FE_BS"/"$_FE_BS$_FE_BS"}"
+    printf -v "$1" '%s' "${_FE_TEXT//"$_FE_PCT"/"$_FE_PCT$_FE_PCT"}"
 }
 
 # --- Helper: optical power (dBm) as a JSON value ---
@@ -572,7 +630,7 @@ colorize_speed() {
 read_iface_stats() {
     local PREFIX="$1"
     shift
-    local STATS_DIR IFACE VAL
+    local STATS_DIR IFACE VAL COUNTER
     for IFACE in "$@"; do
         STATS_DIR="/sys/class/net/${IFACE}/statistics"
         [[ ! -d "$STATS_DIR" ]] && continue
@@ -580,9 +638,53 @@ read_iface_stats() {
                        rx_dropped tx_dropped rx_errors tx_errors \
                        rx_fifo_errors tx_fifo_errors; do
             VAL=$(<"${STATS_DIR}/${COUNTER}") || VAL=0
-            eval "${PREFIX}_${COUNTER}[\"${IFACE}\"]=${VAL}"
+            [[ "$VAL" =~ ^[0-9]+$ ]] || VAL=0
+            # Nameref, not eval: the interface name is data and must never be parsed as code
+            local -n _STATS="${PREFIX}_${COUNTER}"
+            _STATS["$IFACE"]="$VAL"
+            unset -n _STATS
         done
     done
+}
+
+# Usage: counter_delta RESULT_VAR S1_ARRAY S2_ARRAY IFACE
+# Sets RESULT_VAR to S2[IFACE] - S1[IFACE], or 0 when negative (counter wrap/reset) or missing.
+# Subtract first, then clamp: sysfs counters are unsigned 64-bit, and the two's-complement
+# difference stays correct when a counter crosses 2^63 (where a signed NEW >= OLD would not).
+# Values are read by parameter expansion and checked before arithmetic: bash < 5.2 expands
+# an associative subscript again inside $(( )), which would let an interface name run code.
+counter_delta() {
+    local -n _RESULT="$1" _OLD_ARR="$2" _NEW_ARR="$3"
+    local OLD="${_OLD_ARR[$4]:-0}" NEW="${_NEW_ARR[$4]:-0}"
+    _RESULT=0
+    if [[ "$OLD" =~ ^[0-9]+$ && "$NEW" =~ ^[0-9]+$ ]]; then
+        _RESULT=$(( NEW - OLD ))
+        (( _RESULT < 0 )) && _RESULT=0
+    fi
+    return 0
+}
+
+# Whole seconds from a monotonic clock (/proc/uptime), so an NTP step during a metrics
+# window cannot skew the rates; falls back to wall-clock time if it cannot be read
+monotonic_s() {
+    local UP _REST
+    if { read -r UP _REST < "$PROC_UPTIME"; } 2>/dev/null && [[ "$UP" =~ ^([0-9]+) ]]; then
+        printf '%d' "${BASH_REMATCH[1]}"
+    else
+        printf '%(%s)T' -1
+    fi
+}
+
+# Permanent MAC of a bond slave, from a /proc/net/bonding/<bond> file
+# Args: $1=bonding file, $2=slave interface. Prints nothing when not found.
+# The slave name is compared as a whole string: a prefix match would give eth1 the MAC of eth10.
+bond_slave_perm_mac() {
+    # Passed via ENVIRON, not -v, which would interpret backslash escapes in the name
+    BOND_SLAVE_LINE="Slave Interface: $2" awk '
+        BEGIN { slave = ENVIRON["BOND_SLAVE_LINE"] }
+        $0 == slave { found = 1; next }
+        found && /^Slave Interface:/ { exit }
+        found && /^Permanent HW addr:/ { print $4; exit }' "$1" 2>/dev/null
 }
 
 # Countdown sleep for watch mode (non-metrics only)
@@ -636,6 +738,12 @@ colorize_nonzero() {
 
 # --- SFP/QSFP Optics Diagnostics ---
 
+# Characters kept as is in DOT node IDs (listed, not a range: ranges are locale-dependent)
+DOT_ID_CHARS="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+# Optical power at or below this (dBm) means no light: always ALARM
+OPTICS_DARK_DBM="-40.0"
+
 # Fallback DOM thresholds (dBm) when SFP EEPROM thresholds are unavailable
 # Format: "tx_low_alarm tx_low_warn tx_high_warn tx_high_alarm rx_low_alarm rx_low_warn rx_high_warn rx_high_alarm"
 # Sources: Cisco, Juniper, FS.com datasheets (SFF-8472/SFF-8636 typical ranges)
@@ -670,18 +778,46 @@ declare -A SFP_FALLBACK_THRESHOLDS=(
 evaluate_optics_health() {
     local DBM="$1" LOW_ALARM="$2" LOW_WARN="$3" HIGH_WARN="$4" HIGH_ALARM="$5"
 
-    # -inf or -40 dBm → always ALARM (zero optical power)
+    # -inf or OPTICS_DARK_DBM → always ALARM (zero optical power)
     if [[ "$DBM" == "-inf" || "$DBM" == "-inf"* ]]; then
         echo "ALARM"
         return
     fi
 
     awk -v dbm="$DBM" -v la="$LOW_ALARM" -v lw="$LOW_WARN" -v hw="$HIGH_WARN" -v ha="$HIGH_ALARM" \
-        'BEGIN {
-            if (dbm+0 <= -40.0) { print "ALARM"; exit }
+        -v floor="$OPTICS_DARK_DBM" 'BEGIN {
+            if (dbm+0 <= floor+0) { print "ALARM"; exit }
             if (dbm+0 < la+0 || dbm+0 > ha+0) { print "ALARM"; exit }
             if (dbm+0 < lw+0 || dbm+0 > hw+0) { print "WARN"; exit }
             print "OK"
+        }'
+}
+
+# Summarise per-lane optical power: lowest lane value and worst health status over all lanes
+# Args: $1=colon-separated lane values (dBm, "N/A" or "-inf"), $2=low_alarm, $3=low_warn,
+#       $4=high_warn, $5=high_alarm
+# Outputs: "<lowest dBm> <OK|WARN|ALARM>"; the lowest is "-inf" when a lane has no light,
+#          and "N/A N/A" when no lane has a usable reading.
+# A no-light lane is matched as text before any numeric conversion, because awks disagree
+# on "-inf": gawk reads it as minus infinity, mawk as 0, which would make it the strongest lane.
+optics_lanes_summary() {
+    awk -v lanes="$1" -v la="$2" -v lw="$3" -v hw="$4" -v ha="$5" -v floor="$OPTICS_DARK_DBM" '
+        BEGIN {
+            n = split(lanes, v, ":"); rank = 0; dark = 0; have = 0
+            for (i = 1; i <= n; i++) {
+                if (v[i] ~ /^-inf/) { dark = 1; rank = 3; continue }
+                if (v[i] !~ /^-?[0-9]+(\.[0-9]+)?$/) continue
+                x = v[i] + 0
+                if (!have || x < low) { low = x; have = 1 }
+                if (x <= floor + 0 || x < la + 0 || x > ha + 0) r = 3
+                else if (x < lw + 0 || x > hw + 0) r = 2
+                else r = 1
+                if (r > rank) rank = r
+            }
+            if (!have && !dark) { print "N/A N/A"; exit }   # no usable lane reading
+            split("OK WARN ALARM", name, " ")
+            if (dark) printf "-inf"; else printf "%.2f", low
+            printf " %s\n", name[rank]
         }'
 }
 
@@ -837,21 +973,24 @@ parse_optics() {
             return
         fi
 
-        # Find worst-case Tx (minimum across lanes)
+        # Lowest lane power for display; health is the worst status over all lanes,
+        # so a single lane above its high thresholds is not hidden by a weaker lane
+        local _SUMMARY
         if [[ "$HAS_TX_DATA" == true ]]; then
-            OPTICS_TX_DBM=$(printf '%s\n' "${TX_VALS[@]}" | grep -v 'N/A' | awk 'BEGIN{m=999} {if($1+0<m) m=$1+0} END{printf "%.2f",m}')
+            _SUMMARY=$(optics_lanes_summary "$OPTICS_TX_LANES" "$TX_LA" "$TX_LW" "$TX_HW" "$TX_HA")
+            OPTICS_TX_DBM="${_SUMMARY% *}"
             if [[ "$HAS_DOM_THRESHOLDS" == true ]]; then
-                OPTICS_TX_STATUS=$(evaluate_optics_health "$OPTICS_TX_DBM" "$TX_LA" "$TX_LW" "$TX_HW" "$TX_HA")
+                OPTICS_TX_STATUS="${_SUMMARY##* }"
             else
                 OPTICS_TX_STATUS="N/DOM"
             fi
         fi
 
-        # Find worst-case Rx (minimum across lanes)
         if [[ "$HAS_RX_DATA" == true ]]; then
-            OPTICS_RX_DBM=$(printf '%s\n' "${RX_VALS[@]}" | grep -v 'N/A' | awk 'BEGIN{m=999} {if($1+0<m) m=$1+0} END{printf "%.2f",m}')
+            _SUMMARY=$(optics_lanes_summary "$OPTICS_RX_LANES" "$RX_LA" "$RX_LW" "$RX_HW" "$RX_HA")
+            OPTICS_RX_DBM="${_SUMMARY% *}"
             if [[ "$HAS_DOM_THRESHOLDS" == true ]]; then
-                OPTICS_RX_STATUS=$(evaluate_optics_health "$OPTICS_RX_DBM" "$RX_LA" "$RX_LW" "$RX_HW" "$RX_HA")
+                OPTICS_RX_STATUS="${_SUMMARY##* }"
             else
                 OPTICS_RX_STATUS="N/DOM"
             fi
@@ -1027,13 +1166,14 @@ optics_lane_variance() {
     IFS=':' read -ra VALS <<< "$LANES_STR"
     IFS="$IFS_SAVE"
 
-    # Filter out N/A values
+    # Keep numeric lanes only: N/A has no reading, and a no-light lane (-inf) is already an
+    # ALARM in the health status, while awks disagree on its value (see optics_lanes_summary)
     local -a NUMERIC=()
     local -a INDICES=()
     local I=0
     for V in "${VALS[@]}"; do
         ((I++))
-        [[ "$V" == "N/A" ]] && continue
+        [[ "$V" =~ ^-?[0-9]+(\.[0-9]+)?$ ]] || continue
         NUMERIC+=("$V")
         INDICES+=("$I")
     done
@@ -1394,12 +1534,15 @@ collect_data() {
     # --- Metrics: Snapshot 1 (before data collection) ---
 enumerate_ifaces
 if $SHOW_METRICS; then
+    # shellcheck disable=SC2034  # written and read through namerefs (read_iface_stats, counter_delta)
     declare -A S1_rx_bytes S1_tx_bytes S1_rx_packets S1_tx_packets
+    # shellcheck disable=SC2034  # see above
     declare -A S1_rx_dropped S1_tx_dropped S1_rx_errors S1_tx_errors
+    # shellcheck disable=SC2034  # see above
     declare -A S1_rx_fifo_errors S1_tx_fifo_errors
     METRICS_IFACES=("${ENUM_IFACES[@]}")
     read_iface_stats "S1" "${METRICS_IFACES[@]}"
-    METRICS_START=$(date +%s)
+    METRICS_START=$(monotonic_s)
 fi
 
 # --- Data Collection ---
@@ -1517,7 +1660,7 @@ for IFACE in "${ENUM_IFACES[@]}"; do
         fi
         BOND_COLOR="${BOND_COLORS[$BOND_MASTER]}${BOND_MASTER}${RESET_COLOR}"
         BOND_PLAIN="$BOND_MASTER"
-        MAC=$(grep -E "Slave Interface: ${IFACE}|Permanent HW addr" "/proc/net/bonding/${BOND_MASTER}" |grep -A1 "Slave Interface: ${IFACE}"|tail -1|awk '{ print $4}' 2>/dev/null)
+        MAC=$(bond_slave_perm_mac "/proc/net/bonding/${BOND_MASTER}" "$IFACE")
         BMAC=$(grep "System MAC address" "/proc/net/bonding/${BOND_MASTER}"|awk '{ print $4 }' 2>/dev/null)
     else
         BOND_COLOR="$BOND_MASTER"
@@ -1584,11 +1727,11 @@ for IFACE in "${ENUM_IFACES[@]}"; do
     # LLDP Info (physical interfaces only — virtual devices have no LLDP peers)
     if $IS_PHYSICAL; then
         LLDP_OUTPUT=$(lldpctl "$IFACE" 2>/dev/null)
-        SWITCH_NAME=$(echo "$LLDP_OUTPUT" | awk -F'SysName: ' '/SysName:/ {print $2}' | xargs)
-        PORT_NAME=$(echo "$LLDP_OUTPUT" | awk -F'PortID: ' '/PortID:/ {print $2}' | xargs)
+        SWITCH_NAME=$(echo "$LLDP_OUTPUT" | awk -F'SysName: ' '/SysName:/ {print $2}' | squeeze_ws)
+        PORT_NAME=$(echo "$LLDP_OUTPUT" | awk -F'PortID: ' '/PortID:/ {print $2}' | squeeze_ws)
 
         # LLDP PortDescr
-        PORT_DESCR=$(echo "$LLDP_OUTPUT" | awk -F'PortDescr: ' '/PortDescr:/ {print $2}' | xargs)
+        PORT_DESCR=$(echo "$LLDP_OUTPUT" | awk -F'PortDescr: ' '/PortDescr:/ {print $2}' | squeeze_ws)
         # ACI topology paths: extract policy name from pathep-[POLICY_NAME]
         if [[ "$PORT_DESCR" =~ pathep-\[([^]]+)\] ]]; then
             PORT_DESCR="VPC: ${BASH_REMATCH[1]}"
@@ -1736,10 +1879,9 @@ if $SHOW_VIRTUAL; then
     done
 fi
 
-# --- Guard: no interfaces found ---
+# --- Guard: no interfaces found (the caller reports it) ---
 if [[ $ROW_COUNT -eq 0 ]]; then
-    echo "No matching network interfaces found." >&2
-    exit 0
+    return 1
 fi
 
 # --- Bond-level LACP consistency validation ---
@@ -1852,7 +1994,7 @@ fi
 # --- Metrics: Sleep, Snapshot 2, Delta Computation ---
 if $SHOW_METRICS; then
     # Compute remaining sleep time
-    METRICS_NOW=$(date +%s)
+    METRICS_NOW=$(monotonic_s)
     METRICS_ELAPSED_SO_FAR=$((METRICS_NOW - METRICS_START))
     METRICS_REMAINING=$((METRICS_DURATION - METRICS_ELAPSED_SO_FAR))
     (( METRICS_REMAINING < 0 )) && METRICS_REMAINING=0
@@ -1876,11 +2018,14 @@ if $SHOW_METRICS; then
     fi
 
     # Snapshot 2
+    # shellcheck disable=SC2034  # written and read through namerefs (read_iface_stats, counter_delta)
     declare -A S2_rx_bytes S2_tx_bytes S2_rx_packets S2_tx_packets
+    # shellcheck disable=SC2034  # see above
     declare -A S2_rx_dropped S2_tx_dropped S2_rx_errors S2_tx_errors
+    # shellcheck disable=SC2034  # see above
     declare -A S2_rx_fifo_errors S2_tx_fifo_errors
     read_iface_stats "S2" "${METRICS_IFACES[@]}"
-    METRICS_END=$(date +%s)
+    METRICS_END=$(monotonic_s)
     METRICS_ELAPSED=$((METRICS_END - METRICS_START))
     (( METRICS_ELAPSED < 1 )) && METRICS_ELAPSED=1
 
@@ -1888,26 +2033,17 @@ if $SHOW_METRICS; then
     for ((i = 0; i < ROW_COUNT; i++)); do
         local_iface="${DATA_IFACE[i]}"
 
-        # Compute raw deltas (clamp negative to 0 for 32-bit counter wraps)
-        D_RX_BYTES=$(( S2_rx_bytes["$local_iface"] - S1_rx_bytes["$local_iface"] ))
-        D_TX_BYTES=$(( S2_tx_bytes["$local_iface"] - S1_tx_bytes["$local_iface"] ))
-        D_RX_PKTS=$(( S2_rx_packets["$local_iface"] - S1_rx_packets["$local_iface"] ))
-        D_TX_PKTS=$(( S2_tx_packets["$local_iface"] - S1_tx_packets["$local_iface"] ))
-        D_RX_DROP=$(( S2_rx_dropped["$local_iface"] - S1_rx_dropped["$local_iface"] ))
-        D_TX_DROP=$(( S2_tx_dropped["$local_iface"] - S1_tx_dropped["$local_iface"] ))
-        D_RX_ERR=$(( S2_rx_errors["$local_iface"] - S1_rx_errors["$local_iface"] ))
-        D_TX_ERR=$(( S2_tx_errors["$local_iface"] - S1_tx_errors["$local_iface"] ))
-        D_RX_FIFO=$(( S2_rx_fifo_errors["$local_iface"] - S1_rx_fifo_errors["$local_iface"] ))
-        D_TX_FIFO=$(( S2_tx_fifo_errors["$local_iface"] - S1_tx_fifo_errors["$local_iface"] ))
-
-        # Clamp negative deltas (counter wrap)
-        for _VAR in D_RX_BYTES D_TX_BYTES D_RX_PKTS D_TX_PKTS \
-                    D_RX_DROP D_TX_DROP D_RX_ERR D_TX_ERR \
-                    D_RX_FIFO D_TX_FIFO; do
-            declare -n _REF="$_VAR"
-            (( _REF < 0 )) && _REF=0
-        done
-        unset -n _REF
+        # Raw deltas; negative ones (32-bit counter wraps) clamp to 0
+        counter_delta D_RX_BYTES S1_rx_bytes S2_rx_bytes "$local_iface"
+        counter_delta D_TX_BYTES S1_tx_bytes S2_tx_bytes "$local_iface"
+        counter_delta D_RX_PKTS S1_rx_packets S2_rx_packets "$local_iface"
+        counter_delta D_TX_PKTS S1_tx_packets S2_tx_packets "$local_iface"
+        counter_delta D_RX_DROP S1_rx_dropped S2_rx_dropped "$local_iface"
+        counter_delta D_TX_DROP S1_tx_dropped S2_tx_dropped "$local_iface"
+        counter_delta D_RX_ERR S1_rx_errors S2_rx_errors "$local_iface"
+        counter_delta D_TX_ERR S1_tx_errors S2_tx_errors "$local_iface"
+        counter_delta D_RX_FIFO S1_rx_fifo_errors S2_rx_fifo_errors "$local_iface"
+        counter_delta D_TX_FIFO S1_tx_fifo_errors S2_tx_fifo_errors "$local_iface"
 
         # Rates (per second)
         RX_BPS=$((D_RX_BYTES / METRICS_ELAPSED))
@@ -2046,6 +2182,8 @@ if $SHOW_METRICS; then
     done
     unset MET_BOND_MEMBERS
 fi
+# Non-zero is reserved for "no matching interface" (guard above)
+return 0
 }
 
 # --- Layout computation: column widths and render order ---
@@ -2114,12 +2252,15 @@ if $SHOW_METRICS; then
 fi
 
 # --- Column Gap ---
+# The gap is embedded in printf formats: measure the text, then escape it
 if [[ -n "${FIELD_SEP}" ]]; then
     COL_GAP=" ${FIELD_SEP} "
 else
     COL_GAP="   "
 fi
 COL_GAP_WIDTH=${#COL_GAP}
+COL_GAP_TEXT="$COL_GAP"            # for printf '%s' arguments
+fmt_escape COL_GAP "$COL_GAP"   # for embedding in printf formats
 
 # --- Build Render Order ---
 RENDER_ORDER=()
@@ -2203,18 +2344,31 @@ fi
 
 # Sanitize a string to a valid DOT identifier
 dot_id() {
-    local STR="$1"
-    STR="${STR//[^a-zA-Z0-9_]/_}"
-    printf '%s' "$STR"
+    # Injective, so distinct names never share a node: letters and digits are kept,
+    # "_" becomes "__" and any other character "_<hex code>_" (eth0.100 → eth0_2e_100)
+    local STR="$1" OUT="" CH HEX I
+    for (( I = 0; I < ${#STR}; I++ )); do
+        CH="${STR:I:1}"
+        if [[ "$DOT_ID_CHARS" == *"$CH"* ]]; then
+            OUT+="$CH"
+        elif [[ "$CH" == "_" ]]; then
+            OUT+="__"
+        else
+            printf -v HEX '%x' "'$CH"
+            OUT+="_${HEX}_"
+        fi
+    done
+    printf '%s' "$OUT"
 }
 
 # Escape HTML entities for DOT HTML labels
 dot_escape() {
     local STR="$1"
-    STR="${STR//&/&amp;}"
-    STR="${STR//</&lt;}"
-    STR="${STR//>/&gt;}"
-    STR="${STR//\"/&quot;}"
+    # Quoted replacements: bash 5.2+ (patsub_replacement) expands an unquoted & to the match
+    STR="${STR//&/"&amp;"}"
+    STR="${STR//</"&lt;"}"
+    STR="${STR//>/"&gt;"}"
+    STR="${STR//\"/"&quot;"}"
     printf '%s' "$STR"
 }
 
@@ -2568,10 +2722,9 @@ DOTHEADER
             for ((_CH=0; _CH<${#_TX_L[@]}; _CH++)); do
                 local _TV="${_TX_L[$_CH]}" _RV="${_RX_L[$_CH]}"
                 local _TC _RC
-                # Evaluate each lane independently
+                # Lanes take the port's overall (worst-lane) status colour; per-lane
+                # thresholds are not kept after parse_optics
                 if [[ "$_TV" != "N/A" && "$_TX_S" != "N/DOM" && "$_TX_S" != "N/A" ]]; then
-                    _TC=$(_optics_dot_color "$(evaluate_optics_health "$_TV" "" "" "" "" 2>/dev/null || echo "$_TX_S")")
-                    # Use overall status color for simplicity (thresholds evaluated per lane would need passing them through)
                     _TC=$(_optics_dot_color "$_TX_S")
                 else
                     _TC="$SUBTEXT_COLOR"
@@ -2737,6 +2890,8 @@ DOTHEADER
         declare -A _NUMA_SET       # numa_id -> 1 (unique NUMA tracker)
 
         for ((i = 0; i < ROW_COUNT; i++)); do
+            # Virtual interfaces have no PCI slot: they are drawn by the virtual pass
+            [[ "${DATA_IS_PHYSICAL[$i]}" != "true" ]] && continue
             local _N="${DATA_NUMA[$i]}"
             local _S="${DATA_PCI_SLOT[$i]}"
             _SLOT_INDICES["$_S"]+="$i "
@@ -2745,13 +2900,14 @@ DOTHEADER
         done
 
         # Pre-sort all PCI slots (space-safe via mapfile)
-        local -a _ALL_SORTED_SLOTS
-        mapfile -t _ALL_SORTED_SLOTS < <(printf '%s\n' "${!_SLOT_INDICES[@]}" | sort)
+        # Guarded: printf on an empty set would yield one empty slot (all rows virtual)
+        local -a _ALL_SORTED_SLOTS=()
+        (( ${#_SLOT_INDICES[@]} > 0 )) && mapfile -t _ALL_SORTED_SLOTS < <(printf '%s\n' "${!_SLOT_INDICES[@]}" | sort)
 
         # Emit NUMA clusters containing PCI slot clusters with NIC card nodes
         local _PCI_CLUSTER_IDX=0
-        local -a _SORTED_NUMAS
-        mapfile -t _SORTED_NUMAS < <(printf '%s\n' "${!_NUMA_SET[@]}" | sort)
+        local -a _SORTED_NUMAS=()
+        (( ${#_NUMA_SET[@]} > 0 )) && mapfile -t _SORTED_NUMAS < <(printf '%s\n' "${!_NUMA_SET[@]}" | sort)
         for _NUMA_ID in "${_SORTED_NUMAS[@]}"; do
             printf '    subgraph cluster_numa_%s {\n' "$(dot_id "$_NUMA_ID")"
             printf '        style=dashed;\n'
@@ -2839,7 +2995,10 @@ DOTHEADER
     unset EMITTED_PORTS
 
     # --- Switch nodes ---
-    for SW_NAME in $(printf '%s\n' "${!SEEN_SWITCHES[@]}" | sort); do
+    # LLDP SysNames may contain spaces or glob characters: sort into an array (space-safe)
+    local -a SORTED_SWITCHES=()
+    (( ${#SEEN_SWITCHES[@]} > 0 )) && mapfile -t SORTED_SWITCHES < <(printf '%s\n' "${!SEEN_SWITCHES[@]}" | sort)
+    for SW_NAME in "${SORTED_SWITCHES[@]}"; do
         local SW_ID
         SW_ID=$(dot_id "sw_${SW_NAME}")
         printf '    %s [shape=plain, label=<\n' "$SW_ID"
@@ -2904,6 +3063,14 @@ DOTHEADER
         # Server -> NIC card nodes (deduplicated per PCI slot)
         declare -A _EMITTED_SERVER_NIC_EDGES
         for ((i = 0; i < ROW_COUNT; i++)); do
+            if [[ "${DATA_IS_PHYSICAL[$i]}" != "true" ]]; then
+                # Top-level virtual interfaces hang off the server, as in bond mode
+                local _VP="${DATA_VIRT_PARENT[$i]:-}"
+                [[ -n "$_VP" && "$_VP" != "—" ]] && continue
+                printf '    server -> %s [color="%s", penwidth=1.0, arrowsize=0.6];\n' \
+                    "$(dot_id "${DATA_IFACE[$i]}")" "$BORDER_COLOR"
+                continue
+            fi
             local _S="${DATA_PCI_SLOT[$i]}"
             if [[ -z "${_EMITTED_SERVER_NIC_EDGES[$_S]+x}" ]]; then
                 _EMITTED_SERVER_NIC_EDGES["$_S"]=1
@@ -2917,6 +3084,7 @@ DOTHEADER
 
         # NIC card -> interface port nodes
         for ((i = 0; i < ROW_COUNT; i++)); do
+            [[ "${DATA_IS_PHYSICAL[$i]}" != "true" ]] && continue
             local _S="${DATA_PCI_SLOT[$i]}"
             local _NIC_CARD_ID
             _NIC_CARD_ID=$(dot_id "nic_${_S}")
@@ -3136,7 +3304,7 @@ DOTHEADER
     # Switch nodes on the right
     if [[ ${#SEEN_SWITCHES[@]} -gt 0 || "$HAS_DISCONNECTED" == true ]]; then
         printf '    { rank=max;'
-        for SW_NAME in $(printf '%s\n' "${!SEEN_SWITCHES[@]}" | sort); do
+        for SW_NAME in "${SORTED_SWITCHES[@]}"; do
             printf ' %s;' "$(dot_id "sw_${SW_NAME}")"
         done
         if [[ "$HAS_DISCONNECTED" == true ]]; then
@@ -3149,6 +3317,43 @@ DOTHEADER
 }
 
 # --- Output rendering: table, CSV, JSON, DOT/SVG/PNG ---
+# --- CSV header row (columns follow the enabled options); uses FS from the caller ---
+print_csv_header() {
+    if ${SHOW_VIRTUAL}; then
+        printf "%s${FS}%s${FS}%s${FS}%s${FS}" "type" "parent" "encap_overhead_bytes" "mtu_warn"
+    fi
+    if ${SHOW_PHYSICAL}; then
+        printf "%s${FS}%s${FS}%s${FS}%s${FS}" "NUMA" "PCI Slot" "NIC Vendor" "NIC Model"
+    fi
+    printf "%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
+        "Device" "Driver" "Firmware" "Interface" "MAC Address" "MTU" "MTU Warn" "Link" "Speed/Duplex" "Speed Mb/s" "Duplex" "Parent Bond"
+    ${SHOW_BMAC} && printf "${FS}%s" "Bond MAC"
+    ${SHOW_LACP} && printf "${FS}%s" "LACP Status"
+    ${SHOW_VLAN} && printf "${FS}%s" "VLAN"
+    if ${SHOW_OPTICS}; then
+        printf "${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
+            "SFP Type" "SFP Vendor" "Wavelength" "Tx Power (dBm)" "Tx Status" \
+            "Rx Power (dBm)" "Rx Status" "Lane Count"
+    fi
+    if ${SHOW_METRICS}; then
+        printf "${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
+            "Rx bps" "Tx bps" "Rx pps" "Tx pps" \
+            "Rx Drops" "Tx Drops" "Rx Errors" "Tx Errors" \
+            "Rx FIFO Errors" "Tx FIFO Errors" "Sample Duration (s)"
+    fi
+    printf "${FS}%s${FS}%s${FS}%s\n" "Switch Name" "Port Name" "Port Descr"
+}
+
+# --- Output for a run that matched no interface ---
+# Formatted outputs stay parseable: JSON gets an empty array, CSV its header row
+render_empty_output() {
+    echo "No matching network interfaces found." >&2
+    case "$OUTPUT_FORMAT" in
+        json) printf '[]\n' ;;
+        csv)  fmt_escape FS "${FIELD_SEP:-,}"; print_csv_header ;;
+    esac
+}
+
 render_output() {
 
 if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
@@ -3245,13 +3450,13 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
                 DROP) _W_COL="${RED}✗${RESET_COLOR}" ;;
             esac
             pad_plain "${DATA_VIRT_TYPE[$i]}" "$COL_W_VIRT_TYPE"
-            printf '%s' "${COL_GAP}"
+            printf '%s' "${COL_GAP_TEXT}"
             pad_plain "${DATA_VIRT_PARENT[$i]}" "$COL_W_VIRT_PARENT"
-            printf '%s' "${COL_GAP}"
+            printf '%s' "${COL_GAP_TEXT}"
             pad_plain "$_ENCAP_DISP" "$COL_W_VIRT_ENCAP"
-            printf '%s' "${COL_GAP}"
+            printf '%s' "${COL_GAP_TEXT}"
             pad_color "$_W_COL" 1
-            printf '%s' "${COL_GAP}"
+            printf '%s' "${COL_GAP_TEXT}"
         fi
         if ${SHOW_PHYSICAL}; then
             printf "%-${COL_W_NUMA}s${COL_GAP}%-${COL_W_PCI_SLOT}s${COL_GAP}%-${COL_W_NIC_VENDOR}s${COL_GAP}%-${COL_W_NIC_MODEL}s${COL_GAP}" \
@@ -3282,37 +3487,37 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
         pad_plain "$_IFACE_DISP" "$COL_W_IFACE"
         printf "${COL_GAP}%-${COL_W_MAC}s${COL_GAP}" "${DATA_MAC[$i]}"
         pad_color "$_MTU_CELL" "$COL_W_MTU"
-        printf '%s' "${COL_GAP}"
+        printf '%s' "${COL_GAP_TEXT}"
         pad_color "${DATA_LINK_COLOR[$i]}" "$COL_W_LINK"
-        printf '%s' "${COL_GAP}"
+        printf '%s' "${COL_GAP_TEXT}"
         pad_color "${DATA_SPEED_COLOR[$i]}" "$COL_W_SPEED"
-        printf '%s' "${COL_GAP}"
+        printf '%s' "${COL_GAP_TEXT}"
         pad_color "${DATA_BOND_COLOR[$i]}" "$COL_W_BOND"
         if ${SHOW_BMAC}; then
             printf "${COL_GAP}%-${COL_W_BMAC}s" "${DATA_BMAC[$i]}"
         fi
         if ${SHOW_LACP}; then
-            printf '%s' "${COL_GAP}"
+            printf '%s' "${COL_GAP_TEXT}"
             pad_color "${DATA_LACP_COLOR[$i]}" "$COL_W_LACP"
         fi
         ${SHOW_VLAN} && printf "${COL_GAP}%-${COL_W_VLAN}s" "${DATA_VLAN[$i]}"
         if ${SHOW_OPTICS}; then
             printf "${COL_GAP}%-${COL_W_OPT_TYPE}s" "${DATA_OPTICS_TYPE[$i]}"
-            printf '%s' "${COL_GAP}"
+            printf '%s' "${COL_GAP_TEXT}"
             pad_color "${DATA_OPTICS_TX_COLOR[$i]}" "$COL_W_OPT_TX"
-            printf '%s' "${COL_GAP}"
+            printf '%s' "${COL_GAP_TEXT}"
             pad_color "${DATA_OPTICS_RX_COLOR[$i]}" "$COL_W_OPT_RX"
         fi
         if ${SHOW_METRICS}; then
-            printf '%s' "${COL_GAP}"
+            printf '%s' "${COL_GAP_TEXT}"
             pad_color "${DATA_MET_BW_COLOR[$i]}" "$COL_W_MET_BW"
-            printf '%s' "${COL_GAP}"
+            printf '%s' "${COL_GAP_TEXT}"
             pad_color "${DATA_MET_PPS_COLOR[$i]}" "$COL_W_MET_PPS"
-            printf '%s' "${COL_GAP}"
+            printf '%s' "${COL_GAP_TEXT}"
             pad_color "${DATA_MET_DROP_COLOR[$i]}" "$COL_W_MET_DROP"
-            printf '%s' "${COL_GAP}"
+            printf '%s' "${COL_GAP_TEXT}"
             pad_color "${DATA_MET_ERR_COLOR[$i]}" "$COL_W_MET_ERR"
-            printf '%s' "${COL_GAP}"
+            printf '%s' "${COL_GAP_TEXT}"
             pad_color "${DATA_MET_FIFO_COLOR[$i]}" "$COL_W_MET_FIFO"
         fi
         printf "${COL_GAP}%-${COL_W_SWITCH}s${COL_GAP}%-${COL_W_PORT}s${COL_GAP}%s\n" "${DATA_SWITCH[$i]}" "${DATA_PORT[$i]}" "${DATA_PORT_DESCR[$i]}"
@@ -3322,31 +3527,8 @@ if [[ "${OUTPUT_FORMAT}" == "table" ]]; then
         printf '\n📊 Metrics sampled over %ds\n' "$METRICS_ELAPSED"
     fi
 elif [[ "${OUTPUT_FORMAT}" == "csv" ]]; then
-    FS="${FIELD_SEP:-,}"
-    # CSV Header
-    if ${SHOW_VIRTUAL}; then
-        printf "%s${FS}%s${FS}%s${FS}%s${FS}" "type" "parent" "encap_overhead_bytes" "mtu_warn"
-    fi
-    if ${SHOW_PHYSICAL}; then
-        printf "%s${FS}%s${FS}%s${FS}%s${FS}" "NUMA" "PCI Slot" "NIC Vendor" "NIC Model"
-    fi
-    printf "%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
-        "Device" "Driver" "Firmware" "Interface" "MAC Address" "MTU" "MTU Warn" "Link" "Speed/Duplex" "Speed Mb/s" "Duplex" "Parent Bond"
-    ${SHOW_BMAC} && printf "${FS}%s" "Bond MAC"
-    ${SHOW_LACP} && printf "${FS}%s" "LACP Status"
-    ${SHOW_VLAN} && printf "${FS}%s" "VLAN"
-    if ${SHOW_OPTICS}; then
-        printf "${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
-            "SFP Type" "SFP Vendor" "Wavelength" "Tx Power (dBm)" "Tx Status" \
-            "Rx Power (dBm)" "Rx Status" "Lane Count"
-    fi
-    if ${SHOW_METRICS}; then
-        printf "${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s${FS}%s" \
-            "Rx bps" "Tx bps" "Rx pps" "Tx pps" \
-            "Rx Drops" "Tx Drops" "Rx Errors" "Tx Errors" \
-            "Rx FIFO Errors" "Tx FIFO Errors" "Sample Duration (s)"
-    fi
-    printf "${FS}%s${FS}%s${FS}%s\n" "Switch Name" "Port Name" "Port Descr"
+    fmt_escape FS "${FIELD_SEP:-,}"
+    print_csv_header
     # CSV Data rows
     for i in "${RENDER_ORDER[@]}"; do
         local _SPD_MBPS _DUPLEX
@@ -3523,6 +3705,9 @@ if [[ "$OUTPUT_FORMAT" == "table" && -n "$DIAGRAM_OUTPUT_FILE" ]]; then
         echo "Diagram saved to: $DIAGRAM_OUTPUT_FILE" >&2
     else
         echo "Failed to render diagram. Check that graphviz is installed." >&2
+        # A requested output failed: exit non-zero like --output svg|png, except in
+        # watch mode, where the table keeps refreshing
+        $WATCH_MODE || exit 1
     fi
 fi
 }
@@ -3531,10 +3716,18 @@ fi
 if $WATCH_MODE; then
     # Use alternate screen buffer for clean refresh
     tput smcup 2>/dev/null
-    trap 'tput rmcup 2>/dev/null; exit 0' INT TERM
+    # Leave the alternate screen however the script ends
+    trap 'tput rmcup 2>/dev/null' EXIT
+    trap 'exit 0' INT TERM
 
     while true; do
-        collect_data
+        if ! collect_data; then
+            # Nothing matches (yet): say so and keep watching
+            tput clear 2>/dev/null
+            render_empty_output 2>&1
+            watch_sleep "$WATCH_INTERVAL"
+            continue
+        fi
         compute_layout
         tput cup 0 0 2>/dev/null
         render_output
@@ -3544,8 +3737,9 @@ if $WATCH_MODE; then
             watch_sleep "$WATCH_INTERVAL"
         fi
     done
-else
-    collect_data
+elif collect_data; then
     compute_layout
     render_output
+else
+    render_empty_output
 fi
