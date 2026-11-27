@@ -30,6 +30,17 @@ _spec.loader.exec_module(nr)
 ROLE_RE = r"^[^-]+-[^-]+-(?P<role>[a-z]+\d+[a-z]*)-\d+"
 THEMES = os.path.join(REPO, "tests", "fixtures", "themes")
 EXAMPLE_THEME = os.path.join(THEMES, "example")
+
+
+def help_option_re(short, long, metavar=""):
+    """Regex for an option line in --help output, in either argparse layout:
+    '-C OLD NEW, --compare OLD NEW' (Python <= 3.12) or '-C, --compare OLD NEW' (3.13+)."""
+    arg = " " + re.escape(metavar) if metavar else ""
+    # A flag without a metavar must be followed by the help column (2+ spaces) or the line end,
+    # so an argument added by mistake ('-N, --strict-narrative N') does not match
+    end = r"(?:\s|$)" if metavar else r"(?:\s{2,}|$)"
+    return rf"(?m)^\s+{re.escape(short)}(?:{arg})?, {re.escape(long)}{arg}{end}"
+
 try:
     import weasyprint  # noqa: F401  # optional: PDF tests run only where it is installed
     HAVE_WEASYPRINT = True
@@ -1102,13 +1113,19 @@ class TestSuppress(Phase5Base):
                "invalid 'hosts' regex": {"schema_version": 1, "suppress": [{"check_id": "x", "reason": "r", "hosts": "[a"}]},
                "'sites' must be": {"schema_version": 1, "suppress": [{"check_id": "x", "reason": "r", "sites": ["a/b"]}]},
                "rule 2": {"schema_version": 1, "suppress": [{"check_id": "x", "reason": "r"}, {"check_id": "x", "reason": ""}]},
-               "larger than 1024 KiB": " " * (nr.SUPPRESS_MAX + 1),
-               "recursion": "[" * 100000}
+               "larger than 1024 KiB": " " * (nr.SUPPRESS_MAX + 1)}
         for n, (msg, doc) in enumerate(bad.items()):
             path = self.write_json(f"s{n}.json", doc)
             with self.assertRaises(nr.InputError, msg=msg) as cm:
                 nr.load_suppress(path)
             self.assertIn(msg, str(cm.exception))
+        # Absurdly deep nesting is an input error. Whether the parser runs out of stack
+        # (RecursionError) or reaches the end of the input (ValueError) depends on the
+        # Python version and the C stack size, so the message is not checked.
+        with self.assertRaises(nr.InputError) as cm:
+            nr.load_suppress(self.write_json("deep.json", "[" * 100000))
+        self.assertTrue(str(cm.exception).startswith(os.path.join(self.tmp.name, "deep.json") + ": "),
+                        cm.exception)                  # names the file, then the parser's reason
         self.pcie_site()
         rc, _, err = self.cli("-R", self.root, "-S", self.write_json("broken.json", "{"))
         self.assertEqual(rc, 1, err)
@@ -1467,8 +1484,9 @@ class TestThemes(Phase5Base):
         d = self.theme_dir()
         with open(os.path.join(d, "theme.json"), "w") as fh:
             fh.write("[" * 50000)
-        with self.assertRaisesRegex(nr.InputError, "recursion"):
+        with self.assertRaises(nr.InputError) as cm:  # RecursionError or ValueError: see TestSuppress
             nr.load_theme(d)
+        self.assertTrue(str(cm.exception).startswith(os.path.join(d, nr.THEME_FILE) + ": "), cm.exception)
 
     def test_text_fields_cleaned(self):
         theme = nr.load_theme(self.theme_dir({"org": "Ex‮ample\x07 Corp", "labels": {"classification": "In⁦ternal\n"}}))
@@ -3569,7 +3587,7 @@ class TestCompare(Phase7Base):
     def test_help_and_cli_run(self):
         rc, out, _ = self.cli("--help")
         self.assertEqual(rc, 0)
-        self.assertIn("-C OLD NEW, --compare OLD NEW", out)
+        self.assertRegex(out, help_option_re("-C", "--compare", "OLD NEW"))
         self.assertIn("not with SWEEP_DIR, -R, -s, -a, -i, -b all or -P", " ".join(out.split()))
         old, new = self.write_pair()
         rc, out, err = self.cli("--compare", old, new, "-O", "json", env={nr.RULES_ENV: ""})
@@ -3902,9 +3920,9 @@ class TestNarrativeMerge(Phase7Base):
     def test_help(self):
         rc, out, _ = self.cli("--help")
         self.assertEqual(rc, 0)
-        for opt in ("-A FILE, --ai-brief FILE", "-U AUDIENCE, --audience AUDIENCE", "-n FILE, --narrative FILE",
-                    "-N, --strict-narrative"):
-            self.assertIn(opt, out)
+        for short, long, metavar in (("-A", "--ai-brief", "FILE"), ("-U", "--audience", "AUDIENCE"),
+                                     ("-n", "--narrative", "FILE"), ("-N", "--strict-narrative", "")):
+            self.assertRegex(out, help_option_re(short, long, metavar))
         self.assertIn("it never calls a model or the network", out)
 
 
