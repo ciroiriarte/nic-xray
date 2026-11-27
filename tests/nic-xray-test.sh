@@ -93,6 +93,9 @@ check_lanes() {  # check_lanes <label> <awk command...>
     assert_eq "$AWK_LABEL: variance flags weak lane"  " Ch2↓4dB" "$(optics_lane_variance '-1.00:-5.00:-1.20:-1.10')"
     unset -f awk
 }
+# nic-xray needs awk; CI images without it (SLES 15 job) skip the awk-backed tests
+HAVE_AWK=false; command -v awk &>/dev/null && HAVE_AWK=true
+if $HAVE_AWK; then
 AWKS=0
 for AWK_BIN in gawk mawk busybox original-awk; do
     command -v "$AWK_BIN" &>/dev/null || continue
@@ -105,6 +108,9 @@ for AWK_BIN in gawk mawk busybox original-awk; do
 done
 (( AWKS > 0 )) || check_lanes awk awk
 command -v mawk &>/dev/null || echo "⏭️  SKIP mawk optics tests: mawk not found"
+else
+    echo "⏭️  SKIP optics lane tests: awk not found"
+fi
 
 # LLDP values are taken literally (xargs choked on quotes and ran echo on them)
 assert_eq "squeeze_ws trims"            "sw-lab01"        "$(printf '  sw-lab01  \n' | squeeze_ws)"
@@ -186,6 +192,7 @@ T2[big]=9223372036854775900
 counter_delta D T1 T2 big;     assert_eq "counter_delta across 2^63" "100" "$D"
 assert_eq "read_iface_stats has no eval" "0" "$(sed -n '/^read_iface_stats() {/,/^}/p' "$SCRIPT" | grep -cE '^[[:space:]]*eval[[:space:]]')"
 
+if $HAVE_AWK; then
 # Bond slave permanent MAC: exact slave name, not a prefix
 BOND_FILE="$TEST_TMP/bond"
 cat > "$BOND_FILE" <<'BOND'
@@ -207,7 +214,11 @@ assert_eq "bond MAC other slave"        "aa:aa:aa:aa:aa:10" "$(bond_slave_perm_m
 assert_eq "bond MAC no line → empty"    ""                  "$(bond_slave_perm_mac "$BOND_FILE" eth2)"
 assert_eq "bond MAC unknown slave"      ""                  "$(bond_slave_perm_mac "$BOND_FILE" eth)"
 rm -f "$BOND_FILE"
+else
+    echo "⏭️  SKIP bond MAC tests: awk not found"
+fi
 
+if $HAVE_AWK; then
 # Unusable lane readings are not reported as a healthy 0 dBm
 assert_eq "lanes with no usable reading" "N/A N/A" "$(optics_lanes_summary 'nan:N/A:N/A:N/A' "${SR4[@]}")"
 # Single-lane optics: no light is ALARM whatever the thresholds
@@ -215,6 +226,9 @@ load_functions evaluate_optics_health
 assert_eq "single lane -inf is ALARM"   "ALARM" "$(evaluate_optics_health -inf "${SR4[@]}")"
 assert_eq "single lane -40 is ALARM"    "ALARM" "$(evaluate_optics_health -40.00 -50 -50 5 5)"
 assert_eq "single lane in range is OK"  "OK"    "$(evaluate_optics_health -2.00 "${SR4[@]}")"
+else
+    echo "⏭️  SKIP single-lane optics tests: awk not found"
+fi
 
 # Separators in real rows: a table gap and a CSV row built the way the writers build them
 # shellcheck disable=SC2016  # a sed address, not a shell expansion
