@@ -68,8 +68,9 @@ FIELD_RE='^[A-Za-z0-9][A-Za-z0-9._-]*$'
 # Address: a name, an IPv4 or an IPv6 address, including "::"-leading forms (::1, ::ffff:192.0.2.1)
 # and a zone ID (fe80::1%eth0). A leading ":" cannot start an option; "%" only before the zone
 ADDRESS_RE='^([A-Za-z0-9][A-Za-z0-9._:-]*|:[0-9A-Fa-f:.]*)(%[A-Za-z0-9._-]+)?$'
-# Jump host for ssh -J: [user@]host[:port], with an IPv6 host in brackets ([2001:db8::1]:22)
-JUMP_RE='^([A-Za-z0-9][A-Za-z0-9._-]*@)?([A-Za-z0-9][A-Za-z0-9._-]*|\[[0-9A-Fa-f:.]+(%[A-Za-z0-9._-]+)?\])(:[0-9]+)?$'
+# Jump host for ssh -J: [user@]host[:port], with an IPv6 host in brackets ([2001:db8::1]:22).
+# No zone ID: OpenSSH percent-expands the ProxyJump value, so "%eth0" fails as an unknown "%e" token
+JUMP_RE='^([A-Za-z0-9][A-Za-z0-9._-]*@)?([A-Za-z0-9][A-Za-z0-9._-]*|\[[0-9A-Fa-f:.]+\])(:[0-9]+)?$'
 # nodes/<host>.xray.json would collide with the canonical file of a host named "<host>.xray"
 XRAY_SUFFIX=".xray"
 INVENTORY_HEADER_RE='^site,host,address(,user)?$'
@@ -177,8 +178,8 @@ usage() {
     echo -e " 0  Every host collected, all verdicts OK"
     echo -e " 1  Every host collected, at least one WARN, no CRIT"
     echo -e " 2  At least one CRIT (even if some hosts could not be collected)"
-    echo -e " 3  No CRIT, but a host was not collected; or no WARN and a host reported UNKNOWN;"
-    echo -e "    or a usage error"
+    echo -e " 3  No CRIT, but a host was not collected or a sweep could not be written completely;"
+    echo -e "    or no WARN and a host reported UNKNOWN; or a usage error"
     echo -e ""
     echo -e "See also: nic-health.sh(8), nic-xray.sh(8). Design: $DESIGN_REF"
 }

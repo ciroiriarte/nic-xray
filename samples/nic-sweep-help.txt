@@ -41,7 +41,7 @@ Exit status:
  0  Every host collected, all verdicts OK
  1  Every host collected, at least one WARN, no CRIT
  2  At least one CRIT (even if some hosts could not be collected)
- 3  No CRIT, but a host was not collected; or no WARN and a host reported UNKNOWN;
-    or a usage error
+ 3  No CRIT, but a host was not collected or a sweep could not be written completely;
+    or no WARN and a host reported UNKNOWN; or a usage error
 
 See also: nic-health.sh(8), nic-xray.sh(8). Design: docs/design/nic-sweep.md

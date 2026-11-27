@@ -93,10 +93,11 @@ done
 for A in -oProxyCommand=x . .. '%eth0' 'fe80::1%' 'a%b%c' 'h;x' 'h x' ':x:y'; do
     assert_eq "address rejected: $A" "no" "$([[ "$A" =~ $ADDRESS_RE ]] && echo yes || echo no)"
 done
-for J in jump.example admin@jump.example admin@jump.example:2222 '[2001:db8::1]' 'admin@[2001:db8::1]:22' '[fe80::1%eth0]'; do
+for J in jump.example admin@jump.example admin@jump.example:2222 '[2001:db8::1]' 'admin@[2001:db8::1]:22'; do
     assert_eq "jump accepted: $J" "yes" "$([[ "$J" =~ $JUMP_RE ]] && echo yes || echo no)"
 done
-for J in -J '[x]' '[2001:db8::1' 'admin@[::1]:p' 'a b'; do
+# A zone ID breaks OpenSSH's percent expansion of ProxyJump ("unknown key %e"): rejected up front
+for J in -J '[x]' '[2001:db8::1' 'admin@[::1]:p' 'a b' '[fe80::1%eth0]'; do
     assert_eq "jump rejected: $J" "no" "$([[ "$J" =~ $JUMP_RE ]] && echo yes || echo no)"
 done
 

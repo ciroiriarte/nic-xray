@@ -104,7 +104,8 @@ SSH jump host,
 passed to
 .BR "ssh \-J" ;
 an IPv6 host goes in brackets, e.g.
-.BR [2001:db8::1]:22 .
+.BR [2001:db8::1]:22
+(without a zone ID, which OpenSSH cannot take in a jump host).
 .TP
 .BR \-u ", " \-\-user " " \fIUSER\fR
 SSH user for inventory lines without one. Default: the user from your SSH
