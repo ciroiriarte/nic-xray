@@ -1562,6 +1562,28 @@ class TestOutputFiles(Phase5Base):
         with open(manifest, "rb") as fh:
             self.assertEqual(fh.read(), before)
 
+    def test_input_identity_comes_from_the_opened_file(self):
+        """An input path swapped between its stat and its open: the file actually read is the one protected."""
+        path = os.path.join(self.tmp.name, "rules.json")
+        with open(path, "w") as fh:
+            fh.write("{}")
+        nr._INPUTS_READ.clear()
+        nr._INPUT_INODES.clear()
+        real_note = nr.note_input
+
+        def note_then_swap(p):
+            real_note(p)
+            swapped = p + ".new"
+            with open(swapped, "w") as fh:
+                fh.write('{"swapped": true}')
+            os.replace(swapped, p)                          # a new inode under the same path
+
+        with mock.patch.object(nr, "note_input", note_then_swap):
+            nr.read_json(path)
+        with open(path, "r+b") as fh:
+            with self.assertRaisesRegex(nr.InputError, "is one of the report's input files"):
+                nr._refuse_input_fd(fh.fileno(), path)
+
     def test_special_target_swapped_for_a_regular_file_is_not_written(self):
         """A path classified as special but replaced by a regular file (a hard link to an input, say) before it
         is opened is refused on the open descriptor, and nothing is truncated."""

@@ -670,12 +670,21 @@ _INPUT_INODES = set()
 
 
 def note_input(path):
-    """Record PATH as read, so no output can replace or overwrite an input of the same report."""
+    """Record PATH as read, so no output can replace or overwrite an input of the same report (by path, before
+    it is opened, so a failed read still protects it; the identity comes from the open file: note_opened)."""
     _INPUTS_READ.add(os.path.realpath(path))
     with contextlib.suppress(OSError):
         st = os.stat(path)
         if stat.S_ISREG(st.st_mode):
             _INPUT_INODES.add((st.st_dev, st.st_ino))
+
+
+def note_opened(fh):
+    """Record the (device, inode) of the file actually opened for reading: a path swapped between note_input's
+    stat and the open cannot leave the content read unprotected."""
+    st = os.fstat(fh.fileno())
+    if stat.S_ISREG(st.st_mode):
+        _INPUT_INODES.add((st.st_dev, st.st_ino))
 
 
 def read_json(path, limit=None, replaced=None):
@@ -684,6 +693,7 @@ def read_json(path, limit=None, replaced=None):
     note_input(path)
     try:
         with open(path, "rb") as fh:
+            note_opened(fh)
             data = fh.read() if limit is None else fh.read(limit + 1)
         if limit is not None and len(data) > limit:
             raise InputError(f"{path}: larger than {limit // 1024} KiB")
@@ -719,6 +729,7 @@ def load_sweep_dir(path):
     note_input(manifest)
     try:
         with open(manifest, encoding="utf-8", newline="") as fh:
+            note_opened(fh)
             reader = csv.DictReader(fh, delimiter="\t")
             rows = list(reader)
             missing = [c for c in MANIFEST_REQUIRED if c not in (reader.fieldnames or [])]
@@ -942,6 +953,7 @@ def _clean_csv_lines(path):
     note_input(path)
     try:
         with open(path, encoding="utf-8", newline="") as fh:
+            note_opened(fh)
             lines = [ln.replace("\r", "") for ln in fh]
     except (OSError, UnicodeDecodeError) as exc:
         raise InputError(f"{path}: {exc}") from exc
@@ -2768,6 +2780,7 @@ def _theme_file(real_dir, name, what, limit):
     note_input(real)
     try:
         with open(real, "rb") as fh:
+            note_opened(fh)
             data = fh.read(limit + 1)
     except OSError as exc:
         raise InputError(f"theme {what}: {exc}") from exc
@@ -3768,6 +3781,7 @@ def read_narrative(path):
             raise InputError(f"{path}: not a regular file")
         note_input(path)
         with open(path, "rb") as fh:
+            note_opened(fh)
             data = fh.read(NARRATIVE_MAX + 1)
     except OSError as exc:
         raise InputError(f"{path}: {exc}") from exc
