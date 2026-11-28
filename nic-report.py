@@ -4269,7 +4269,7 @@ def _open_special(path):
     st = os.fstat(fd)
     if stat.S_ISREG(st.st_mode) or stat.S_ISDIR(st.st_mode):
         os.close(fd)
-        raise InputError(f"{path}: changed while the report was written; not written")
+        raise InputError(f"{path}: changed since it was checked (now a regular file or directory); nothing written")
     return fd
 
 
@@ -4322,10 +4322,18 @@ def write_outputs(outputs):
             raise InputError(f"{path}: directory {folder} does not exist or is not writable")
         if os.path.isdir(path) and not os.path.islink(path):
             raise InputError(f"{path}: is a directory")
-    temps, fds = [], []
+    # Stream aliases are checked before anything is written (fstat of the descriptor they name: no open, no
+    # blocking); FIFOs and devices can only be checked once opened, which may block, so they are handled one by
+    # one at the end, as a reader consuming several FIFOs in turn expects
+    for path, _ in special:
+        fd_no = _stream_fd(path)
+        if fd_no is not None:
+            try:
+                _refuse_input_fd(fd_no, path)
+            except OSError as exc:
+                raise InputError(f"cannot write the report: {path}: {exc}") from exc
+    temps = []
     try:
-        for path, data in special:                      # opened and checked before anything is written
-            fds.append(_open_special(path))
         for path, data in files:
             folder, base = os.path.split(os.path.abspath(path))
             tmp = os.path.join(folder, f".{base}.{secrets.token_hex(TEMP_NAME_BYTES)}.tmp")
@@ -4335,20 +4343,19 @@ def write_outputs(outputs):
                 fh.write(data)
         for (path, _), tmp in zip(files, temps):
             os.replace(tmp, path)
-        sys.stdout.flush()                              # keep the order with anything already printed
-        while fds:
-            fd, (path, data) = fds.pop(0), special.pop(0)
-            with os.fdopen(fd, "wb") as fh:
+        temps = []
+        for path, data in special:
+            if _stream_fd(path) == 1:
+                sys.stdout.flush()                      # keep the order with anything already printed
+            # Opened, checked, written and closed in turn: a duplicated descriptor never outlives its write, so
+            # it cannot take the number of a closed /dev/fd/N named by a later output
+            with os.fdopen(_open_special(path), "wb") as fh:
                 fh.write(data)
     except OSError as exc:
         for tmp in temps:
             with contextlib.suppress(OSError):
                 os.remove(tmp)
         raise InputError(f"cannot write the report: {exc}") from exc
-    finally:
-        for fd in fds:
-            with contextlib.suppress(OSError):
-                os.close(fd)
     for path, content in outputs:
         if path is None:
             sys.stdout.write(content)

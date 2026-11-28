@@ -817,8 +817,9 @@ WeasyPrint missing or failing for
 or a narrative that cannot be read (missing, not a regular file or pipe, larger
 than 256 KiB, not UTF-8, empty) or, with
 .BR \-\-strict\-narrative ,
-fails its check; or an output file cannot be written (or would replace one of
-the report's inputs, or is a symbolic link to a FIFO or device).
+fails its check; or an output file cannot be written (or would replace or
+overwrite one of the report's inputs, through a hard link or with standard
+output redirected to it as well, or is a symbolic link to a FIFO or device).
 .TP
 .B 3
 Usage error.

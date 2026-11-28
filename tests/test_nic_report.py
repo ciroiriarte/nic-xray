@@ -1513,6 +1513,42 @@ class TestOutputFiles(Phase5Base):
         with open(manifest, "rb") as fh:
             self.assertEqual(fh.read(), before)
 
+    def test_fifos_are_written_one_after_the_other(self):
+        """A reader consuming two FIFOs in turn (cat report.fifo brief.fifo) gets both: the writer does not open
+        the second before the first is written and closed."""
+        self.normal_site("SITE1")
+        f1, f2 = (os.path.join(self.tmp.name, n) for n in ("report.fifo", "brief.fifo"))
+        os.mkfifo(f1)
+        os.mkfifo(f2)
+        reader = subprocess.Popen(["cat", f1, f2], stdout=subprocess.PIPE)
+        try:
+            p = subprocess.run([sys.executable, SCRIPT, "-R", self.root, "-o", f1, "-A", f2],
+                               stderr=subprocess.PIPE, text=True, timeout=30)
+            out, _ = reader.communicate(timeout=30)
+        finally:
+            reader.kill()
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn(b"SITE1", out)
+        self.assertGreater(out.count(b"SITE1"), 1)       # the report and the brief both arrived
+
+    def test_closed_stream_alias_is_refused(self):
+        """/dev/fd/N for a closed descriptor is an error, never silently another output's duplicate."""
+        self.normal_site("SITE1")
+        brief = "/dev/fd/9"
+        p = subprocess.run([sys.executable, SCRIPT, "-R", self.root, "-o", "/dev/stdout", "-A", brief],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.assertEqual(p.returncode, 1, p.stderr)
+        self.assertIn("/dev/fd/9", p.stderr)
+        self.assertEqual(p.stdout, "")                   # checked before anything is written
+
+    def test_file_output_with_standard_output_closed(self):
+        self.normal_site("SITE1")
+        out = os.path.join(self.tmp.name, "r.md")
+        p = subprocess.run(["sh", "-c", '"$0" "$1" -R "$2" -o "$3" >&-', sys.executable, SCRIPT, self.root, out],
+                           stderr=subprocess.PIPE, text=True)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertTrue(os.path.getsize(out) > 0)
+
     def test_input_passed_as_standard_output_refused(self):
         """Without -o, standard output itself may be an input a caller opened (read-write) and passed in."""
         self.normal_site("SITE1")
@@ -1532,7 +1568,7 @@ class TestOutputFiles(Phase5Base):
         regular = os.path.join(self.tmp.name, "was-a-fifo")
         with open(regular, "w") as fh:
             fh.write("input")
-        with self.assertRaisesRegex(nr.InputError, "changed while the report was written"):
+        with self.assertRaisesRegex(nr.InputError, "changed since it was checked"):
             nr._open_special(regular)
         with open(regular) as fh:
             self.assertEqual(fh.read(), "input")
