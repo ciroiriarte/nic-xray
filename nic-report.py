@@ -624,17 +624,20 @@ def _elapsed(value):
     up to ELAPSED_MAX_S, else None (absent in older output and CSV imports, null or 0 without a window)."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return float(value) if math.isfinite(value) and 0 < value <= ELAPSED_MAX_S else None
+    # The range test alone also rules out nan and inf, and never converts a huge JSON integer to float
+    return float(value) if 0 < value <= ELAPSED_MAX_S else None
 
 
 def window_s(meta):
     """Seconds the deltas of a host were measured over, for rates: the measured window (elapsed_s), which includes
     the time nic-health spent taking its snapshots, as nic-health computes its own rates; else the requested
-    interval_s (older output, CSV imports). None when neither is known."""
-    if meta.get("elapsed_s"):
-        return meta["elapsed_s"]
+    interval_s (older output, CSV imports, or an elapsed_s shorter than interval_s). None when neither is known."""
     interval = meta.get("interval_s")
-    return interval if interval and interval > 0 else None
+    interval = interval if interval and interval > 0 else None
+    # nic-health sleeps the whole interval between its snapshots: a shorter "measured" window is not real
+    if meta.get("elapsed_s") and (interval is None or meta["elapsed_s"] >= interval):
+        return meta["elapsed_s"]
+    return interval
 
 
 def make_record(host, raw):
@@ -4010,7 +4013,8 @@ def build_parser():
                 "    site with OLD earlier, an invalid suppress file, rule catalog or theme, theme contrast\n"
                 f"    below {MIN_CONTRAST}:1 with --strict-theme, WeasyPrint missing or failing for -O pdf, a\n"
                 "    narrative that cannot be read or, with --strict-narrative, fails its check) or an\n"
-                "    output file cannot be written (or would replace an input of the report)\n 3  usage error\n\n"
+                "    output file cannot be written (or would replace an input of the report, or is a symbolic link\n"
+                "    to a FIFO or device other than /dev/stdout and the like)\n 3  usage error\n\n"
                 f"See also: nic-sweep.sh(8), nic-health.sh(8), nic-xray.sh(8). Design: {DESIGN_REF}"))
     p.add_argument("sweep_dirs", nargs="*", metavar="SWEEP_DIR", help="nic-sweep directories (DIR/<site>/<UTC time>)")
     p.add_argument("-R", "--sweep-root", metavar="DIR", help="nic-sweep tree; selects the latest sweep of each site")
@@ -4148,6 +4152,7 @@ def _warn(text):
 
 def build_outputs(args, now):
     """[(path or None for stdout, text or PDF bytes)]: the report, then one per site with --per-site."""
+    _INPUTS_READ.clear()                    # the inputs of this report only (it may be built more than once)
     args.theme_data = None
     if args.theme and args.output_format in ("html", "pdf"):    # md and json never read a theme
         args.theme_data = load_theme(args.theme)
@@ -4219,6 +4224,12 @@ def build_outputs(args, now):
     return outputs
 
 
+def _stream_alias(path):
+    """True for /dev/stdout, /dev/stderr, /dev/fd/N and /proc/self/fd/N (also spelt //dev/stdout and the like)."""
+    norm = os.path.normpath(os.path.abspath(path))
+    return bool(STREAM_ALIAS_RE.match("/" + norm.lstrip("/")))
+
+
 def write_outputs(outputs):
     """Write every file atomically: a temp file next to it (exclusive, random name, never through a symlink,
     REPORT_MODE), then os.replace, which also replaces a symlink at the target instead of following it. All
@@ -4243,8 +4254,12 @@ def write_outputs(outputs):
             st = os.stat(path)
         except OSError:
             st = None
-        if st and not stat.S_ISREG(st.st_mode) and not stat.S_ISDIR(st.st_mode):
-            if os.path.islink(path) and not STREAM_ALIAS_RE.match(os.path.abspath(path)):
+        if _stream_alias(path):
+            # Written in place whatever it points at: with stdout redirected to a file, /dev/stdout resolves to
+            # a regular file, and replacing it would swap the system's /dev/stdout link (as root) for the report
+            special.append((path, data))
+        elif st and not stat.S_ISREG(st.st_mode) and not stat.S_ISDIR(st.st_mode):
+            if os.path.islink(path):
                 raise InputError(f"{path}: is a symbolic link to a special file (FIFO or device); "
                                  "give the file itself, or /dev/stdout")
             special.append((path, data))
@@ -4286,7 +4301,6 @@ def main(argv=None):
         return EXIT_USAGE
     args = parse_args(sys.argv[1:] if argv is None else argv)
     now = datetime.datetime.now().astimezone()
-    _INPUTS_READ.clear()                    # main() may run more than once in a process (tests)
     try:
         write_outputs(build_outputs(args, now))
     except InputError as exc:

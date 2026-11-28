@@ -416,7 +416,10 @@ is written. An existing
 .I FILE
 that is not a regular file (for example
 .B /dev/null
-or a named pipe) is written to directly instead; it is reached through a
+or a named pipe) is written to directly instead, and so are the stream aliases
+below whatever they point at (with standard output redirected to a file,
+.B \-o /dev/stdout
+writes that file); such a target is reached through a
 symbolic link only for
 .BR /dev/stdout ,
 .BR /dev/stderr ,

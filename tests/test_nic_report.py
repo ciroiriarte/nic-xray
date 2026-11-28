@@ -1434,9 +1434,15 @@ class TestOutputFiles(Phase5Base):
                 self.assertEqual(fh.read(), before)
         # The same through a symlink to the input, and for a CSV given to --import
         link = os.path.join(self.tmp.name, "link.md")
-        os.symlink(os.path.join(sweep, "MANIFEST.tsv"), link)
+        manifest = os.path.join(sweep, "MANIFEST.tsv")
+        with open(manifest, "rb") as fh:
+            before = fh.read()
+        os.symlink(manifest, link)
         rc, _, err = self.cli("-R", self.root, "-o", link)
         self.assertEqual(rc, 1, err)
+        self.assertIn("is one of the report's input files", err)
+        with open(manifest, "rb") as fh:
+            self.assertEqual(fh.read(), before)
         csv_in = os.path.join(self.tmp.name, "acme-s9-stoc2-01_20261023T141935Z_nic-health.csv")
         legacy = ("severity,scope,target,check_id,value,unit,threshold,evidence,hint,ref\n"
                   '"OK","port","eno1","generic.link.state","up","","","","",""\n')
@@ -1447,6 +1453,34 @@ class TestOutputFiles(Phase5Base):
         self.assertIn("is one of the report's input files", err)
         with open(csv_in) as fh:
             self.assertEqual(fh.read(), legacy)
+
+    def test_per_site_output_never_replaces_an_input(self):
+        """#36: a derived --per-site path (FILE-SITE.ext) that is an input file is refused like -o itself."""
+        self.normal_site("SITE1")
+        self.normal_site("SITE2")
+        out = os.path.join(self.tmp.name, "r.json")
+        suppress = os.path.join(self.tmp.name, "r-SITE2.json")           # the per-site name of SITE2's report
+        with open(suppress, "w") as fh:
+            json.dump({"schema_version": 1, "suppress": []}, fh)
+        rc, _, err = self.cli("-R", self.root, "-O", "json", "-o", out, "-P", "-S", suppress)
+        self.assertEqual(rc, 1, err)
+        self.assertIn("r-SITE2.json: is one of the report's input files", err)
+        self.assertFalse(os.path.exists(out))                            # nothing written, not even -o
+        with open(suppress) as fh:
+            self.assertEqual(json.load(fh), {"schema_version": 1, "suppress": []})
+
+    def test_dev_stdout_redirected_to_a_file(self):
+        """-o /dev/stdout with stdout redirected to a regular file writes that file in place (it used to try to
+        replace /dev/stdout itself: an error for a user, the system's /dev/stdout link swapped as root)."""
+        self.normal_site("SITE1")
+        target = os.path.join(self.tmp.name, "out.md")
+        with open(target, "wb") as fh:
+            p = subprocess.run([sys.executable, SCRIPT, "-R", self.root, "-o", "/dev/stdout"], stdout=fh,
+                               stderr=subprocess.PIPE, text=True)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        with open(target) as fh:
+            self.assertIn("SITE1", fh.read())
+        self.assertTrue(os.path.islink("/dev/stdout"))
 
     def test_symlink_to_special_file_refused_except_stream_aliases(self):
         """#36: an output symlink to a FIFO or device could have been planted; only the stream aliases may be one."""
@@ -1620,14 +1654,22 @@ class TestMeasuredWindow(unittest.TestCase):
     def test_elapsed_validation(self):
         self.assertEqual(nr._elapsed(31.43), 31.43)
         self.assertEqual(nr._elapsed(30), 30.0)
-        for bad in (None, 0, -1, True, "31", float("inf"), float("nan"), nr.ELAPSED_MAX_S + 1):
+        for bad in (None, 0, -1, True, "31", float("inf"), float("nan"), nr.ELAPSED_MAX_S + 1, 10 ** 400):
             self.assertIsNone(nr._elapsed(bad), bad)
 
     def test_window_prefers_elapsed(self):
         self.assertEqual(nr.window_s({"elapsed_s": 31.5, "interval_s": 30}), 31.5)
+        self.assertEqual(nr.window_s({"elapsed_s": 0.5, "interval_s": 30}), 30)   # shorter than the sleep: not real
+        self.assertEqual(nr.window_s({"elapsed_s": 31.5}), 31.5)
         self.assertEqual(nr.window_s({"elapsed_s": None, "interval_s": 30}), 30)
         self.assertIsNone(nr.window_s({"interval_s": 0}))
         self.assertIsNone(nr.window_s({}))
+
+    def test_traffic_floor_follows_the_window(self):
+        # 3100 bytes: above the floor over 30 s (3000 B), below it over the measured 31.25 s (3125 B)
+        m = {"rx_bytes": {"total": 10 ** 9, "delta": 3100}, "tx_bytes": {"total": 10 ** 9, "delta": 0}}
+        self.assertEqual(nr.impact_facts(m, 30)["has_traffic"], True)
+        self.assertEqual(nr.impact_facts(m, 31.25)["has_traffic"], False)
 
     def test_port_facts_use_the_measured_window(self):
         with tempfile.TemporaryDirectory() as root:
