@@ -167,6 +167,7 @@ DEFAULT_LLDP_LOOKBACK_DAYS = 30      # --lldp-lookback: earlier sweeps searched 
 LLDP_LOOKBACK_MAX_DAYS = 3650       # --lldp-lookback upper bound (keeps the date arithmetic in range)
 LLDP_LOOKBACK_MAX_SWEEPS = 50        # earlier sweeps read at most, newest first
 SWEEP_META_MAX = 1024 * 1024         # bytes of an earlier sweep's sweep.json read for the LLDP fallback
+ELAPSED_MAX_S = 24 * 3600            # a measured window (nic-health elapsed_s) longer than this is not trusted
 BDF_RE = re.compile(r"^([0-9a-fA-F]{4}):([0-9a-fA-F]{2}):([0-9a-fA-F]{2})\.[0-7]$")
 # Predictable interface names carry the PCI bus and device (enp130s0f0np0 -> 0000:82:00; enP2p1s0 -> 0002:01:00)
 PCI_NAME_RE = re.compile(r"^en(?:P(\d{1,5}))?p(\d{1,3})s(\d{1,2})(?:f\d|$)")
@@ -238,6 +239,9 @@ FONT_FALLBACK = '"Liberation Sans","DejaVu Sans",sans-serif'
 # PDF (design §6.4)
 PDF_PACKAGE_HINT = "python3-weasyprint, or pip install weasyprint"
 REPORT_MODE = 0o640             # report files hold host names and switch ports (umask still applies)
+# Output paths that are symbolic links by design (the standard streams): the only symlinks to a special file
+# (FIFO, device) an output may go through. Any other such symlink could have been planted to aim at a device
+STREAM_ALIAS_RE = re.compile(r"^/(dev/(stdout|stderr|fd/\d+)|proc/self/fd/\d+)$")
 WIDE_ROW_CHARS = 150            # a table whose Markdown row is longer than this gets a landscape page...
 WIDE_COLS = 10                  # ...and so does one with this many columns
 WIDE_LEAD_MAX = 2               # paragraphs before a wide table that move with it (plus its heading)
@@ -615,6 +619,24 @@ def _typed(value, kind):
     return value if isinstance(value, kind) else None
 
 
+def _elapsed(value):
+    """nic-health's measured sampling window (elapsed_s, nic-health 2.x JSON): a positive, finite number of seconds
+    up to ELAPSED_MAX_S, else None (absent in older output and CSV imports, null or 0 without a window)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) if math.isfinite(value) and 0 < value <= ELAPSED_MAX_S else None
+
+
+def window_s(meta):
+    """Seconds the deltas of a host were measured over, for rates: the measured window (elapsed_s), which includes
+    the time nic-health spent taking its snapshots, as nic-health computes its own rates; else the requested
+    interval_s (older output, CSV imports). None when neither is known."""
+    if meta.get("elapsed_s"):
+        return meta["elapsed_s"]
+    interval = meta.get("interval_s")
+    return interval if interval and interval > 0 else None
+
+
 def make_record(host, raw):
     rec = {f: _text(raw.get(f)) for f in RECORD_FIELDS}
     rec["site"], rec["host"], rec["role"] = host.site, host.name, host.role
@@ -637,9 +659,19 @@ def sweep_stamp_dt(stamp):
         return None
 
 
+# Real paths of every input file read in this run; write_outputs refuses to replace any of them
+_INPUTS_READ = set()
+
+
+def note_input(path):
+    """Record PATH as read (by its real path), so no output can replace an input of the same report."""
+    _INPUTS_READ.add(os.path.realpath(path))
+
+
 def read_json(path, limit=None, replaced=None):
     """A JSON document; with limit, a file larger than limit bytes is an input error (read bounded). With a list
     as replaced, invalid UTF-8 is replaced by U+FFFD instead of failing, and path is appended to that list."""
+    note_input(path)
     try:
         with open(path, "rb") as fh:
             data = fh.read() if limit is None else fh.read(limit + 1)
@@ -674,6 +706,7 @@ def load_sweep_dir(path):
         raise InputError(f"{meta_path}: invalid site name {site!r}")
     data = SiteData(site, "sweep", path=path, stamp=os.path.basename(os.path.normpath(path)))
     manifest = os.path.join(path, "MANIFEST.tsv")
+    note_input(manifest)
     try:
         with open(manifest, encoding="utf-8", newline="") as fh:
             reader = csv.DictReader(fh, delimiter="\t")
@@ -716,7 +749,7 @@ def load_node(path, host):
     host.meta = {"collected_at": _typed(doc.get("collected_at"), str), "tool_version": _typed(doc.get("version"), str),
                  "level": _typed(doc.get("level"), str), "mode": _typed(doc.get("mode"), str),
                  "interval_s": _typed(doc.get("interval_s"), int), "uptime_s": _typed(doc.get("uptime_s"), int),
-                 "boot_id": _typed(doc.get("boot_id"), str)}
+                 "boot_id": _typed(doc.get("boot_id"), str), "elapsed_s": _elapsed(doc.get("elapsed_s"))}
     host.raw_results = results
     host.invalid_utf8 = bool(replaced)
     host.typed_metrics = any(isinstance(r.get("metrics"), dict) for r in results)
@@ -896,6 +929,7 @@ def worst_verdict(rows):
 
 def _clean_csv_lines(path):
     """CSV text lines tolerating CRLF and leading blank lines (terminal captures)."""
+    note_input(path)
     try:
         with open(path, encoding="utf-8", newline="") as fh:
             lines = [ln.replace("\r", "") for ln in fh]
@@ -1398,12 +1432,12 @@ def port_facts(sites):
                 if p is None:
                     p = ports[key] = {"site": site.site, "host": host.name, "role": host.role, "port": r["target"],
                                       "link": None, "uptime_s": host.meta.get("uptime_s"),
-                                      "interval_s": host.meta.get("interval_s"),
+                                      "interval_s": host.meta.get("interval_s"), "window_s": window_s(host.meta),
                                       "xray": (host.xray_ports or {}).get(r["target"])}
                 m, cid = r["metrics"], r["check_id"]
                 if cid == LINK_STATE:
                     p["link"] = r["value"] == LINK_UP
-                    service = impact_facts(m, host.meta.get("interval_s"))
+                    service = impact_facts(m, window_s(host.meta))
                     if service:
                         p["service"] = service
                 elif cid == "mlx5.deep.module":
@@ -1454,7 +1488,7 @@ def port_facts(sites):
     return list(ports.values())
 
 
-def impact_facts(m, interval_s=None):
+def impact_facts(m, window=None):
     """Service-impact facts of a port from its generic.link.state metrics (P3): in_use, in_use_reasons (and
     in_use_reasons_complete when nic-health could not check addresses), bond, bond_link_failures, and has_traffic:
     bytes received or sent in the sampling window. Totals since boot do not tell (LLDP and ARP alone make them grow),
@@ -1463,7 +1497,7 @@ def impact_facts(m, interval_s=None):
     more than CONTROL_TRAFFIC_BPS: below it a port only sees control frames. Each only when known."""
     out = {k: m[k] for k in ("in_use", "in_use_reasons", "in_use_reasons_complete", "bond", "bond_link_failures")
            if k in m}
-    floor = CONTROL_TRAFFIC_BPS * interval_s if interval_s and interval_s > 0 else 0
+    floor = CONTROL_TRAFFIC_BPS * window if window and window > 0 else 0
     window = [m[k].get("delta") if isinstance(m.get(k), dict) else None for k in ("rx_bytes", "tx_bytes")]
     if any(d is not None and d > floor for d in window):
         out["has_traffic"] = True
@@ -2109,8 +2143,8 @@ def rule_targets(sites, report_ports, baseline_ports, a4, pcie, pt, multi, args)
             f["phy_err_total"] = se["total"]
             if se["delta"] is not None:
                 f.update(phy_err_window=se["delta"], phy_err_growing=se["delta"] > 0)
-                if p.get("interval_s"):
-                    f["phy_err_rate_s"] = round(se["delta"] / p["interval_s"], 3)
+                if p.get("window_s"):
+                    f["phy_err_rate_s"] = round(se["delta"] / p["window_s"], 3)
             if (p.get("uptime_s") or 0) > 0:
                 f["phy_err_rate_h_uptime"] = round(se["total"] / (p["uptime_s"] / SECONDS_PER_HOUR), 3)
         _put(f, carrier_changes=p.get("carrier_changes"), flaps_window=p.get("flaps_window"),
@@ -2721,6 +2755,7 @@ def _theme_file(real_dir, name, what, limit):
         raise InputError(f"theme {what}: {name} points outside the theme folder")
     if not os.path.isfile(real):
         raise InputError(f"theme {what}: {name}: no such file in {real_dir}")
+    note_input(real)
     try:
         with open(real, "rb") as fh:
             data = fh.read(limit + 1)
@@ -3721,6 +3756,7 @@ def read_narrative(path):
         st = os.stat(path)
         if not (stat.S_ISREG(st.st_mode) or stat.S_ISFIFO(st.st_mode)):
             raise InputError(f"{path}: not a regular file")
+        note_input(path)
         with open(path, "rb") as fh:
             data = fh.read(NARRATIVE_MAX + 1)
     except OSError as exc:
@@ -3974,7 +4010,7 @@ def build_parser():
                 "    site with OLD earlier, an invalid suppress file, rule catalog or theme, theme contrast\n"
                 f"    below {MIN_CONTRAST}:1 with --strict-theme, WeasyPrint missing or failing for -O pdf, a\n"
                 "    narrative that cannot be read or, with --strict-narrative, fails its check) or an\n"
-                "    output file cannot be written\n 3  usage error\n\n"
+                "    output file cannot be written (or would replace an input of the report)\n 3  usage error\n\n"
                 f"See also: nic-sweep.sh(8), nic-health.sh(8), nic-xray.sh(8). Design: {DESIGN_REF}"))
     p.add_argument("sweep_dirs", nargs="*", metavar="SWEEP_DIR", help="nic-sweep directories (DIR/<site>/<UTC time>)")
     p.add_argument("-R", "--sweep-root", metavar="DIR", help="nic-sweep tree; selects the latest sweep of each site")
@@ -4188,7 +4224,16 @@ def write_outputs(outputs):
     REPORT_MODE), then os.replace, which also replaces a symlink at the target instead of following it. All
     target directories are checked first so --per-site does not leave a partial set; temp files go on failure.
     An existing target that is not a regular file (/dev/null, a FIFO, /dev/stdout) is written to directly:
-    replacing it would destroy it (as root, the system's /dev/null)."""
+    replacing it would destroy it (as root, the system's /dev/null). It is reached through a symbolic link only
+    for the standard stream aliases (STREAM_ALIAS_RE). No output may replace one of the report's inputs."""
+    # An output must never replace a file this report read (a sweep's merged.csv given to --import, its
+    # MANIFEST.tsv, a node's JSON, a theme file...): the atomic replace would lose the input for good
+    # (A special file, /dev/null say, is written in place, never replaced: no input can be lost through it)
+    for path, _ in outputs:
+        if path is None:
+            continue
+        if os.path.realpath(path) in _INPUTS_READ and (not os.path.exists(path) or os.path.isfile(path)):
+            raise InputError(f"{path}: is one of the report's input files; choose another output name")
     files, special = [], []
     for path, content in outputs:
         if path is None:
@@ -4199,6 +4244,9 @@ def write_outputs(outputs):
         except OSError:
             st = None
         if st and not stat.S_ISREG(st.st_mode) and not stat.S_ISDIR(st.st_mode):
+            if os.path.islink(path) and not STREAM_ALIAS_RE.match(os.path.abspath(path)):
+                raise InputError(f"{path}: is a symbolic link to a special file (FIFO or device); "
+                                 "give the file itself, or /dev/stdout")
             special.append((path, data))
         else:
             files.append((path, data))
@@ -4238,6 +4286,7 @@ def main(argv=None):
         return EXIT_USAGE
     args = parse_args(sys.argv[1:] if argv is None else argv)
     now = datetime.datetime.now().astimezone()
+    _INPUTS_READ.clear()                    # main() may run more than once in a process (tests)
     try:
         write_outputs(build_outputs(args, now))
     except InputError as exc:

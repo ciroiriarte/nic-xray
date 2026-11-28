@@ -189,6 +189,7 @@ Each `nic-health` result becomes one row, enriched with its collection context:
 | `site`, `host` | inventory / sweep path (import: argument and file name) |
 | `role` | derived from `host` with `--role-regex` (e.g. `^[^-]+-[^-]+-(?P<role>[a-z]+\d+[a-z]*)-\d+`); empty if not set |
 | `collected_at`, `tool_version`, `level`, `mode`, `interval_s` | `nic-health` JSON envelope; `null` for legacy CSV |
+| `elapsed_s` (host metadata, not a record column) | `nic-health` JSON envelope: the measured sampling window, which includes the snapshot time. Rates over the window (traffic floor, symbol errors per second) use it, as `nic-health` does for its own rates; without it (older output, legacy CSV, `null`/`0`) they fall back to `interval_s` |
 | `uptime_s`, `boot_id` | JSON envelope once P1 lands (§7); else `null` |
 | `severity`, `scope`, `target`, `check_id`, `value`, `unit`, `threshold`, `evidence`, `hint`, `ref` | the record |
 | `metrics` | structured values: from `nic-health`'s typed `metrics` (P2, §7, JSON `schema_version` 2) value by value, else parsed from `evidence` by tested extractors (§6.2); service-impact facts (P3) only from typed `metrics` |

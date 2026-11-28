@@ -1418,6 +1418,55 @@ class TestOutputFiles(Phase5Base):
         self.assertEqual(rc, 1, err)
         self.assertEqual(os.listdir(ro), [])
 
+    def test_output_never_replaces_an_input(self):
+        """#36: -o naming a file the report reads (MANIFEST.tsv, a node's JSON, an imported CSV) is refused, and the
+        input is left as it was."""
+        self.normal_site("SITE1")
+        sweep = os.path.join(self.root, "SITE1", "20261026T100000Z")
+        node = os.path.join(sweep, "nodes", sorted(os.listdir(os.path.join(sweep, "nodes")))[0])
+        for target in (os.path.join(sweep, "MANIFEST.tsv"), node):
+            with open(target, "rb") as fh:
+                before = fh.read()
+            rc, _, err = self.cli("-R", self.root, "-o", target)
+            self.assertEqual(rc, 1, err)
+            self.assertIn("is one of the report's input files", err)
+            with open(target, "rb") as fh:
+                self.assertEqual(fh.read(), before)
+        # The same through a symlink to the input, and for a CSV given to --import
+        link = os.path.join(self.tmp.name, "link.md")
+        os.symlink(os.path.join(sweep, "MANIFEST.tsv"), link)
+        rc, _, err = self.cli("-R", self.root, "-o", link)
+        self.assertEqual(rc, 1, err)
+        csv_in = os.path.join(self.tmp.name, "acme-s9-stoc2-01_20261023T141935Z_nic-health.csv")
+        legacy = ("severity,scope,target,check_id,value,unit,threshold,evidence,hint,ref\n"
+                  '"OK","port","eno1","generic.link.state","up","","","","",""\n')
+        with open(csv_in, "w") as fh:
+            fh.write(legacy)
+        rc, _, err = self.cli("-o", csv_in, "-i", "SITE9", csv_in)
+        self.assertEqual(rc, 1, err)
+        self.assertIn("is one of the report's input files", err)
+        with open(csv_in) as fh:
+            self.assertEqual(fh.read(), legacy)
+
+    def test_symlink_to_special_file_refused_except_stream_aliases(self):
+        """#36: an output symlink to a FIFO or device could have been planted; only the stream aliases may be one."""
+        fifo = os.path.join(self.tmp.name, "p")
+        os.mkfifo(fifo)
+        link = os.path.join(self.tmp.name, "r.md")
+        os.symlink(fifo, link)
+        keep = os.open(fifo, os.O_RDWR | os.O_NONBLOCK)    # a reader, so a regression writes instead of hanging
+        self.addCleanup(os.close, keep)
+        with self.assertRaisesRegex(nr.InputError, "symbolic link to a special file"):
+            nr.write_outputs([(link, "x")])
+        r, w = os.pipe()
+        self.addCleanup(os.close, r)
+        try:
+            nr.write_outputs([(f"/dev/fd/{w}", "via alias\n")])
+        finally:
+            os.close(w)
+        with os.fdopen(os.dup(r), "rb") as fh:
+            self.assertEqual(fh.read(), b"via alias\n")
+
     def test_failed_write_removes_temp_files(self):
         out = os.path.join(self.tmp.name, "a.md")
         os.mkdir(os.path.join(self.tmp.name, "b.md"))
@@ -1563,6 +1612,34 @@ class TestAttribution(Phase5Base):
 
 FILE_SVG = ('<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="96" height="24">'
             '<rect width="20" height="20" fill="#fff"/><image href="file://{0}" xlink:href="file://{0}" width="96" height="24"/></svg>')
+
+
+class TestMeasuredWindow(unittest.TestCase):
+    """#36: rates use nic-health's measured window (elapsed_s), else the requested interval_s."""
+
+    def test_elapsed_validation(self):
+        self.assertEqual(nr._elapsed(31.43), 31.43)
+        self.assertEqual(nr._elapsed(30), 30.0)
+        for bad in (None, 0, -1, True, "31", float("inf"), float("nan"), nr.ELAPSED_MAX_S + 1):
+            self.assertIsNone(nr._elapsed(bad), bad)
+
+    def test_window_prefers_elapsed(self):
+        self.assertEqual(nr.window_s({"elapsed_s": 31.5, "interval_s": 30}), 31.5)
+        self.assertEqual(nr.window_s({"elapsed_s": None, "interval_s": 30}), 30)
+        self.assertIsNone(nr.window_s({"interval_s": 0}))
+        self.assertIsNone(nr.window_s({}))
+
+    def test_port_facts_use_the_measured_window(self):
+        with tempfile.TemporaryDirectory() as root:
+            measured = host_doc("acme-s1-ctrl2d-01", "OK", interval=30)
+            measured["elapsed_s"] = 31.25
+            old = host_doc("acme-s1-ctrl2d-02", "OK", interval=30)        # older nic-health: no elapsed_s
+            d = write_sweep(root, "SITE1", "20261026T100000Z", [("acme-s1-ctrl2d-01", "ok", "OK", measured),
+                                                                 ("acme-s1-ctrl2d-02", "ok", "OK", old)])
+            data = nr.load_sweep_dir(d)
+            self.assertEqual(data.hosts["acme-s1-ctrl2d-01"].meta["elapsed_s"], 31.25)
+            windows = {p["host"]: p["window_s"] for p in nr.port_facts([nr.finalize(data, None)])}
+            self.assertEqual(windows, {"acme-s1-ctrl2d-01": 31.25, "acme-s1-ctrl2d-02": 30})
 
 
 class TestWriteSpecialTargets(unittest.TestCase):
