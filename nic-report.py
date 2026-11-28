@@ -66,6 +66,7 @@ import datetime
 import glob
 import hashlib
 import html
+import io
 import json
 import logging
 import math
@@ -4231,25 +4232,61 @@ def build_outputs(args, now):
     return outputs
 
 
-def _stream_alias(path):
-    """True for /dev/stdout, /dev/stderr, /dev/fd/N and /proc/self/fd/N (also spelt //dev/stdout and the like)."""
-    norm = os.path.normpath(os.path.abspath(path))
-    return bool(STREAM_ALIAS_RE.match("/" + norm.lstrip("/")))
+def _stream_fd(path):
+    """The file descriptor a stream alias names (/dev/stdout 1, /dev/stderr 2, /dev/fd/N and /proc/self/fd/N N,
+    also spelt //dev/stdout and the like), else None."""
+    norm = "/" + os.path.normpath(os.path.abspath(path)).lstrip("/")
+    if not STREAM_ALIAS_RE.match(norm):
+        return None
+    tail = norm.rsplit("/", 1)[1]
+    return {"stdout": 1, "stderr": 2}.get(tail) or int(tail)
+
+
+def _refuse_input_fd(fd, label):
+    """InputError when the open descriptor FD is a regular file that is one of the report's inputs. Checked on the
+    descriptor itself, so no path can be swapped between the check and the write."""
+    st = os.fstat(fd)
+    if stat.S_ISREG(st.st_mode) and (st.st_dev, st.st_ino) in _INPUT_INODES:
+        raise InputError(f"{label}: is one of the report's input files; choose another output name")
+    return st
+
+
+def _open_special(path):
+    """An open, checked descriptor for a target written in place. A stream alias is the descriptor it names
+    (duplicated, so the shell's offset and append mode are kept: '>>' appends); any other special file is opened
+    without following a symlink and without truncation, then must still be special (not swapped for a regular
+    file, a hard link to an input say, since it was classified)."""
+    fd_no = _stream_fd(path)
+    if fd_no is not None:
+        fd = os.dup(fd_no)
+        try:
+            _refuse_input_fd(fd, path)
+        except InputError:
+            os.close(fd)
+            raise
+        return fd
+    fd = os.open(path, os.O_WRONLY | os.O_NOCTTY | getattr(os, "O_NOFOLLOW", 0))
+    st = os.fstat(fd)
+    if stat.S_ISREG(st.st_mode) or stat.S_ISDIR(st.st_mode):
+        os.close(fd)
+        raise InputError(f"{path}: changed while the report was written; not written")
+    return fd
 
 
 def write_outputs(outputs):
     """Write every file atomically: a temp file next to it (exclusive, random name, never through a symlink,
     REPORT_MODE), then os.replace, which also replaces a symlink at the target instead of following it. All
     target directories are checked first so --per-site does not leave a partial set; temp files go on failure.
-    An existing target that is not a regular file (/dev/null, a FIFO, /dev/stdout) is written to directly:
-    replacing it would destroy it (as root, the system's /dev/null). It is reached through a symbolic link only
-    for the standard stream aliases (STREAM_ALIAS_RE). No output may replace one of the report's inputs."""
+    An existing target that is not a regular file (/dev/null, a FIFO), and a stream alias (/dev/stdout,
+    /dev/fd/N...) whatever it points at, is written to in place instead: replacing it would destroy it (as root,
+    the system's /dev/null or /dev/stdout link). A special file is reached through a symbolic link only for the
+    stream aliases (STREAM_ALIAS_RE). No output, standard output included, may replace or overwrite one of the
+    report's inputs: by path, and by inode on the open descriptor for what is written in place."""
     # An output must never replace a file this report read (a sweep's merged.csv given to --import, its
     # MANIFEST.tsv, a node's JSON, a theme file...): the atomic replace would lose the input for good
-    # (A special file, /dev/null say, is written in place, never replaced: no input can be lost through it)
     for path, _ in outputs:
-        if path is None:
-            continue
+        if path is None or _stream_fd(path) is not None:
+            continue                                    # checked on the descriptor below
         try:
             st = os.stat(path)
         except OSError:
@@ -4257,6 +4294,10 @@ def write_outputs(outputs):
         same_inode = st is not None and stat.S_ISREG(st.st_mode) and (st.st_dev, st.st_ino) in _INPUT_INODES
         if same_inode or (os.path.realpath(path) in _INPUTS_READ and (st is None or stat.S_ISREG(st.st_mode))):
             raise InputError(f"{path}: is one of the report's input files; choose another output name")
+    if any(path is None for path, _ in outputs):
+        # Standard output itself (no -o) may be an input a caller opened and passed in
+        with contextlib.suppress(AttributeError, ValueError, io.UnsupportedOperation):
+            _refuse_input_fd(sys.stdout.fileno(), "standard output")
     files, special = [], []
     for path, content in outputs:
         if path is None:
@@ -4266,9 +4307,7 @@ def write_outputs(outputs):
             st = os.stat(path)
         except OSError:
             st = None
-        if _stream_alias(path):
-            # Written in place whatever it points at: with stdout redirected to a file, /dev/stdout resolves to
-            # a regular file, and replacing it would swap the system's /dev/stdout link (as root) for the report
+        if _stream_fd(path) is not None:
             special.append((path, data))
         elif st and not stat.S_ISREG(st.st_mode) and not stat.S_ISDIR(st.st_mode):
             if os.path.islink(path):
@@ -4283,8 +4322,10 @@ def write_outputs(outputs):
             raise InputError(f"{path}: directory {folder} does not exist or is not writable")
         if os.path.isdir(path) and not os.path.islink(path):
             raise InputError(f"{path}: is a directory")
-    temps = []
+    temps, fds = [], []
     try:
+        for path, data in special:                      # opened and checked before anything is written
+            fds.append(_open_special(path))
         for path, data in files:
             folder, base = os.path.split(os.path.abspath(path))
             tmp = os.path.join(folder, f".{base}.{secrets.token_hex(TEMP_NAME_BYTES)}.tmp")
@@ -4294,14 +4335,20 @@ def write_outputs(outputs):
                 fh.write(data)
         for (path, _), tmp in zip(files, temps):
             os.replace(tmp, path)
-        for path, data in special:
-            with open(path, "wb") as fh:
+        sys.stdout.flush()                              # keep the order with anything already printed
+        while fds:
+            fd, (path, data) = fds.pop(0), special.pop(0)
+            with os.fdopen(fd, "wb") as fh:
                 fh.write(data)
     except OSError as exc:
         for tmp in temps:
             with contextlib.suppress(OSError):
                 os.remove(tmp)
         raise InputError(f"cannot write the report: {exc}") from exc
+    finally:
+        for fd in fds:
+            with contextlib.suppress(OSError):
+                os.close(fd)
     for path, content in outputs:
         if path is None:
             sys.stdout.write(content)

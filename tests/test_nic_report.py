@@ -1480,7 +1480,17 @@ class TestOutputFiles(Phase5Base):
         self.assertEqual(p.returncode, 0, p.stderr)
         with open(target) as fh:
             self.assertIn("SITE1", fh.read())
-        self.assertTrue(os.path.islink("/dev/stdout"))
+        self.assertFalse(os.path.isfile("/dev/stdout") and not os.path.islink("/dev/stdout"))   # not replaced
+        # Appending ('>>') keeps what the file held: the alias is written through the shell's descriptor
+        with open(target, "w") as fh:
+            fh.write("HEADER\n")
+        with open(target, "ab") as fh:
+            p = subprocess.run([sys.executable, SCRIPT, "-R", self.root, "-o", "/dev/stdout"], stdout=fh,
+                               stderr=subprocess.PIPE, text=True)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        with open(target) as fh:
+            text = fh.read()
+        self.assertTrue(text.startswith("HEADER\n") and "SITE1" in text, text[:80])
 
     def test_hard_link_and_redirected_stdout_to_an_input_refused(self):
         """An input reached by another path with the same inode (a hard link, or stdout redirected to the input
@@ -1502,6 +1512,30 @@ class TestOutputFiles(Phase5Base):
         self.assertIn("is one of the report's input files", p.stderr)
         with open(manifest, "rb") as fh:
             self.assertEqual(fh.read(), before)
+
+    def test_input_passed_as_standard_output_refused(self):
+        """Without -o, standard output itself may be an input a caller opened (read-write) and passed in."""
+        self.normal_site("SITE1")
+        manifest = os.path.join(self.root, "SITE1", "20261026T100000Z", "MANIFEST.tsv")
+        with open(manifest, "rb") as fh:
+            before = fh.read()
+        with open(manifest, "r+b") as fh:
+            p = subprocess.run([sys.executable, SCRIPT, "-R", self.root], stdout=fh, stderr=subprocess.PIPE, text=True)
+        self.assertEqual(p.returncode, 1, p.stderr)
+        self.assertIn("standard output: is one of the report's input files", p.stderr)
+        with open(manifest, "rb") as fh:
+            self.assertEqual(fh.read(), before)
+
+    def test_special_target_swapped_for_a_regular_file_is_not_written(self):
+        """A path classified as special but replaced by a regular file (a hard link to an input, say) before it
+        is opened is refused on the open descriptor, and nothing is truncated."""
+        regular = os.path.join(self.tmp.name, "was-a-fifo")
+        with open(regular, "w") as fh:
+            fh.write("input")
+        with self.assertRaisesRegex(nr.InputError, "changed while the report was written"):
+            nr._open_special(regular)
+        with open(regular) as fh:
+            self.assertEqual(fh.read(), "input")
 
     def test_symlink_to_special_file_refused_except_stream_aliases(self):
         """#36: an output symlink to a FIFO or device could have been planted; only the stream aliases may be one."""
