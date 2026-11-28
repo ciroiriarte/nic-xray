@@ -416,7 +416,20 @@ is written. An existing
 .I FILE
 that is not a regular file (for example
 .B /dev/null
-or a named pipe) is written to directly instead.
+or a named pipe) is written to directly instead, and so are the stream aliases
+below whatever they point at (with standard output redirected to a file,
+.B \-o /dev/stdout
+writes that file); such a target is reached through a
+symbolic link only for
+.BR /dev/stdout ,
+.BR /dev/stderr ,
+.BI /dev/fd/ N
+and
+.BI /proc/self/fd/ N\fR.
+An output may not be one of the report's inputs (a sweep's
+.BR MANIFEST.tsv ,
+a node's JSON, an imported CSV, a theme file...): that is an input error and
+nothing is written.
 .TP
 .BR \-P ", " \-\-per\-site
 With
@@ -613,7 +626,9 @@ traffic in the window (which ranks it higher within its level, shown as
 .IR "ranked higher within P" n),
 and lowered one level for a port that is up but unused
 (not in use and no traffic, from nic-health service-impact facts). Traffic means
-more than 100 bytes per second in either direction over the sampling window:
+more than 100 bytes per second in either direction over the sampling window
+(the window nic-health measured, else the requested interval; error rates per
+second use the same window):
 below that a port only sees control frames such as LLDP; then by
 activity (growing in the window before history only), service impact, number of
 hosts and place. The order and the text are the same on every run over the same
@@ -802,7 +817,9 @@ WeasyPrint missing or failing for
 or a narrative that cannot be read (missing, not a regular file or pipe, larger
 than 256 KiB, not UTF-8, empty) or, with
 .BR \-\-strict\-narrative ,
-fails its check; or an output file cannot be written.
+fails its check; or an output file cannot be written (or would replace or
+overwrite one of the report's inputs, through a hard link or with standard
+output redirected to it as well, or is a symbolic link to a FIFO or device).
 .TP
 .B 3
 Usage error.

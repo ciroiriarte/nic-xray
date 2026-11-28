@@ -1418,6 +1418,202 @@ class TestOutputFiles(Phase5Base):
         self.assertEqual(rc, 1, err)
         self.assertEqual(os.listdir(ro), [])
 
+    def test_output_never_replaces_an_input(self):
+        """#36: -o naming a file the report reads (MANIFEST.tsv, a node's JSON, an imported CSV) is refused, and the
+        input is left as it was."""
+        self.normal_site("SITE1")
+        sweep = os.path.join(self.root, "SITE1", "20261026T100000Z")
+        node = os.path.join(sweep, "nodes", sorted(os.listdir(os.path.join(sweep, "nodes")))[0])
+        for target in (os.path.join(sweep, "MANIFEST.tsv"), node):
+            with open(target, "rb") as fh:
+                before = fh.read()
+            rc, _, err = self.cli("-R", self.root, "-o", target)
+            self.assertEqual(rc, 1, err)
+            self.assertIn("is one of the report's input files", err)
+            with open(target, "rb") as fh:
+                self.assertEqual(fh.read(), before)
+        # The same through a symlink to the input, and for a CSV given to --import
+        link = os.path.join(self.tmp.name, "link.md")
+        manifest = os.path.join(sweep, "MANIFEST.tsv")
+        with open(manifest, "rb") as fh:
+            before = fh.read()
+        os.symlink(manifest, link)
+        rc, _, err = self.cli("-R", self.root, "-o", link)
+        self.assertEqual(rc, 1, err)
+        self.assertIn("is one of the report's input files", err)
+        with open(manifest, "rb") as fh:
+            self.assertEqual(fh.read(), before)
+        csv_in = os.path.join(self.tmp.name, "acme-s9-stoc2-01_20261023T141935Z_nic-health.csv")
+        legacy = ("severity,scope,target,check_id,value,unit,threshold,evidence,hint,ref\n"
+                  '"OK","port","eno1","generic.link.state","up","","","","",""\n')
+        with open(csv_in, "w") as fh:
+            fh.write(legacy)
+        rc, _, err = self.cli("-o", csv_in, "-i", "SITE9", csv_in)
+        self.assertEqual(rc, 1, err)
+        self.assertIn("is one of the report's input files", err)
+        with open(csv_in) as fh:
+            self.assertEqual(fh.read(), legacy)
+
+    def test_per_site_output_never_replaces_an_input(self):
+        """#36: a derived --per-site path (FILE-SITE.ext) that is an input file is refused like -o itself."""
+        self.normal_site("SITE1")
+        self.normal_site("SITE2")
+        out = os.path.join(self.tmp.name, "r.json")
+        suppress = os.path.join(self.tmp.name, "r-SITE2.json")           # the per-site name of SITE2's report
+        with open(suppress, "w") as fh:
+            json.dump({"schema_version": 1, "suppress": []}, fh)
+        rc, _, err = self.cli("-R", self.root, "-O", "json", "-o", out, "-P", "-S", suppress)
+        self.assertEqual(rc, 1, err)
+        self.assertIn("r-SITE2.json: is one of the report's input files", err)
+        self.assertFalse(os.path.exists(out))                            # nothing written, not even -o
+        with open(suppress) as fh:
+            self.assertEqual(json.load(fh), {"schema_version": 1, "suppress": []})
+
+    def test_dev_stdout_redirected_to_a_file(self):
+        """-o /dev/stdout with stdout redirected to a regular file writes that file in place (it used to try to
+        replace /dev/stdout itself: an error for a user, the system's /dev/stdout link swapped as root)."""
+        self.normal_site("SITE1")
+        target = os.path.join(self.tmp.name, "out.md")
+        with open(target, "wb") as fh:
+            p = subprocess.run([sys.executable, SCRIPT, "-R", self.root, "-o", "/dev/stdout"], stdout=fh,
+                               stderr=subprocess.PIPE, text=True)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        with open(target) as fh:
+            self.assertIn("SITE1", fh.read())
+        self.assertFalse(os.path.isfile("/dev/stdout") and not os.path.islink("/dev/stdout"))   # not replaced
+        # Appending ('>>') keeps what the file held: the alias is written through the shell's descriptor
+        with open(target, "w") as fh:
+            fh.write("HEADER\n")
+        with open(target, "ab") as fh:
+            p = subprocess.run([sys.executable, SCRIPT, "-R", self.root, "-o", "/dev/stdout"], stdout=fh,
+                               stderr=subprocess.PIPE, text=True)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        with open(target) as fh:
+            text = fh.read()
+        self.assertTrue(text.startswith("HEADER\n") and "SITE1" in text, text[:80])
+
+    def test_hard_link_and_redirected_stdout_to_an_input_refused(self):
+        """An input reached by another path with the same inode (a hard link, or stdout redirected to the input
+        with -o /dev/stdout) is refused too: in-place writing would truncate the input."""
+        self.normal_site("SITE1")
+        sweep = os.path.join(self.root, "SITE1", "20261026T100000Z")
+        manifest = os.path.join(sweep, "MANIFEST.tsv")
+        with open(manifest, "rb") as fh:
+            before = fh.read()
+        hard = os.path.join(self.tmp.name, "hard.md")
+        os.link(manifest, hard)
+        rc, _, err = self.cli("-R", self.root, "-o", hard)
+        self.assertEqual(rc, 1, err)
+        self.assertIn("is one of the report's input files", err)
+        with open(hard, "ab") as fh:                     # appending keeps the content: no truncation by the shell
+            p = subprocess.run([sys.executable, SCRIPT, "-R", self.root, "-o", "/dev/stdout"], stdout=fh,
+                               stderr=subprocess.PIPE, text=True)
+        self.assertEqual(p.returncode, 1, p.stderr)
+        self.assertIn("is one of the report's input files", p.stderr)
+        with open(manifest, "rb") as fh:
+            self.assertEqual(fh.read(), before)
+
+    def test_fifos_are_written_one_after_the_other(self):
+        """A reader consuming two FIFOs in turn (cat report.fifo brief.fifo) gets both: the writer does not open
+        the second before the first is written and closed."""
+        self.normal_site("SITE1")
+        f1, f2 = (os.path.join(self.tmp.name, n) for n in ("report.fifo", "brief.fifo"))
+        os.mkfifo(f1)
+        os.mkfifo(f2)
+        reader = subprocess.Popen(["cat", f1, f2], stdout=subprocess.PIPE)
+        try:
+            p = subprocess.run([sys.executable, SCRIPT, "-R", self.root, "-o", f1, "-A", f2],
+                               stderr=subprocess.PIPE, text=True, timeout=30)
+            out, _ = reader.communicate(timeout=30)
+        finally:
+            reader.kill()
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn(b"SITE1", out)
+        self.assertGreater(out.count(b"SITE1"), 1)       # the report and the brief both arrived
+
+    def test_closed_stream_alias_is_refused(self):
+        """/dev/fd/N for a closed descriptor is an error, never silently another output's duplicate."""
+        self.normal_site("SITE1")
+        brief = "/dev/fd/9"
+        p = subprocess.run([sys.executable, SCRIPT, "-R", self.root, "-o", "/dev/stdout", "-A", brief],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.assertEqual(p.returncode, 1, p.stderr)
+        self.assertIn("/dev/fd/9", p.stderr)
+        self.assertEqual(p.stdout, "")                   # checked before anything is written
+
+    def test_file_output_with_standard_output_closed(self):
+        self.normal_site("SITE1")
+        out = os.path.join(self.tmp.name, "r.md")
+        p = subprocess.run(["sh", "-c", '"$0" "$1" -R "$2" -o "$3" >&-', sys.executable, SCRIPT, self.root, out],
+                           stderr=subprocess.PIPE, text=True)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertTrue(os.path.getsize(out) > 0)
+
+    def test_input_passed_as_standard_output_refused(self):
+        """Without -o, standard output itself may be an input a caller opened (read-write) and passed in."""
+        self.normal_site("SITE1")
+        manifest = os.path.join(self.root, "SITE1", "20261026T100000Z", "MANIFEST.tsv")
+        with open(manifest, "rb") as fh:
+            before = fh.read()
+        with open(manifest, "r+b") as fh:
+            p = subprocess.run([sys.executable, SCRIPT, "-R", self.root], stdout=fh, stderr=subprocess.PIPE, text=True)
+        self.assertEqual(p.returncode, 1, p.stderr)
+        self.assertIn("standard output: is one of the report's input files", p.stderr)
+        with open(manifest, "rb") as fh:
+            self.assertEqual(fh.read(), before)
+
+    def test_input_identity_comes_from_the_opened_file(self):
+        """An input path swapped between its stat and its open: the file actually read is the one protected."""
+        path = os.path.join(self.tmp.name, "rules.json")
+        with open(path, "w") as fh:
+            fh.write("{}")
+        nr._INPUTS_READ.clear()
+        nr._INPUT_INODES.clear()
+        real_note = nr.note_input
+
+        def note_then_swap(p):
+            real_note(p)
+            swapped = p + ".new"
+            with open(swapped, "w") as fh:
+                fh.write('{"swapped": true}')
+            os.replace(swapped, p)                          # a new inode under the same path
+
+        with mock.patch.object(nr, "note_input", note_then_swap):
+            nr.read_json(path)
+        with open(path, "r+b") as fh:
+            with self.assertRaisesRegex(nr.InputError, "is one of the report's input files"):
+                nr._refuse_input_fd(fh.fileno(), path)
+
+    def test_special_target_swapped_for_a_regular_file_is_not_written(self):
+        """A path classified as special but replaced by a regular file (a hard link to an input, say) before it
+        is opened is refused on the open descriptor, and nothing is truncated."""
+        regular = os.path.join(self.tmp.name, "was-a-fifo")
+        with open(regular, "w") as fh:
+            fh.write("input")
+        with self.assertRaisesRegex(nr.InputError, "changed since it was checked"):
+            nr._open_special(regular)
+        with open(regular) as fh:
+            self.assertEqual(fh.read(), "input")
+
+    def test_symlink_to_special_file_refused_except_stream_aliases(self):
+        """#36: an output symlink to a FIFO or device could have been planted; only the stream aliases may be one."""
+        fifo = os.path.join(self.tmp.name, "p")
+        os.mkfifo(fifo)
+        link = os.path.join(self.tmp.name, "r.md")
+        os.symlink(fifo, link)
+        keep = os.open(fifo, os.O_RDWR | os.O_NONBLOCK)    # a reader, so a regression writes instead of hanging
+        self.addCleanup(os.close, keep)
+        with self.assertRaisesRegex(nr.InputError, "symbolic link to a special file"):
+            nr.write_outputs([(link, "x")])
+        r, w = os.pipe()
+        self.addCleanup(os.close, r)
+        try:
+            nr.write_outputs([(f"/dev/fd/{w}", "via alias\n")])
+        finally:
+            os.close(w)
+        with os.fdopen(os.dup(r), "rb") as fh:
+            self.assertEqual(fh.read(), b"via alias\n")
+
     def test_failed_write_removes_temp_files(self):
         out = os.path.join(self.tmp.name, "a.md")
         os.mkdir(os.path.join(self.tmp.name, "b.md"))
@@ -1563,6 +1759,42 @@ class TestAttribution(Phase5Base):
 
 FILE_SVG = ('<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="96" height="24">'
             '<rect width="20" height="20" fill="#fff"/><image href="file://{0}" xlink:href="file://{0}" width="96" height="24"/></svg>')
+
+
+class TestMeasuredWindow(unittest.TestCase):
+    """#36: rates use nic-health's measured window (elapsed_s), else the requested interval_s."""
+
+    def test_elapsed_validation(self):
+        self.assertEqual(nr._elapsed(31.43), 31.43)
+        self.assertEqual(nr._elapsed(30), 30.0)
+        for bad in (None, 0, -1, True, "31", float("inf"), float("nan"), nr.ELAPSED_MAX_S + 1, 10 ** 400):
+            self.assertIsNone(nr._elapsed(bad), bad)
+
+    def test_window_prefers_elapsed(self):
+        self.assertEqual(nr.window_s({"elapsed_s": 31.5, "interval_s": 30}), 31.5)
+        self.assertEqual(nr.window_s({"elapsed_s": 0.5, "interval_s": 30}), 30)   # shorter than the sleep: not real
+        self.assertEqual(nr.window_s({"elapsed_s": 31.5}), 31.5)
+        self.assertEqual(nr.window_s({"elapsed_s": None, "interval_s": 30}), 30)
+        self.assertIsNone(nr.window_s({"interval_s": 0}))
+        self.assertIsNone(nr.window_s({}))
+
+    def test_traffic_floor_follows_the_window(self):
+        # 3100 bytes: above the floor over 30 s (3000 B), below it over the measured 31.25 s (3125 B)
+        m = {"rx_bytes": {"total": 10 ** 9, "delta": 3100}, "tx_bytes": {"total": 10 ** 9, "delta": 0}}
+        self.assertEqual(nr.impact_facts(m, 30)["has_traffic"], True)
+        self.assertEqual(nr.impact_facts(m, 31.25)["has_traffic"], False)
+
+    def test_port_facts_use_the_measured_window(self):
+        with tempfile.TemporaryDirectory() as root:
+            measured = host_doc("acme-s1-ctrl2d-01", "OK", interval=30)
+            measured["elapsed_s"] = 31.25
+            old = host_doc("acme-s1-ctrl2d-02", "OK", interval=30)        # older nic-health: no elapsed_s
+            d = write_sweep(root, "SITE1", "20261026T100000Z", [("acme-s1-ctrl2d-01", "ok", "OK", measured),
+                                                                 ("acme-s1-ctrl2d-02", "ok", "OK", old)])
+            data = nr.load_sweep_dir(d)
+            self.assertEqual(data.hosts["acme-s1-ctrl2d-01"].meta["elapsed_s"], 31.25)
+            windows = {p["host"]: p["window_s"] for p in nr.port_facts([nr.finalize(data, None)])}
+            self.assertEqual(windows, {"acme-s1-ctrl2d-01": 31.25, "acme-s1-ctrl2d-02": 30})
 
 
 class TestWriteSpecialTargets(unittest.TestCase):

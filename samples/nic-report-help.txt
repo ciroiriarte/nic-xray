@@ -91,7 +91,8 @@ Exit status:
     site with OLD earlier, an invalid suppress file, rule catalog or theme, theme contrast
     below 4.5:1 with --strict-theme, WeasyPrint missing or failing for -O pdf, a
     narrative that cannot be read or, with --strict-narrative, fails its check) or an
-    output file cannot be written
+    output file cannot be written (or would replace an input of the report, or is a symbolic link
+    to a FIFO or device other than /dev/stdout and the like)
  3  usage error
 
 See also: nic-sweep.sh(8), nic-health.sh(8), nic-xray.sh(8). Design: docs/design/nic-sweep.md
