@@ -1482,6 +1482,27 @@ class TestOutputFiles(Phase5Base):
             self.assertIn("SITE1", fh.read())
         self.assertTrue(os.path.islink("/dev/stdout"))
 
+    def test_hard_link_and_redirected_stdout_to_an_input_refused(self):
+        """An input reached by another path with the same inode (a hard link, or stdout redirected to the input
+        with -o /dev/stdout) is refused too: in-place writing would truncate the input."""
+        self.normal_site("SITE1")
+        sweep = os.path.join(self.root, "SITE1", "20261026T100000Z")
+        manifest = os.path.join(sweep, "MANIFEST.tsv")
+        with open(manifest, "rb") as fh:
+            before = fh.read()
+        hard = os.path.join(self.tmp.name, "hard.md")
+        os.link(manifest, hard)
+        rc, _, err = self.cli("-R", self.root, "-o", hard)
+        self.assertEqual(rc, 1, err)
+        self.assertIn("is one of the report's input files", err)
+        with open(hard, "ab") as fh:                     # appending keeps the content: no truncation by the shell
+            p = subprocess.run([sys.executable, SCRIPT, "-R", self.root, "-o", "/dev/stdout"], stdout=fh,
+                               stderr=subprocess.PIPE, text=True)
+        self.assertEqual(p.returncode, 1, p.stderr)
+        self.assertIn("is one of the report's input files", p.stderr)
+        with open(manifest, "rb") as fh:
+            self.assertEqual(fh.read(), before)
+
     def test_symlink_to_special_file_refused_except_stream_aliases(self):
         """#36: an output symlink to a FIFO or device could have been planted; only the stream aliases may be one."""
         fifo = os.path.join(self.tmp.name, "p")

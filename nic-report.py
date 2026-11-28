@@ -662,13 +662,19 @@ def sweep_stamp_dt(stamp):
         return None
 
 
-# Real paths of every input file read in this run; write_outputs refuses to replace any of them
+# Every input file read in this run, by real path and by (device, inode) identity (a hard link, or /dev/stdout
+# redirected to the file, has another path but the same inode); write_outputs refuses to write over any of them
 _INPUTS_READ = set()
+_INPUT_INODES = set()
 
 
 def note_input(path):
-    """Record PATH as read (by its real path), so no output can replace an input of the same report."""
+    """Record PATH as read, so no output can replace or overwrite an input of the same report."""
     _INPUTS_READ.add(os.path.realpath(path))
+    with contextlib.suppress(OSError):
+        st = os.stat(path)
+        if stat.S_ISREG(st.st_mode):
+            _INPUT_INODES.add((st.st_dev, st.st_ino))
 
 
 def read_json(path, limit=None, replaced=None):
@@ -4153,6 +4159,7 @@ def _warn(text):
 def build_outputs(args, now):
     """[(path or None for stdout, text or PDF bytes)]: the report, then one per site with --per-site."""
     _INPUTS_READ.clear()                    # the inputs of this report only (it may be built more than once)
+    _INPUT_INODES.clear()
     args.theme_data = None
     if args.theme and args.output_format in ("html", "pdf"):    # md and json never read a theme
         args.theme_data = load_theme(args.theme)
@@ -4243,7 +4250,12 @@ def write_outputs(outputs):
     for path, _ in outputs:
         if path is None:
             continue
-        if os.path.realpath(path) in _INPUTS_READ and (not os.path.exists(path) or os.path.isfile(path)):
+        try:
+            st = os.stat(path)
+        except OSError:
+            st = None
+        same_inode = st is not None and stat.S_ISREG(st.st_mode) and (st.st_dev, st.st_ino) in _INPUT_INODES
+        if same_inode or (os.path.realpath(path) in _INPUTS_READ and (st is None or stat.S_ISREG(st.st_mode))):
             raise InputError(f"{path}: is one of the report's input files; choose another output name")
     files, special = [], []
     for path, content in outputs:
