@@ -16,7 +16,7 @@ Options:
  -f, --inventory FILE    Hosts to sweep, one per line: site,host,address[,user]
                          (# comments and a 'site,host,address,user' header allowed)
  -s, --site SITE         Only sweep this site (repeatable; default: every site)
- -J, --jump HOST         SSH jump host ([user@]host[:port], passed to ssh -J)
+ -J, --jump HOST         SSH jump host ([user@]host[:port], IPv6 as [addr]; passed to ssh -J)
  -u, --user USER         SSH user when the inventory line has none (default: ssh config)
  -p, --parallel N        Hosts swept at once (default: 8, max: 256)
  -T, --timeout SEC       Per-host limit for nic-health (default: interval + 300 s
@@ -33,7 +33,7 @@ Options:
                          Needs sudo for 'bash /tmp/nic-health.*', which amounts to full root
      --accept-new-hostkeys  Trust unknown host keys on first contact
                          (ssh StrictHostKeyChecking=accept-new; default: your ssh policy)
- -n, --no-color          Disable color and the progress bar
+ -n, --no-color          Disable color (the progress bar shows whenever stderr is a terminal)
  -v, --version           Display version information
  -h, --help              Display this help message
 
@@ -41,7 +41,7 @@ Exit status:
  0  Every host collected, all verdicts OK
  1  Every host collected, at least one WARN, no CRIT
  2  At least one CRIT (even if some hosts could not be collected)
- 3  No CRIT, but a host was not collected; or no WARN and a host reported UNKNOWN;
-    or a usage error
+ 3  No CRIT, but a host was not collected or a sweep could not be written completely;
+    or no WARN and a host reported UNKNOWN; or a usage error
 
 See also: nic-health.sh(8), nic-xray.sh(8). Design: docs/design/nic-sweep.md

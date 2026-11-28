@@ -107,7 +107,7 @@ SITE1,node-cmp-01,10.0.0.20,ops
 ```
 
 - `host` is the name used in reports. `address` is what SSH connects to (IP or DNS name).
-- Every field is validated against a strict pattern (`[A-Za-z0-9._-]+`; `address` also allows `:` for IPv6) before it reaches any command line. A failing line is reported and skipped; it is never passed to a shell.
+- Every field is validated against a strict pattern (`[A-Za-z0-9._-]+`; `address` also allows `:` for IPv6, a leading `::` and a zone ID such as `%eth0`) before it reaches any command line. A header with spaces around the commas is still the header. A failing line is reported and skipped; it is never passed to a shell.
 - Generating the inventory from MAAS, Juju or Ansible is out of scope; the README gives one-line examples (e.g. `juju machines --format json | jq …`).
 
 ### 5.2 CLI sketch
@@ -143,8 +143,10 @@ A missing `--inventory` prints the usage message (`CLAUDE.md` §3).
    `sudo -n nic-health -O json -l <level> -I <interval> [-L <lookback>]`; with `--ship`, the shipped path instead, removed on exit.
 3. stdout → `nodes/<host>.json`, stderr → `nodes/<host>.err`; host, address, status, exit code, duration, nic-xray status and verdict → `MANIFEST.tsv`.
 4. Classify each host: `ok` (JSON parsed; any verdict), `ssh-fail`, `sudo-fail` (`sudo -n` refused), `tool-missing`, `timeout`, `bad-output` (not valid JSON). JSON validity is strict: `jq` checks the shape, plus a separate check for bare non-finite numbers (`inf`, `-inf`, `nan`), which JSON forbids but `jq` (1.6 and 1.7) accepts. `nic-xray` < 2.13.0 writes `-inf` for optics without light (#24): such output is kept, marked `failed`, and noted in `.err`. `jq` 1.6 also exits 0 on empty input with `-e`, so output must be non-empty. The `nic-health` `schema_version` is not checked: 1 and 2 (typed `metrics`, §7 P2) are both collected as they are, and `merged.csv` keeps its columns (metrics are JSON only); a non-finite number inside `metrics` is `bad-output` like anywhere else.
-5. A progress bar on stderr when stdout is a terminal (`CLAUDE.md` §3); none with `-n` or when output is redirected.
+5. A progress bar on stderr whenever stderr is a terminal (`CLAUDE.md` §3), as in `nic-health.sh`: also with stdout redirected to a log or with `-n` (which only turns color off).
 6. Requirements on the operator host: Bash 4.4+, `ssh`, `timeout`, `jq`, `sha256sum`, `getopt`. `jq` is the one addition to the repo's tool set; it runs only on the operator host, never on the swept nodes.
+7. `nic-xray` is not attempted on hosts that were unreachable, timed out or refused `sudo -n` (it runs under `sudo -n` too).
+8. Each site's files are written as `FILE.part` and renamed when complete. `sweep.json` is written last, and only after `MANIFEST.tsv` and `merged.csv` were both written completely: it is what marks the directory as a sweep for `nic-report`. `sweep.json` is re-read before it is renamed. A write failure (disk full, I/O error) is reported and makes the run exit 3 unless a CRIT outranks it. A host whose valid JSON cannot be exported to CSV (a `jq` runtime error, exit 5, as opposed to 2 for a failed write) is left out of `merged.csv` with a warning, as before; its JSON is kept and the site is still published, so one odd host never hides the others from `nic-report`.
 
 ### 5.4 Output layout (the contract)
 
@@ -170,9 +172,9 @@ sweeps/<site>/<YYYYmmddTHHMMSSZ>/
 | 0 | Every host collected, all verdicts OK or N/A |
 | 1 | Every host collected, at least one WARN, no CRIT |
 | 2 | At least one CRIT (even if some hosts failed to collect) |
-| 3 | No CRIT, but at least one host not collected; or no WARN and at least one UNKNOWN verdict; or usage error |
+| 3 | No CRIT, but at least one host not collected or a site's sweep not written completely; or no WARN and at least one UNKNOWN verdict; or usage error |
 
-Precedence: CRIT > a host not collected > WARN > UNKNOWN verdict > OK. CRIT outranks a collection failure so that a real fault is never hidden behind one unreachable host; among verdicts the order is `nic-health`'s own. A worker that ends without a result still gets a manifest line (`bad-output`, exit `-`), and an empty result set is UNKNOWN. `MANIFEST.tsv` always lists the failures.
+Precedence: CRIT > a host not collected or a sweep not written > WARN > UNKNOWN verdict > OK. CRIT outranks a collection failure so that a real fault is never hidden behind one unreachable host; among verdicts the order is `nic-health`'s own. A worker that ends without a result still gets a manifest line (`bad-output`, exit `-`), and an empty result set is UNKNOWN. `MANIFEST.tsv` always lists the failures.
 
 ---
 

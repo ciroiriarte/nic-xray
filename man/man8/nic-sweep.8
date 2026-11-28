@@ -85,10 +85,14 @@ Blank lines, lines starting with
 .B #
 and a
 .B site,host,address,user
-header are ignored. Every field must match
+header (any case, spaces allowed around the commas) are ignored. Every field must match
 .B [A-Za-z0-9._-]+
 (the address may also contain
-.BR : );
+.BR : ,
+start with
+.B ::
+and end in an IPv6 zone such as
+.BR %eth0 );
 a line that does not, or a duplicate host within a site, is reported and skipped.
 .TP
 .BR \-s ", " \-\-site " " \fISITE\fR
@@ -98,7 +102,10 @@ Only sweep this site. Repeatable. Default: every site in the inventory.
 SSH jump host,
 .RI [ user @] host [: port ],
 passed to
-.BR "ssh \-J" .
+.BR "ssh \-J" ;
+an IPv6 host goes in brackets, e.g.
+.BR [2001:db8::1]:22
+(without a zone ID, which OpenSSH cannot take in a jump host).
 .TP
 .BR \-u ", " \-\-user " " \fIUSER\fR
 SSH user for inventory lines without one. Default: the user from your SSH
@@ -172,7 +179,8 @@ Trust unknown host keys on first contact
 By default your SSH host key policy applies.
 .TP
 .BR \-n ", " \-\-no\-color
-Disable color and the progress bar (both are off when output is not a terminal).
+Disable color. Color is also off when standard output is not a terminal; the
+progress bar is shown whenever standard error is a terminal.
 .TP
 .BR \-v ", " \-\-version
 Print the version and exit.
@@ -218,7 +226,8 @@ nic-xray is recorded separately as
 .B failed
 (error or invalid JSON) or
 .B skipped
-(\fB\-\-no\-xray\fR, or the host was unreachable or timed out).
+(\fB\-\-no\-xray\fR, or the host was unreachable, timed out or refused
+.BR "sudo \-n" ).
 .SH NOTES
 The remote commands are run by the SSH user's login shell, which must be a POSIX
 shell (sh, dash, bash, ksh, zsh); a csh or fish login shell yields
@@ -294,10 +303,15 @@ Every host collected, at least one WARN and no CRIT.
 At least one CRIT, even if some hosts could not be collected.
 .TP
 .B 3
-No CRIT, but at least one host was not collected; or no WARN and at least one
+No CRIT, but at least one host was not collected or a site's sweep could not be
+written completely (disk full, I/O error); or no WARN and at least one
 host reported UNKNOWN; or a usage error.
+A site whose files could not all be written is reported on standard error and
+gets no
+.BR sweep.json ,
+so it is never read as a complete sweep.
 .PP
-Precedence: CRIT > a host not collected > WARN > UNKNOWN > OK. Among verdicts this
+Precedence: CRIT > a host not collected or a sweep not written > WARN > UNKNOWN > OK. Among verdicts this
 is the order nic-health uses.
 .SH EXAMPLES
 Inventory (one file can hold several sites):
